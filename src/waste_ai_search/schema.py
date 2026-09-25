@@ -1,0 +1,474 @@
+from __future__ import annotations
+
+import re
+from datetime import date, datetime
+from typing import Any
+
+from .db_enums import (
+    COVER_TYPE_VALUES,
+    FACILITY_STATUS_VALUES,
+    FACILITY_TYPE_VALUES,
+    GCCS_CURRENT_PROJECT_STATUS_VALUES,
+    GCCS_ENERGY_PROJECT_TYPE_VALUES,
+)
+
+
+GEOCODE_FIELDS = [
+    "municipality",
+    "admin1",
+    "admin2",
+    "formatted_address",
+    "geocoder_provider",
+    "geocoder_confidence",
+    "geocoded_at",
+    "geocode_status",
+]
+
+WASTE_SITE_BASE_EXTRA_FIELDS = [
+    "site_id",
+    "site_name",
+    "country_iso3",
+    "input_area_square_meters",
+    "pilot_selection_reason",
+    *GEOCODE_FIELDS,
+]
+
+
+# --- target attributes -------------------------------------------------------------------------
+# Metadata attributes requested only when the facility's baseline value is empty (gap-fill, Q29).
+GAP_FILL_ATTRIBUTES = [
+    "facility_status",
+    "facility_type",
+    "opening_year",
+    "closing_year",
+    "has_landfill_gas_collection",
+    "annual_incoming_waste_metric_tonnes",
+    "waste_in_place_metric_tonnes",
+    "area",
+    "waste_depth_meters",
+    "has_cover",
+    "cover_types",
+    "has_biocover",
+    "gccs_ch4_flared_metric_tonnes",
+    "gccs_ch4_generated_metric_tonnes",
+    "gccs_ch4_collected_metric_tonnes",
+    "gccs_ch4_flow_to_project_metric_tonnes",
+    "gccs_energy_project_type",
+    "gccs_current_project_status",
+    "gccs_collection_efficiency",
+]
+
+# Always requested. These are how we know the agent found the *right* facility, so they are not
+# gap-filled: identity confirmation is what makes an auto-validated fill defensible (Q30).
+IDENTITY_ATTRIBUTES = [
+    "found_site_name",
+    "found_latitude",
+    "found_longitude",
+]
+
+# --- country policy ------------------------------------------------------------------------
+# US facilities are already well covered by usa_ghgrp_2026 and lmop_2024, both Tier 1, so an AI
+# search there mostly produces equal-tier conflicts for a human to adjudicate rather than new
+# data. Excluded by default; --include-excluded-countries or naming the country explicitly
+# overrides it.
+DEFAULT_EXCLUDED_ISO3 = {"USA"}
+
+# Countries where the ONLY thing worth searching is the coordinates, and only for facilities whose
+# recorded location is flagged inexact. Every other attribute for these facilities comes from a
+# government source, so searching it risks overwriting better data than the search can find.
+# No facility currently satisfies this - `is_location_exact` is TRUE corpus-wide - so the rule
+# matches nothing until inexact-location facilities enter the consolidation. It is a default now
+# so that those facilities are scoped correctly the moment they arrive.
+COORDINATES_ONLY_ISO3 = {"BRA"}
+
+COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
+
+
+# Computed locally from found coordinates. No source, no tier (Q12).
+CALCULATED_ATTRIBUTES = [
+    "distance_to_original_coordinates_km",
+]
+
+TARGET_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *CALCULATED_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
+REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
+
+BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover"}
+ARRAY_TARGET_ATTRIBUTES = {"cover_types", "gccs_energy_project_type", "gccs_current_project_status"}
+# Stored as a numeric array in the spec, so multiple project rows can collapse into one record.
+NUMERIC_ARRAY_TARGET_ATTRIBUTES = {"gccs_ch4_flow_to_project_metric_tonnes"}
+# Spec requires a fraction between 0 and 1, never a percentage.
+FRACTION_TARGET_ATTRIBUTES = {"gccs_collection_efficiency"}
+
+# Gas collection and control system attributes. Only meaningful at a facility that has a gas
+# collection system, so they are not requested where the baseline says there is none: asking
+# about methane flaring at a site with no capture system spends prompt on a certain "nothing".
+GCCS_ATTRIBUTES = {
+    "gccs_ch4_flared_metric_tonnes",
+    "gccs_ch4_generated_metric_tonnes",
+    "gccs_ch4_collected_metric_tonnes",
+    "gccs_ch4_flow_to_project_metric_tonnes",
+    "gccs_energy_project_type",
+    "gccs_current_project_status",
+    "gccs_collection_efficiency",
+}
+INTEGER_TARGET_ATTRIBUTES = {"opening_year", "closing_year"}
+NUMERIC_TARGET_ATTRIBUTES = {
+    "area",
+    "opening_year",
+    "closing_year",
+    "found_latitude",
+    "found_longitude",
+    "annual_incoming_waste_metric_tonnes",
+    "waste_in_place_metric_tonnes",
+    "waste_depth_meters",
+    "gccs_ch4_flared_metric_tonnes",
+    "gccs_ch4_generated_metric_tonnes",
+    "gccs_ch4_collected_metric_tonnes",
+    "gccs_ch4_flow_to_project_metric_tonnes",
+    "gccs_collection_efficiency",
+}
+
+# Ranges the spec states. Checked after conversion; out-of-range values are not promotable.
+ATTRIBUTE_RANGES = {
+    "area": (0.0, None),
+    "waste_depth_meters": (0.0, None),
+    "annual_incoming_waste_metric_tonnes": (0.0, None),
+    "waste_in_place_metric_tonnes": (0.0, None),
+    "gccs_ch4_flared_metric_tonnes": (0.0, None),
+    "gccs_ch4_generated_metric_tonnes": (0.0, None),
+    "gccs_ch4_collected_metric_tonnes": (0.0, None),
+    "gccs_ch4_flow_to_project_metric_tonnes": (0.0, None),
+    "gccs_collection_efficiency": (0.0, 1.0),
+    "found_latitude": (-90.0, 90.0),
+    "found_longitude": (-180.0, 180.0),
+}
+
+# Attribute -> standardized facility column it populates.
+ATTRIBUTE_TO_STANDARD_COLUMN = {
+    "found_site_name": "facility_name",
+    "found_latitude": "latitude",
+    "found_longitude": "longitude",
+    "facility_status": "facility_status",
+    "facility_type": "facility_type",
+    "opening_year": "opening_year",
+    "closing_year": "closing_year",
+    "has_landfill_gas_collection": "has_landfill_gas_collection",
+    "annual_incoming_waste_metric_tonnes": "annual_incoming_waste_metric_tonnes",
+    "waste_in_place_metric_tonnes": "waste_in_place_metric_tonnes",
+    "area": "area",
+    "waste_depth_meters": "waste_depth_meters",
+    "has_cover": "has_cover",
+    "cover_types": "cover_types",
+    "has_biocover": "has_biocover",
+    "gccs_ch4_flared_metric_tonnes": "gccs_ch4_flared_metric_tonnes",
+    "gccs_ch4_generated_metric_tonnes": "gccs_ch4_generated_metric_tonnes",
+    "gccs_ch4_collected_metric_tonnes": "gccs_ch4_collected_metric_tonnes",
+    "gccs_ch4_flow_to_project_metric_tonnes": "gccs_ch4_flow_to_project_metric_tonnes",
+    "gccs_energy_project_type": "gccs_energy_project_type",
+    "gccs_current_project_status": "gccs_current_project_status",
+    "gccs_collection_efficiency": "gccs_collection_efficiency",
+}
+
+
+# --- categorical mapping onto the live database enums (Q20/Q26) --------------------------------
+FACILITY_STATUS_MAP = {
+    "active": "Active",
+    "inactive": "Inactive",
+    "closed": "Inactive",
+    "temporarily closed": "Inactive",
+    "planned": None,
+    "under construction": None,
+    "unknown": None,
+}
+
+FACILITY_TYPE_MAP = {
+    "sanitary landfill": "Sanitary Landfill",
+    "landfill": "Sanitary Landfill",
+    "controlled dumpsite": "Controlled Dumpsite",
+    "dumpsite": "Dumpsite",
+    "dump": "Dumpsite",
+    "open dump": "Dumpsite",
+    "legacy landfill": "Dumpsite",
+    "incineration facility": "Incineration Facility",
+    "incinerator": "Incineration Facility",
+    "transfer station": None,
+    "unknown": None,
+}
+
+COVER_TYPE_MAP = {
+    "clay cover": "clay cover",
+    "clay": "clay cover",
+    "organic cover": "organic cover",
+    "organic": "organic cover",
+    "biocover": "organic cover",
+    "bio-cover": "organic cover",
+    "sand cover": "sand cover",
+    "sand": "sand cover",
+    "other soil mixture": "other soil mixture",
+    "soil": "other soil mixture",
+    "soil cover": "other soil mixture",
+    "unknown": None,
+}
+
+GCCS_ENERGY_PROJECT_TYPE_MAP = {
+    "electricity generation": "Electricity Generation",
+    "electricity": "Electricity Generation",
+    "power generation": "Electricity Generation",
+    "electricity generation project": "Electricity Generation",
+    "direct use": "Direct Use",
+    "direct-use": "Direct Use",
+    "renewable natural gas": "Renewable Natural Gas",
+    "rng": "Renewable Natural Gas",
+    "pipeline injection": "Renewable Natural Gas",
+    "other": "Other",
+    "flaring": None,
+    "flare": None,
+    "none": None,
+    "unknown": None,
+}
+
+GCCS_CURRENT_PROJECT_STATUS_MAP = {
+    "operational": "Operational",
+    "active": "Operational",
+    "in operation": "Operational",
+    "under construction": "Under Construction",
+    "construction": "Under Construction",
+    "planned": "Planned",
+    "proposed": "Planned",
+    "closed": "Closed",
+    "shutdown": "Closed",
+    "decommissioned": "Closed",
+    "unknown": None,
+}
+
+ENUM_MAPS = {
+    "facility_status": (FACILITY_STATUS_MAP, FACILITY_STATUS_VALUES),
+    "facility_type": (FACILITY_TYPE_MAP, FACILITY_TYPE_VALUES),
+    "cover_types": (COVER_TYPE_MAP, COVER_TYPE_VALUES),
+    "gccs_energy_project_type": (GCCS_ENERGY_PROJECT_TYPE_MAP, GCCS_ENERGY_PROJECT_TYPE_VALUES),
+    "gccs_current_project_status": (GCCS_CURRENT_PROJECT_STATUS_MAP, GCCS_CURRENT_PROJECT_STATUS_VALUES),
+}
+
+BOOLEAN_INPUT_MAP = {
+    "yes": True, "y": True, "true": True, "t": True, "1": True,
+    "no": False, "n": False, "false": False, "f": False, "0": False,
+    "unknown": None, "": None,
+}
+
+
+# --- output levels (Q5) ------------------------------------------------------------------------
+EVIDENCE_HEADERS = [
+    "evidence_id", "run_id", "dataset_version", "site_id", "internal_facility_id",
+    "attribute_name", "claimed_value", "claimed_unit", "normalized_value", "normalized_unit",
+    "unit_conversion_note", "mapped_value", "mapping_note", "value_basis", "value_date",
+    "agent_confidence", "source_id", "source_tier", "agent_proposed_tier", "tier_rule_applied",
+    "evidence_summary", "quoted_evidence_short", "search_terms_used", "promotion_eligible",
+    "exclusion_reason", "record_created_date",
+]
+
+RESOLVED_HEADERS = [
+    "site_id", "internal_facility_id", "site_name", "country_iso3", "attribute_name",
+    "baseline_value", "baseline_source", "baseline_tier",
+    "resolved_value", "resolved_unit", "resolution", "resolution_rule",
+    "winning_evidence_id", "winning_source_tier", "winning_source_url", "best_tier_available",
+    "value_date", "confidence_score", "validation_status", "reviewer", "reviewed_date",
+    "researcher_notes",
+]
+
+# Who is recorded as having signed off a row the pipeline decided without a human.
+AUTO_REVIEWER = "AI Agent"
+
+SOURCES_HEADERS = [
+    "source_id", "url_normalized", "url", "source_title", "publisher", "source_type",
+    "source_tier", "tier_rule_applied", "agent_proposed_tier", "publication_date",
+    "has_publication_date", "language", "paywall_flag", "subscription_followup_needed",
+    "first_seen_run_id", "times_cited", "cited_site_count",
+]
+
+# The filtered queue an SME actually works through (Q31).
+REVIEW_QUEUE_HEADERS = [
+    "site_id", "site_name", "country_iso3", "attribute_name", "resolution",
+    "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
+    "winning_source_tier", "winning_source_url", "value_date", "agreeing_source_count",
+    "evidence_summary", "validation_status", "reviewer", "reviewed_date", "researcher_notes",
+]
+
+SUPPLEMENTARY_LEADS_HEADERS = [
+    "run_id", "site_id", "site_name", "country_iso3", "attribute_name", "lead_value",
+    "source_tier", "lead_summary", "url", "exclusion_reason",
+]
+
+FOUNDRY_RUN_LOG_HEADERS = [
+    "run_id", "site_id", "site_name", "country_iso3", "requested_attributes", "agent_id",
+    "request_started_at", "request_finished_at", "status", "raw_response_path",
+    "parsed_attribute_count", "parsed_source_count", "error_message", "retry_count",
+]
+
+PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
+
+
+# --- standardized facility table (Q19) --------------------------------------------------------
+AI_SEARCH_DATA_SOURCE = "ai_search_2026"
+
+# `has_biocover` is NOT yet in StandardizedFacilityTableSpecification.md. It is placed with the
+# other cover columns because that is where it belongs semantically; if the column is appended at
+# the end of the real DDL instead, this order must be changed to match, or a positional load will
+# misalign every column after it.
+STANDARDIZED_FACILITY_COLUMNS = [
+    "facility_id", "year", "facility_name", "iso3c_plus", "area", "facility_status",
+    "facility_type", "opening_year", "closing_year", "has_landfill_gas_collection",
+    "waste_depth_meters", "annual_incoming_waste_metric_tonnes", "waste_in_place_metric_tonnes",
+    "has_cover", "cover_types", "has_biocover",
+    "gccs_ch4_flared_metric_tonnes", "gccs_ch4_generated_metric_tonnes",
+    "gccs_ch4_collected_metric_tonnes", "gccs_energy_project_type", "gccs_current_project_status",
+    "gccs_ch4_flow_to_project_metric_tonnes", "gccs_ch4_percent", "gccs_collection_efficiency",
+    "oxidation", "mcf", "latitude", "longitude", "point", "is_location_exact",
+    "ch4_emissions_metric_tonnes", "food_percent_by_weight", "green_percent_by_weight",
+    "wood_percent_by_weight", "paper_cardboard_percent_by_weight", "textiles_percent_by_weight",
+    "plastic_percent_by_weight", "metal_percent_by_weight", "glass_percent_by_weight",
+    "rubber_percent_by_weight", "other_percent_by_weight", "data_source", "created_date", "git_sha",
+]
+
+
+# --- resolution + review vocabularies ----------------------------------------------------------
+RESOLUTION_VALUES = [
+    "Confirmed baseline",
+    "Filled empty baseline",
+    "Overrides baseline",
+    "Conflict - needs review",
+    "Conflict - lower credibility",
+    "Calculated",
+    "Not found",
+]
+
+# Resolutions whose rows belong in the leads sheet and must NOT appear in the review queue.
+LEAD_ROUTED_RESOLUTIONS = {"Conflict - lower credibility"}
+
+DEFINITION_VALUES = {
+    "attribute_name": REQUESTABLE_ATTRIBUTES,
+    "facility_status": FACILITY_STATUS_VALUES,
+    "facility_type": FACILITY_TYPE_VALUES,
+    "cover_type": COVER_TYPE_VALUES,
+    "gccs_energy_project_type": GCCS_ENERGY_PROJECT_TYPE_VALUES,
+    "gccs_current_project_status": GCCS_CURRENT_PROJECT_STATUS_VALUES,
+    "boolean_unknown": ["Yes", "No", "Unknown"],
+    "value_basis": ["Direct", "Inferred", "Conflicting", "Not found"],
+    "confidence_score": ["High", "Medium", "Low", "Excluded candidate"],
+    "resolution": RESOLUTION_VALUES,
+    "source_tier": ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Tier 5"],
+    "validation_status": ["Needs review", "Validated", "Rejected", "Auto-validated", "Routed to leads"],
+    # What a reviewer may choose. The other statuses are set by the pipeline, not by hand.
+    "review_decision": ["Validated", "Rejected"],
+}
+
+# Columns a reviewer may edit, and the vocabulary each offers. Anything absent here is
+# read-only in the workbook, so a dropdown never invites editing a pipeline-set field.
+FIELD_TO_DEFINITION = {
+    "validation_status": "review_decision",
+}
+
+FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS = [
+    "attribute_name",
+    "value",
+    "value_basis",
+    "confidence_score",
+    "sources",
+]
+
+
+# --- scalar helpers ----------------------------------------------------------------------------
+def normalize_scalar(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.replace(microsecond=0).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (list, tuple)):
+        return "; ".join(normalize_scalar(item) for item in value if item is not None)
+    return str(value).strip()
+
+
+
+def parse_tristate_bool(value: Any) -> tuple[bool | None, str]:
+    """Yes/No/Unknown -> True/False/None. Unknown becomes NULL, per the boolean spec column."""
+    if isinstance(value, bool):
+        return value, ""
+    text = normalize_scalar(value).lower()
+    if text in BOOLEAN_INPUT_MAP:
+        return BOOLEAN_INPUT_MAP[text], ""
+    return None, f"Unrecognized boolean value {normalize_scalar(value)!r}; stored as NULL."
+
+
+def is_blank(value: Any) -> bool:
+    return normalize_scalar(value) == ""
+
+
+def normalize_for_compare(value: Any) -> str:
+    return normalize_scalar(value).lower().replace(",", "").strip()
+
+
+def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
+    """Map a search-vocabulary categorical onto the live database enum. Unmappable -> NULL."""
+    if field_name not in ENUM_MAPS:
+        return normalize_scalar(value), ""
+    mapping, allowed = ENUM_MAPS[field_name]
+
+    if field_name in ARRAY_TARGET_ATTRIBUTES:
+        raw_items = value if isinstance(value, (list, tuple)) else re.split(r"[;,]", normalize_scalar(value))
+        mapped: list[str] = []
+        notes: list[str] = []
+        for item in raw_items:
+            text = normalize_scalar(item).lower().strip()
+            if not text:
+                continue
+            if text in mapping and mapping[text] is not None:
+                if mapping[text] not in mapped:
+                    mapped.append(mapping[text])
+            elif text in allowed:
+                if text not in mapped:
+                    mapped.append(text)
+            else:
+                notes.append(f"dropped unmappable {field_name} value {text!r}")
+        return mapped, "; ".join(notes)
+
+    text = normalize_scalar(value).lower().strip()
+    if not text:
+        return None, ""
+    if text in mapping:
+        mapped_value = mapping[text]
+        if mapped_value is None:
+            return None, f"{field_name} value {normalize_scalar(value)!r} has no database enum; stored as NULL."
+        note = "" if normalize_scalar(value) == mapped_value else f"mapped {normalize_scalar(value)!r} -> {mapped_value!r}"
+        return mapped_value, note
+    for candidate in allowed:
+        if candidate.lower() == text:
+            return candidate, f"normalized case {normalize_scalar(value)!r} -> {candidate!r}"
+    return None, f"{field_name} value {normalize_scalar(value)!r} is not a valid enum member; stored as NULL."
+
+
+
+def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    attributes = payload.get("attributes", [])
+    if not isinstance(attributes, list):
+        return ["Payload field 'attributes' must be a list."]
+
+    for idx, attribute in enumerate(attributes, start=1):
+        if not isinstance(attribute, dict):
+            warnings.append(f"attributes[{idx}] must be an object.")
+            continue
+        for field in FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS:
+            if field not in attribute:
+                warnings.append(f"attributes[{idx}] missing required field {field!r}.")
+        name = normalize_scalar(attribute.get("attribute_name"))
+        if name and name not in REQUESTABLE_ATTRIBUTES:
+            warnings.append(f"attributes[{idx}] has unsupported attribute_name {name!r}.")
+        sources = attribute.get("sources", [])
+        if not isinstance(sources, list):
+            warnings.append(f"attributes[{idx}] sources must be a list.")
+        elif not any(isinstance(source, dict) and source.get("url") for source in sources):
+            warnings.append(f"attributes[{idx}] has no clickable source URL.")
+    return warnings

@@ -1,0 +1,8 @@
+facility_id,year,facility_name,iso3c_plus,area,facility_status,facility_type,opening_year,closing_year,has_landfill_gas_collection,waste_depth_meters,annual_incoming_waste_metric_tonnes,waste_in_place_metric_tonnes,has_cover,cover_types,gccs_ch4_flared_metric_tonnes,gccs_ch4_generated_metric_tonnes,gccs_ch4_collected_metric_tonnes,gccs_energy_project_type,gccs_current_project_status,gccs_ch4_flow_to_project_metric_tonnes,gccs_ch4_percent,gccs_collection_efficiency,oxidation,mcf,latitude,longitude,point,is_location_exact,ch4_emissions_metric_tonnes,food_percent_by_weight,green_percent_by_weight,wood_percent_by_weight,paper_cardboard_percent_by_weight,textiles_percent_by_weight,plastic_percent_by_weight,metal_percent_by_weight,glass_percent_by_weight,rubber_percent_by_weight,other_percent_by_weight,data_source,created_date,git_sha
+1,2022,Test Priority Landfill,NGA,120000,,,,,,,,,,,,,,,,,,,,,6.5000,3.3000,POINT(3.3000 6.5000),True,,,,,,,,,,,,osm_2022,,
+2,2022,Test Philippines Dumpsite,PHL,22000,,dumpsite,,,,,,,,,,,,,,,,,,,,14.2000,120.9000,POINT(120.9000 14.2000),True,,,,,,,,,,,,osm_2022,,
+3,2022,OpenStreetMap Landfill,CAN,30000,,,,,,,,,,,,,,,,,,,,,45.0000,-75.0000,POINT(-75.0000 45.0000),True,,,,,,,,,,,,osm_2022,,
+4,2022,City Landfill,USA,40000,,,,,,,,,,,,,,,,,,,,,39.0000,-104.0000,POINT(-104.0000 39.0000),True,,,,,,,,,,,,osm_2022,,
+5,2022,Named Regional Landfill,BRA,50000,,,,,,,,,,,,,,,,,,,,,-23.0000,-46.0000,POINT(-46.0000 -23.0000),True,,,,,,,,,,,,osm_2022,,
+6,2022,Municipal Garbage Dump,DEU,60000,,,,,,,,,,,,,,,,,,,,,51.0000,10.0000,POINT(10.0000 51.0000),True,,,,,,,,,,,,osm_2022,,
+

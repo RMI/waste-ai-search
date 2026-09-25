@@ -1,0 +1,24 @@
+[project]
+name = "waste-ai-search"
+version = "0.1.0"
+description = "AI search pipeline for waste site activity data discovery using Azure Foundry."
+requires-python = ">=3.10"
+dependencies = [
+  "openpyxl",
+  "azure-ai-projects",
+  "azure-identity",
+  "python-dotenv",
+  "psycopg[binary]",
+]
+
+[dependency-groups]
+dev = [
+  "pytest<9",
+]
+
+[project.scripts]
+waste-ai-search = "waste_ai_search.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
