@@ -109,7 +109,7 @@ def test_csv_rendering_uses_postgres_array_and_bool_literals():
     row = to_csv_row(record)
     assert row["cover_types"] == '{"clay cover"}'
     assert row["has_landfill_gas_collection"] == "true"
-    assert row["waste_depth_meters"] == ""
+    assert row["waste_depth"] == ""
     assert set(row) == set(STANDARDIZED_FACILITY_COLUMNS)
 
 

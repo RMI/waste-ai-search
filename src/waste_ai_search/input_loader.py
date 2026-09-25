@@ -19,7 +19,13 @@ def normalize_site_record(row: dict[str, Any]) -> dict[str, Any]:
     site_id = row.get("facility_id") or row.get("site_id") or row.get("id")
     site_name = row.get("facility_name") or row.get("site_name") or row.get("name")
     country_iso3 = row.get("iso3c_plus") or row.get("country_iso3") or row.get("iso3")
-    area = row.get("area") or row.get("input_area_square_meters")
+    # `area` is the pre-8c0bb3fe spelling; seed CSVs generated before the rename still use
+    # it, so both are accepted on read and only the new name is written back out.
+    area = (
+        row.get("area_square_meters")
+        or row.get("input_area_square_meters")
+        or row.get("area")
+    )
 
     normalized["site_id"] = normalize_scalar(site_id)
     normalized["site_name"] = normalize_scalar(site_name)

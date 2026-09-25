@@ -44,8 +44,8 @@ GAP_FILL_ATTRIBUTES = [
     "has_landfill_gas_collection",
     "annual_incoming_waste_metric_tonnes",
     "waste_in_place_metric_tonnes",
-    "area",
-    "waste_depth_meters",
+    "area_square_meters",
+    "waste_depth",
     "has_cover",
     "cover_types",
     "has_biocover",
@@ -113,14 +113,13 @@ GCCS_ATTRIBUTES = {
 }
 INTEGER_TARGET_ATTRIBUTES = {"opening_year", "closing_year"}
 NUMERIC_TARGET_ATTRIBUTES = {
-    "area",
+    "area_square_meters",
     "opening_year",
     "closing_year",
     "found_latitude",
     "found_longitude",
     "annual_incoming_waste_metric_tonnes",
     "waste_in_place_metric_tonnes",
-    "waste_depth_meters",
     "gccs_ch4_flared_metric_tonnes",
     "gccs_ch4_generated_metric_tonnes",
     "gccs_ch4_collected_metric_tonnes",
@@ -130,8 +129,7 @@ NUMERIC_TARGET_ATTRIBUTES = {
 
 # Ranges the spec states. Checked after conversion; out-of-range values are not promotable.
 ATTRIBUTE_RANGES = {
-    "area": (0.0, None),
-    "waste_depth_meters": (0.0, None),
+    "area_square_meters": (0.0, None),
     "annual_incoming_waste_metric_tonnes": (0.0, None),
     "waste_in_place_metric_tonnes": (0.0, None),
     "gccs_ch4_flared_metric_tonnes": (0.0, None),
@@ -155,8 +153,8 @@ ATTRIBUTE_TO_STANDARD_COLUMN = {
     "has_landfill_gas_collection": "has_landfill_gas_collection",
     "annual_incoming_waste_metric_tonnes": "annual_incoming_waste_metric_tonnes",
     "waste_in_place_metric_tonnes": "waste_in_place_metric_tonnes",
-    "area": "area",
-    "waste_depth_meters": "waste_depth_meters",
+    "area_square_meters": "area_square_meters",
+    "waste_depth": "waste_depth",
     "has_cover": "has_cover",
     "cover_types": "cover_types",
     "has_biocover": "has_biocover",
@@ -241,6 +239,53 @@ GCCS_CURRENT_PROJECT_STATUS_MAP = {
     "unknown": None,
 }
 
+# `waste_depth` is the one categorical the spec derives from a numeric source measurement rather
+# than from a source category, so it has no mapping table and is not in ENUM_MAPS. Its values are
+# spec-defined rather than generated into db_enums.py: the live column is `text`, with no Postgres
+# enum type behind it, so there is nothing for scripts/generate_enums.py to read.
+WASTE_DEPTH_VALUES = ["<=5m", ">5m"]
+
+# The spec's boundary: at or below 5 metres is '<=5m', above it is '>5m'.
+WASTE_DEPTH_BOUNDARY_METERS = 5.0
+
+
+def bucket_waste_depth(meters: Any) -> tuple[str | None, str]:
+    """Convert a depth already normalized to metres into the spec's depth category.
+
+    Returns (None, note) rather than a category when the measurement cannot support one. The spec
+    is explicit that a reported depth of zero or less is not a measurement, so it is left NULL
+    instead of being assigned to '<=5m' - a zero would otherwise read as a genuine shallow site.
+    """
+    text = normalize_scalar(meters)
+    if not text:
+        return None, ""
+
+    # A converted range ("12 to 18") keeps both ends; bucket on the shallower one only when both
+    # ends agree, since a range straddling the boundary does not determine a category.
+    try:
+        parsed = [float(part.strip()) for part in text.split(" to ")]
+    except ValueError:
+        return None, f"waste_depth value {text!r} is not numeric; stored as NULL."
+
+    if any(value <= 0 for value in parsed):
+        return None, (
+            f"waste_depth of {text} metres is not a measurement (zero or negative); stored as NULL."
+        )
+
+    buckets = {
+        WASTE_DEPTH_VALUES[0] if value <= WASTE_DEPTH_BOUNDARY_METERS else WASTE_DEPTH_VALUES[1]
+        for value in parsed
+    }
+    if len(buckets) > 1:
+        return None, (
+            f"waste_depth range {text} metres straddles the {WASTE_DEPTH_BOUNDARY_METERS:g}m "
+            "boundary, so it does not determine a category; stored as NULL."
+        )
+
+    category = buckets.pop()
+    return category, f"Binned {text} metres to {category!r}."
+
+
 ENUM_MAPS = {
     "facility_status": (FACILITY_STATUS_MAP, FACILITY_STATUS_VALUES),
     "facility_type": (FACILITY_TYPE_MAP, FACILITY_TYPE_VALUES),
@@ -310,14 +355,14 @@ PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 # --- standardized facility table (Q19) --------------------------------------------------------
 AI_SEARCH_DATA_SOURCE = "ai_search_2026"
 
-# `has_biocover` is NOT yet in StandardizedFacilityTableSpecification.md. It is placed with the
-# other cover columns because that is where it belongs semantically; if the column is appended at
-# the end of the real DDL instead, this order must be changed to match, or a positional load will
-# misalign every column after it.
+# Column order follows StandardizedFacilityTableSpecification.md, which as of upstream 8c0bb3fe
+# defines `has_biocover` beside the other cover columns - where this table had already placed it.
+# Order still matters: the generated load statement names every column, but a positional COPY
+# against a table whose DDL disagrees would misalign everything after the first mismatch.
 STANDARDIZED_FACILITY_COLUMNS = [
-    "facility_id", "year", "facility_name", "iso3c_plus", "area", "facility_status",
+    "facility_id", "year", "facility_name", "iso3c_plus", "area_square_meters", "facility_status",
     "facility_type", "opening_year", "closing_year", "has_landfill_gas_collection",
-    "waste_depth_meters", "annual_incoming_waste_metric_tonnes", "waste_in_place_metric_tonnes",
+    "waste_depth", "annual_incoming_waste_metric_tonnes", "waste_in_place_metric_tonnes",
     "has_cover", "cover_types", "has_biocover",
     "gccs_ch4_flared_metric_tonnes", "gccs_ch4_generated_metric_tonnes",
     "gccs_ch4_collected_metric_tonnes", "gccs_energy_project_type", "gccs_current_project_status",
@@ -349,6 +394,7 @@ DEFINITION_VALUES = {
     "facility_status": FACILITY_STATUS_VALUES,
     "facility_type": FACILITY_TYPE_VALUES,
     "cover_type": COVER_TYPE_VALUES,
+    "waste_depth": WASTE_DEPTH_VALUES,
     "gccs_energy_project_type": GCCS_ENERGY_PROJECT_TYPE_VALUES,
     "gccs_current_project_status": GCCS_CURRENT_PROJECT_STATUS_VALUES,
     "boolean_unknown": ["Yes", "No", "Unknown"],

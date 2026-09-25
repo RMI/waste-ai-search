@@ -62,3 +62,26 @@ def test_spec_columns_match_the_code(provenance: dict) -> None:
         f"Spec defines columns the code does not declare: {missing}. "
         "Update STANDARDIZED_FACILITY_COLUMNS and the code that populates it."
     )
+
+    # `point` is a real column on all 11 transformed.* tables that the spec does not document;
+    # standardized.py derives it from latitude/longitude. It is the ONLY accepted extra, so that
+    # a genuinely invented column cannot slip in beside it.
+    extra = [c for c in STANDARDIZED_FACILITY_COLUMNS if c not in in_spec]
+    assert extra == ["point"], (
+        f"Code declares columns the spec does not define: {extra}. Only 'point' is an accepted "
+        "deviation; anything else must be added to the spec upstream first."
+    )
+
+
+def test_spec_column_order_is_preserved() -> None:
+    """A positional COPY against a mismatched DDL would misalign every column after the first."""
+    from waste_ai_search.standardized import STANDARDIZED_FACILITY_COLUMNS
+
+    in_spec = []
+    for line in SPEC.read_text().splitlines():
+        if line.startswith("| `") and line.count("|") == 5:
+            name = line.split("`")[1]
+            if name not in in_spec:
+                in_spec.append(name)
+
+    assert in_spec == [c for c in STANDARDIZED_FACILITY_COLUMNS if c in in_spec]

@@ -26,9 +26,11 @@ CH4_MASS_ATTRIBUTES = {
     "gccs_ch4_flow_to_project_metric_tonnes",
 }
 
-LENGTH_TARGET_ATTRIBUTES = {"waste_depth_meters"}
+# waste_depth still converts to metres here. The spec derives its category FROM a numeric
+# measurement, so the metre value remains the evidence; schema.bucket_waste_depth bins it.
+LENGTH_TARGET_ATTRIBUTES = {"waste_depth"}
 
-AREA_TARGET_ATTRIBUTES = {"area"}
+AREA_TARGET_ATTRIBUTES = {"area_square_meters"}
 
 # A unit has to carry a letter or a unit symbol; bare digits and punctuation are not a unit.
 UNIT_WORD_PATTERN = re.compile(r"[a-z%°]")
@@ -52,8 +54,8 @@ CANONICAL_UNITS = {
     "waste_in_place_metric_tonnes": "metric tonnes",
     "found_latitude": "decimal degrees",
     "found_longitude": "decimal degrees",
-    "waste_depth_meters": "meters",
-    "area": "square meters",
+    "waste_depth": "meters",
+    "area_square_meters": "square meters",
     "gccs_ch4_flared_metric_tonnes": "metric tonnes CH4",
     "gccs_ch4_generated_metric_tonnes": "metric tonnes CH4",
     "gccs_ch4_collected_metric_tonnes": "metric tonnes CH4",

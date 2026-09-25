@@ -243,7 +243,7 @@ def test_gccs_attributes_are_skipped_where_there_is_no_gas_collection():
     assert not [a for a in absent if a.startswith("gccs")]
     # The rest of the gap-fill set is unaffected.
     assert "waste_in_place_metric_tonnes" in absent
-    assert "waste_depth_meters" in absent
+    assert "waste_depth" in absent
 
 
 def test_gccs_attributes_are_requested_where_gas_collection_exists():
@@ -383,7 +383,7 @@ def test_brazil_with_an_exact_location_is_searched_for_nothing():
         "is_location_exact": "TRUE",
         "has_landfill_gas_collection": "TRUE",
         "facility_status": "",
-        "area": "",
+        "area_square_meters": "",
     }
     assert requested_attributes(exact) == []
 

@@ -1,7 +1,7 @@
 """Seed the metadata search from consolidation.consolidated_facility.
 
 The table holds one row per (internal_facility_id, year): 44k rows describing 15.5k
-physical facilities. Identity columns (name, country, coordinates, area) are constant
+physical facilities. Identity columns (name, country, coordinates, area_square_meters) are constant
 within a facility, so collapsing to one row per internal_facility_id is lossless for
 identity. The time-varying measurements are not constant, so the fold keeps the latest
 year as the reference row and backfills only the still-empty baseline fields from the
@@ -30,13 +30,13 @@ LEDGER_COLUMNS = {
 IDENTITY_FIELDS = [
     "facility_name",
     "iso3c_plus",
-    "area",
+    "area_square_meters",
     "latitude",
     "longitude",
     "is_location_exact",
     "opening_year",
     "closing_year",
-    "area_data_source",
+    "area_square_meters_data_source",
 ]
 
 # Vary by year. Backfilled from the most recent non-null year when the reference row is empty.
@@ -44,11 +44,14 @@ TIME_VARYING_FIELDS = [
     "facility_status",
     "facility_type",
     "has_landfill_gas_collection",
-    "waste_depth_meters",
+    "waste_depth",
     "annual_incoming_waste_metric_tonnes",
     "waste_in_place_metric_tonnes",
     "has_cover",
     "cover_types",
+    # Added upstream in 8c0bb3fe. Before it existed the baseline was always empty, so gap-fill
+    # asked every facility; reading it means only facilities with no recorded value are searched.
+    "has_biocover",
     "gccs_ch4_flared_metric_tonnes",
     "gccs_ch4_generated_metric_tonnes",
     "gccs_ch4_collected_metric_tonnes",
@@ -178,7 +181,7 @@ def to_seed_record(record: dict[str, Any]) -> dict[str, Any]:
     seed["site_id"] = seed["facility_id"]
     seed["site_name"] = seed["facility_name"]
     seed["country_iso3"] = seed["iso3c_plus"]
-    seed["input_area_square_meters"] = seed["area"]
+    seed["input_area_square_meters"] = seed["area_square_meters"]
     seed["pilot_selection_reason"] = ""
     return seed
 
