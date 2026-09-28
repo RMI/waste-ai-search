@@ -456,7 +456,7 @@ def test_explicit_tonne_variants_still_promote():
 
 
 def test_unconvertible_depth_unit_is_not_promoted():
-    _by_attr, rows, _sources, _warn = extract(site(), payload(attribute("waste_depth_meters", "40", "fathoms")))
+    _by_attr, rows, _sources, _warn = extract(site(), payload(attribute("waste_depth", "40", "fathoms")))
     assert rows[0]["promotion_eligible"] == "FALSE"
 
 
@@ -609,17 +609,17 @@ def test_a_non_empty_baseline_still_reports_both():
 
 
 def test_area_is_converted_to_square_metres_and_promoted():
-    by_attr, rows, _sources, _warn = extract(site(), payload(attribute("area", "25", "acres")))
+    by_attr, rows, _sources, _warn = extract(site(), payload(attribute("area_square_meters", "25", "acres")))
 
     assert rows[0]["normalized_value"] == "101171.4"
     assert rows[0]["normalized_unit"] == "square meters"
     assert rows[0]["promotion_eligible"] == "TRUE"
-    row = resolve(site(), "area", by_attr["area"])
+    row = resolve(site(), "area_square_meters", by_attr["area_square_meters"])
     assert row["resolution"] == "Filled empty baseline"
 
 
 def test_negative_area_is_not_promotable():
-    _by_attr, rows, _sources, warnings = extract(site(), payload(attribute("area", "-5", "square meters")))
+    _by_attr, rows, _sources, warnings = extract(site(), payload(attribute("area_square_meters", "-5", "square meters")))
     assert rows[0]["promotion_eligible"] == "FALSE"
     assert any("outside the spec range" in w for w in warnings)
 

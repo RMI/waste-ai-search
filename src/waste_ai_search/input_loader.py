@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 from typing import Any
 
-from .schema import GEOCODE_FIELDS, WASTE_SITE_BASE_EXTRA_FIELDS, normalize_scalar
+from .schema import GEOCODE_FIELDS, WASTE_SITE_BASE_EXTRA_FIELDS, is_blank, normalize_scalar
 
 
 def read_csv_records(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
@@ -14,12 +14,27 @@ def read_csv_records(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
         return rows, list(reader.fieldnames or [])
 
 
+def first_present(row: dict[str, Any], *keys: str) -> Any:
+    """The first key whose value is not blank, treating 0 and False as present."""
+    for key in keys:
+        if not is_blank(row.get(key)):
+            return row.get(key)
+    return None
+
+
 def normalize_site_record(row: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(row)
     site_id = row.get("facility_id") or row.get("site_id") or row.get("id")
     site_name = row.get("facility_name") or row.get("site_name") or row.get("name")
     country_iso3 = row.get("iso3c_plus") or row.get("country_iso3") or row.get("iso3")
-    area = row.get("area") or row.get("input_area_square_meters")
+    # `area` is the pre-8c0bb3fe spelling; seed CSVs generated before the rename still use
+    # it, so both are accepted on read and only the new name is written back out.
+    #
+    # Picked on normalized emptiness rather than with `or`, because a zero area is a real value
+    # the schema permits and `seed_source.is_empty` is careful to preserve. Reading a CSV these
+    # arrive as the string "0", which is truthy, so `or` happened to work; an int 0 from any
+    # other caller would silently fall through to an older alias.
+    area = first_present(row, "area_square_meters", "input_area_square_meters", "area")
 
     normalized["site_id"] = normalize_scalar(site_id)
     normalized["site_name"] = normalize_scalar(site_name)

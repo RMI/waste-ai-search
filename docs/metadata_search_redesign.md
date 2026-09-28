@@ -347,6 +347,7 @@ All settled. Where an answer overrode my recommendation it is marked.
 | F14 | Country scope | USA excluded by default (3,145 sites). Brazil: coordinates only, and only where `is_location_exact` is FALSE — today 0 of 303, so all are skipped. Sites with nothing to ask are dropped from selection. |
 | F13 | `area` and `has_biocover` added | 22 requestable attributes. `has_biocover` is a **new 44th standardized column**, not yet in the published spec. `waste_depth_meters` was already searched. |
 | F12 | Per-attribute baseline provenance | Baseline tier comes from `consolidation.value_resolution_ledger`, joined per attribute, instead of the facility-level composite. `baseline_source` is published in `resolved.csv` and the review queue. |
+| F15 | Schema realigned to upstream `8c0bb3fe` | `area` → `area_square_meters`; `waste_depth_meters` (numeric) → `waste_depth` (derived category `<=5m` / `>5m`); `has_biocover` is now spec-defined rather than a local 44th column, and is read from `consolidated_facility` instead of always gap-filled. The spec is vendored against a pinned upstream commit (`scripts/sync_schema.py`), so F6 and F13 above record the pre-rename state. |
 | F11 | Tier 5 replaces the Unrated sentinel | An unclassifiable source now sits on the ordered scale at Tier 5 rather than out-of-band at 99. `Other` removed from `source_type`: 15 types, no catch-all. |
 
 ### Accepted risks

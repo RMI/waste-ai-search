@@ -25,8 +25,8 @@ ATTRIBUTE_UNITS = {
     "found_longitude": "decimal degrees",
     "opening_year": "year",
     "closing_year": "year",
-    "waste_depth_meters": "meters",
-    "area": "square meters",
+    "waste_depth": "meters",
+    "area_square_meters": "square meters",
     "gccs_ch4_flared_metric_tonnes": "metric tonnes CH4",
     "gccs_ch4_generated_metric_tonnes": "metric tonnes CH4",
     "gccs_ch4_collected_metric_tonnes": "metric tonnes CH4",
@@ -53,14 +53,16 @@ ATTRIBUTE_GUIDANCE = {
     "waste_in_place_metric_tonnes": (
         "Total waste mass in place (a stock, not a rate). Report the source's original unit."
     ),
-    "area": (
+    "area_square_meters": (
         "Surface area of the landfill footprint containing waste. Report the source's original "
         "unit - hectares, acres, square feet, square kilometres or square metres - and the "
         "pipeline converts. This is the waste footprint, not the whole property or parcel."
     ),
-    "waste_depth_meters": (
-        "Average depth of waste. Report the source's original unit (feet or meters); the "
-        "pipeline converts. Must be greater than zero."
+    "waste_depth": (
+        "Average depth of waste. Report the NUMBER and the source's original unit (feet or "
+        "meters) - the pipeline converts to metres and bins the result into a depth category. "
+        "Do not return a category yourself, and never put words or a band in value. Must be "
+        "greater than zero: a reported zero is not a measurement."
     ),
     "has_cover": "Whether any cover material is present. Yes, No, or Unknown.",
     "has_biocover": (

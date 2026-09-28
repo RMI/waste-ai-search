@@ -32,6 +32,7 @@ from .schema import (
     SOURCES_HEADERS,
     STANDARDIZED_FACILITY_COLUMNS,
     SUPPLEMENTARY_LEADS_HEADERS,
+    bucket_waste_depth,
     is_blank,
     map_enum_value,
     normalize_scalar,
@@ -128,6 +129,16 @@ def extract_evidence(
             parsed, note = parse_tristate_bool(value)
             mapping_note = note
             value = "" if parsed is None else ("TRUE" if parsed else "FALSE")
+        elif name == "waste_depth":
+            # Bin the CONVERTED metres, not the raw value: the source may have reported feet, and
+            # the 5m boundary is only meaningful once the unit conversion above has run. A failed
+            # conversion leaves conversion.value in its original unit, so skip binning entirely
+            # there and let the conversion warning exclude the row.
+            if conversion_failed:
+                value = ""
+            else:
+                mapped, mapping_note = bucket_waste_depth(conversion.value)
+                value = normalize_scalar(mapped or "")
         elif name in ENUM_MAPS:
             mapped, mapping_note = map_enum_value(name, attribute.get("value"))
             value = normalize_scalar(mapped) if name in ARRAY_TARGET_ATTRIBUTES else normalize_scalar(mapped or "")

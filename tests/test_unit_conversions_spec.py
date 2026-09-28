@@ -5,22 +5,22 @@ from waste_ai_search.unit_converter import convert_attribute_value as convert
 
 
 def test_feet_to_meters():
-    result = convert("waste_depth_meters", "100", "feet")
+    result = convert("waste_depth", "100", "feet")
     assert result.value == "30.48"
     assert result.unit == "meters"
     assert "feet to meters" in result.note
 
 
 def test_meters_pass_through():
-    assert convert("waste_depth_meters", "30", "meters").value == "30"
+    assert convert("waste_depth", "30", "meters").value == "30"
 
 
 def test_yards_to_meters():
-    assert convert("waste_depth_meters", "10", "yards").value == "9.144"
+    assert convert("waste_depth", "10", "yards").value == "9.144"
 
 
 def test_unsupported_depth_unit_warns_rather_than_guessing():
-    result = convert("waste_depth_meters", "40", "fathoms")
+    result = convert("waste_depth", "40", "fathoms")
     assert result.warning
     assert "fathoms" in result.warning
 
@@ -92,36 +92,36 @@ def test_daily_methane_mass_is_annualized():
 
 def test_square_feet_to_square_metres():
     """Spec: square meters = square feet x 0.092903."""
-    result = convert("area", "100000", "square feet")
+    result = convert("area_square_meters", "100000", "square feet")
     assert float(result.value) == pytest.approx(100000 * 0.092903)
     assert result.unit == "square meters"
 
 
 def test_acres_to_square_metres():
     """Spec: square meters = acres x 4,046.856."""
-    assert float(convert("area", "25", "acres").value) == pytest.approx(25 * 4046.856)
+    assert float(convert("area_square_meters", "25", "acres").value) == pytest.approx(25 * 4046.856)
 
 
 @pytest.mark.parametrize("unit", ["sq ft", "sq. ft", "ft2", "ft²", "square feet"])
 def test_square_foot_spellings(unit):
-    assert float(convert("area", "100000", unit).value) == pytest.approx(9290.3)
+    assert float(convert("area_square_meters", "100000", unit).value) == pytest.approx(9290.3)
 
 
 def test_hectares_and_square_kilometres():
     """Not in the spec's table, but how most non-US sources report a footprint."""
-    assert float(convert("area", "12.5", "hectares").value) == pytest.approx(125000)
-    assert float(convert("area", "0.5", "km2").value) == pytest.approx(500000)
+    assert float(convert("area_square_meters", "12.5", "hectares").value) == pytest.approx(125000)
+    assert float(convert("area_square_meters", "0.5", "km2").value) == pytest.approx(500000)
 
 
 def test_unsupported_area_unit_warns():
-    assert convert("area", "40", "fathoms squared").warning
+    assert convert("area_square_meters", "40", "fathoms squared").warning
 
 
 @pytest.mark.parametrize(
     "attribute,value",
     [
-        ("area", "487065"),
-        ("waste_depth_meters", "30"),
+        ("area_square_meters", "487065"),
+        ("waste_depth", "30"),
         ("waste_in_place_metric_tonnes", "1235000"),
         ("annual_incoming_waste_metric_tonnes", "120000"),
         ("gccs_ch4_flared_metric_tonnes", "1200"),

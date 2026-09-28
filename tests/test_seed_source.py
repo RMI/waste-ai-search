@@ -12,13 +12,13 @@ def row(facility_id, year, **overrides):
         "year": year,
         "facility_name": "Olushosun Landfill",
         "iso3c_plus": "NGA",
-        "area": 487065.6,
+        "area_square_meters": 487065.6,
         "latitude": 6.59,
         "longitude": 3.37,
         "is_location_exact": True,
         "opening_year": None,
         "closing_year": None,
-        "area_data_source": "osm_2022",
+        "area_square_meters_data_source": "osm_2022",
         "facility_status": None,
         "facility_type": None,
         "has_landfill_gas_collection": None,
@@ -26,6 +26,7 @@ def row(facility_id, year, **overrides):
         "waste_in_place_metric_tonnes": None,
         "has_cover": None,
         "cover_types": None,
+        "has_biocover": None,
     }
     base.update(overrides)
     return base
@@ -120,8 +121,10 @@ def test_seed_record_matches_input_loader_shape():
     assert seed["input_area_square_meters"] == "487065.6"
     assert seed["year"] == "2022"
     assert seed["cover_types"] == "clay cover; organic cover"
-    # has_biocover is searched, not derived here, so the seed must not pre-empt it.
-    assert "has_biocover" not in seed
+    # has_biocover is now a real column on consolidated_facility, so the seed carries whatever the
+    # source recorded -- but it is still never INFERRED. This row has organic cover and a NULL
+    # has_biocover, and the seed must leave it empty rather than deriving TRUE from the cover type.
+    assert seed["has_biocover"] == ""
 
 
 def test_static_attributes_join_the_ledger_on_the_facility_alone():

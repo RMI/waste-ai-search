@@ -199,17 +199,20 @@ only trustworthy because identity was confirmed.
 | `has_landfill_gas_collection` | boolean | — | `has_landfill_gas_collection` |
 | `annual_incoming_waste_metric_tonnes` | numeric | `metric tonnes/year` | `annual_incoming_waste_metric_tonnes` |
 | `waste_in_place_metric_tonnes` | numeric | `metric tonnes` | `waste_in_place_metric_tonnes` |
-| `area` | numeric | `square meters` | `area` |
-| `waste_depth_meters` | numeric | `meters` | `waste_depth_meters` |
+| `area_square_meters` | numeric | `square meters` | `area_square_meters` |
+| `waste_depth` | enum (derived) | `meters` in, category out | `waste_depth` |
 | `has_cover` | boolean | — | `has_cover` |
 | `cover_types` | enum array | — | `cover_types` |
-| `has_biocover` † | boolean | — | `has_biocover` † |
+| `has_biocover` | boolean | — | `has_biocover` |
 
-† **`has_biocover` is a 44th column the standardized spec does not define yet.**
+`waste_depth` is the only **derived** categorical. The agent still reports a number and its
+unit; the pipeline converts to metres, then bins on the spec's 5 m boundary. The metre value is
+kept in `normalized_value` as evidence and the category lands in the column. A depth of zero or
+less is not a measurement, so it is stored NULL rather than binned to `<=5m`.
 
-*It is asked of every facility.* `consolidated_facility` has no such column, so the baseline is
-always empty and the gap-fill rule always fires. It is **not** derived from `cover_types` — a plain
-soil, clay or sand cover is not a biocover, and the prompt says so explicitly.
+`has_biocover` is **not** derived from `cover_types` — a plain soil, clay or sand cover is not a
+biocover, and the prompt says so explicitly. `consolidated_facility` now carries the column but it
+is entirely NULL today, so the gap-fill rule still fires for every facility.
 
 
 
@@ -242,8 +245,8 @@ an unconverted number can never land in a column whose name asserts a unit.
 
 | Target | Accepted source units |
 |---|---|
-| `area` → m² | m², **ft² / sq ft** (×0.092903), **acres** (×4046.856), hectares, km² |
-| `waste_depth_meters` → m | m, **feet** (×0.3048), yards |
+| `area_square_meters` → m² | m², **ft² / sq ft** (×0.092903), **acres** (×4046.856), hectares, km² |
+| `waste_depth` → m, then binned | m, **feet** (×0.3048), yards → `<=5m` / `>5m` |
 | mass → metric tonnes | metric tonnes, kg, US short tons, long tons, pounds |
 | rates → per year | /day ×365, /week ×52, /month ×12, /hour, /minute |
 | CH₄ → metric tonnes | t, kg, **ft³ CH₄** (×0.0192 kg), **m³ CH₄** (0.679 kg), **MMCFD** (×1e6×365) |
@@ -296,13 +299,17 @@ auto-validate. Once a baseline value exists, only Tier 1-2 may override it.
 
 ### Regenerating the categorical enums
 
-Allowed values come from the live Postgres enum types, not a hand-kept list:
+Allowed values come from the live database, not a hand-kept list — from Postgres enum types where
+one exists, and from CHECK constraints on `consolidated_facility` where one does not
+(`waste_depth` is the latter):
 
 ```bash
 uv run python scripts/generate_enums.py    # rewrites src/waste_ai_search/db_enums.py
 ```
 
-Re-run it whenever the database enums change. See
+Re-run it whenever the database vocabularies change. See
+[Standardized Facility Schema](#standardized-facility-schema) for how this fits with the
+vendored spec, and
 [docs/metadata_search_redesign.md](docs/metadata_search_redesign.md) for the full design and the
 accepted risks.
 
@@ -421,6 +428,72 @@ Without `--use-geocode-cache` those fields stay empty and every site records
 Live Azure Maps batch reverse geocoding should be added later as a separate
 pre-processing command that writes this cache.
 
+## Standardized Facility Schema
+
+The schema has **two sources of truth, and they cover different things.** Neither one is enough
+on its own.
+
+| | Authoritative for | Read by |
+|---|---|---|
+| **The database** | Column names, types, and which values a categorical column accepts | `scripts/check_db_schema.py`, `scripts/generate_enums.py` |
+| **The vendored spec** | What a column *means*, its units, its numeric ranges, and how a derived value is produced | `scripts/sync_schema.py` |
+
+The database wins on structure, and a rename there breaks this repo immediately — which is
+exactly what happened when `area` became `area_square_meters`: `refresh-seed` started failing
+with *column does not exist* before anyone had touched the spec.
+
+But the database carries **no column comments and no range constraints** on
+`consolidated_facility`, so it cannot tell you what a column means or what a valid number is. The
+clearest case is `waste_depth`. The database says:
+
+```sql
+CHECK (waste_depth IS NULL OR waste_depth = ANY (ARRAY['<=5m', '>5m']))
+```
+
+That gives the two permitted strings. It does **not** say to convert the source's depth to metres
+first, bin at 5 m, or store NULL for a reported zero. Those rules exist only in the spec's prose,
+and getting them from the constraint alone would write a bogus `<=5m` for every source reporting
+a depth of 0.
+
+### Checking structure against the database
+
+```bash
+uv run python scripts/check_db_schema.py       # do the code's columns and vocabularies match?
+uv run python scripts/generate_enums.py        # regenerate src/waste_ai_search/db_enums.py
+uv run python scripts/generate_enums.py --check  # is the committed copy stale?
+```
+
+Both need database access (so, the VPN). Exit `1` means real drift; exit `2` means the database
+could not be reached, so CI can tell a network blip from a genuine mismatch.
+
+`generate_enums.py` reads allowed values from **both** places they live: Postgres enum types, and
+CHECK constraints on `consolidated_facility`. `waste_depth` is only in the second — it is a `text`
+column with a constraint and no enum type, which is why a generator reading `pg_enum` alone never
+saw the depth vocabulary appear.
+
+### Checking semantics against upstream
+
+`inputs/StandardizedFacilityTableSpecification.md` is **owned by
+`RMI/waste_data_ingestion_pipeline`** (`facility_etl/`), not by this repository. It is vendored
+here and pinned to an exact upstream commit recorded in `inputs/SCHEMA_SOURCE.json`, so a rename
+upstream lands as a reviewable diff rather than silently invalidating a run in flight.
+
+```bash
+uv run python scripts/sync_schema.py            # pull upstream main, rewrite the vendored copy
+uv run python scripts/sync_schema.py --check    # network: are we behind upstream?
+uv run python scripts/sync_schema.py --verify   # offline: has the vendored copy been edited?
+```
+
+Do not edit the vendored spec by hand — change it upstream and re-sync. `--verify` and a
+spec-vs-code column check run offline in the test suite; `--check` runs weekly in CI
+(`.github/workflows/schema-drift.yml`), which needs a token that can read the private upstream
+repo, stored as the `UPSTREAM_SCHEMA_TOKEN` secret.
+
+When either source renames or retypes a column, the code bound to it must move in the same commit:
+`STANDARDIZED_FACILITY_COLUMNS`, `ATTRIBUTE_TO_STANDARD_COLUMN` and the attribute sets in
+`schema.py`, the units and guidance in `prompt_builder.py`, the target sets in `unit_converter.py`,
+and the DB column lists in `seed_source.py`. The column test fails until they agree.
+
 ## Wastemap Postgres Database
 
 Connection settings live in `.env` (see `.env.example` for the keys):
@@ -473,9 +546,8 @@ uv run python scripts/seed_metadata_search.py --require-coordinates
 uv run python scripts/seed_metadata_search.py --no-backfill     # latest year verbatim
 ```
 
-`has_biocover` is a 44th standardized column that the published spec does not define yet; it sits
-next to `has_cover` / `cover_types` in `STANDARDIZED_FACILITY_COLUMNS` and must be reordered if the
-real DDL puts it elsewhere.
+`has_biocover` is defined by the spec as of upstream `8c0bb3fe` and sits next to `has_cover` /
+`cover_types` in `STANDARDIZED_FACILITY_COLUMNS`, matching the spec's own column order.
 
 Output is `inputs/consolidated_sites.csv`, in the same shape `load_sites()` and
 `select_mixed_pilot()` already consume, so it drops straight into the Foundry pipeline via
@@ -483,7 +555,7 @@ Output is `inputs/consolidated_sites.csv`, in the same shape `load_sites()` and
 
 ### How duplicate rows are collapsed
 
-Identity columns (`facility_name`, `iso3c_plus`, `area`, `latitude`, `longitude`) are
+Identity columns (`facility_name`, `iso3c_plus`, `area_square_meters`, `latitude`, `longitude`) are
 constant within an `internal_facility_id`, so deduping is lossless for identity. The
 year-varying measurements are not, so the fold:
 
@@ -500,14 +572,15 @@ Backfilling matters for baseline coverage — latest-year-only would drop
 `waste_in_place_metric_tonnes` from 2,499 facilities to 1,137, and
 `annual_incoming_waste_metric_tonnes` from 4,607 to 3,636.
 
-`has_biocover` is not a database column; it is derived from `cover_types` (`organic
-cover` → TRUE, other cover types → FALSE, unknown → blank).
+`has_biocover` is read straight from `consolidated_facility`, which has carried the column
+since upstream `8c0bb3fe`. It is not derived from `cover_types`.
 
 
 ------
 To-dos:
 1) Use source_id in ledger table to find original language site name so that the search can result better data;
-2) Update the standardized facility schema;
+2) ~~Update the standardized facility schema~~ — done: realigned to upstream `8c0bb3fe` and
+   pinned via `scripts/sync_schema.py`, which reports drift against the ETL repo;
 3) Parallel processing; 
 4) Saving search result json files to blob storage;
 5) Process to promote SME validated data into a raw AI_discovery data source;

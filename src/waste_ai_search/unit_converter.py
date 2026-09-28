@@ -26,9 +26,11 @@ CH4_MASS_ATTRIBUTES = {
     "gccs_ch4_flow_to_project_metric_tonnes",
 }
 
-LENGTH_TARGET_ATTRIBUTES = {"waste_depth_meters"}
+# waste_depth still converts to metres here. The spec derives its category FROM a numeric
+# measurement, so the metre value remains the evidence; schema.bucket_waste_depth bins it.
+LENGTH_TARGET_ATTRIBUTES = {"waste_depth"}
 
-AREA_TARGET_ATTRIBUTES = {"area"}
+AREA_TARGET_ATTRIBUTES = {"area_square_meters"}
 
 # A unit has to carry a letter or a unit symbol; bare digits and punctuation are not a unit.
 UNIT_WORD_PATTERN = re.compile(r"[a-z%°]")
@@ -52,8 +54,8 @@ CANONICAL_UNITS = {
     "waste_in_place_metric_tonnes": "metric tonnes",
     "found_latitude": "decimal degrees",
     "found_longitude": "decimal degrees",
-    "waste_depth_meters": "meters",
-    "area": "square meters",
+    "waste_depth": "meters",
+    "area_square_meters": "square meters",
     "gccs_ch4_flared_metric_tonnes": "metric tonnes CH4",
     "gccs_ch4_generated_metric_tonnes": "metric tonnes CH4",
     "gccs_ch4_collected_metric_tonnes": "metric tonnes CH4",
@@ -434,6 +436,11 @@ def parse_coordinate(value: str) -> float | None:
 
 def parse_numbers(value: str) -> tuple[list[float], float]:
     text = value.lower().replace(",", "")
+    # A hyphen BETWEEN two digits is a range separator, not a sign: sources write "3-8 metres"
+    # far more often than they write a negative quantity. Left as-is, "3-8" parses to [3, -8],
+    # which then reads as a negative measurement and the whole value is discarded. A leading
+    # "-5" has no digit before the hyphen and is untouched, so genuine negatives still parse.
+    text = re.sub(r"(?<=\d)\s*-\s*(?=\d)", " to ", text)
     matches = re.findall(r"[-+]?\d*\.?\d+(?:e[-+]?\d+)?", text)
     multiplier = 1.0
     if re.search(r"\b(billion|bn)\b", text):

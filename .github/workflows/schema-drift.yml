@@ -1,0 +1,38 @@
+name: schema drift
+
+# Tells us when RMI/waste_data_ingestion_pipeline has changed the standardized facility
+# spec that this repository's column bindings are written against. It does not sync
+# anything: a schema change needs the code updated alongside it, so the fix is a
+# reviewed PR, not an automatic commit.
+#
+# TOKEN REQUIREMENT
+# The upstream repo is private and belongs to the RMI org, while this repo is personal.
+# The default GITHUB_TOKEN cannot read it and will 404. Create a fine-grained PAT with
+# read access to RMI/waste_data_ingestion_pipeline (Contents: Read) and store it as the
+# repository secret UPSTREAM_SCHEMA_TOKEN. Until that secret exists this workflow fails
+# on every run -- which is why it is scheduled rather than attached to pull requests.
+
+on:
+  schedule:
+    - cron: "0 13 * * 1" # Mondays, 13:00 UTC
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check the vendored spec against upstream
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SCHEMA_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "UPSTREAM_SCHEMA_TOKEN is not set; see the comment at the top of this workflow."
+            exit 1
+          fi
+          python scripts/sync_schema.py --check
