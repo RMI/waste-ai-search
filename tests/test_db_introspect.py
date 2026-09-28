@@ -172,3 +172,14 @@ def test_transfer_station_is_not_emitted_while_the_database_rejects_it():
     # Nothing the map emits may fall outside what the database accepts.
     emitted = {v for v in FACILITY_TYPE_MAP.values() if v is not None}
     assert emitted <= set(FACILITY_TYPE_VALUES)
+
+
+def test_first_present_keeps_a_zero(): 
+    """A zero area is a real value; `or`-chaining silently skipped an int 0 (Copilot review)."""
+    from waste_ai_search.input_loader import first_present
+
+    assert first_present({"a": 0, "b": 999}, "a", "b") == 0
+    assert first_present({"a": "0", "b": "999"}, "a", "b") == "0"
+    assert first_present({"a": "", "b": 999}, "a", "b") == 999
+    assert first_present({"a": None, "b": 999}, "a", "b") == 999
+    assert first_present({}, "a", "b") is None

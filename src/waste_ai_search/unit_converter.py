@@ -436,6 +436,11 @@ def parse_coordinate(value: str) -> float | None:
 
 def parse_numbers(value: str) -> tuple[list[float], float]:
     text = value.lower().replace(",", "")
+    # A hyphen BETWEEN two digits is a range separator, not a sign: sources write "3-8 metres"
+    # far more often than they write a negative quantity. Left as-is, "3-8" parses to [3, -8],
+    # which then reads as a negative measurement and the whole value is discarded. A leading
+    # "-5" has no digit before the hyphen and is untouched, so genuine negatives still parse.
+    text = re.sub(r"(?<=\d)\s*-\s*(?=\d)", " to ", text)
     matches = re.findall(r"[-+]?\d*\.?\d+(?:e[-+]?\d+)?", text)
     multiplier = 1.0
     if re.search(r"\b(billion|bn)\b", text):

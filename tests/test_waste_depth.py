@@ -148,3 +148,63 @@ def test_unconvertible_unit_is_not_binned_or_promoted():
 def test_the_column_is_the_renamed_one():
     assert "waste_depth" in STANDARDIZED_FACILITY_COLUMNS
     assert "waste_depth_meters" not in STANDARDIZED_FACILITY_COLUMNS
+
+
+# --- hyphenated ranges (Copilot review) ----------------------------------------------------
+@pytest.mark.parametrize(
+    "reported,expected",
+    [
+        ("12-18", ">5m"),       # both ends deep
+        ("1-4", "<=5m"),        # both ends shallow
+        ("2.5-4.5", "<=5m"),
+        ("12 - 18", ">5m"),     # spaced hyphen
+    ],
+)
+def test_hyphenated_range_bins_when_both_ends_agree(reported, expected):
+    """Sources write "3-8 metres" constantly. Read as [3, -8] it looked like a negative depth."""
+    assert bucket_waste_depth(reported.replace("-", " to "))[0] == expected
+    _by_attr, rows, _sources, _warn = _extract(reported, "meters")
+    assert rows[0]["mapped_value"] == expected
+
+
+def test_hyphenated_range_straddling_the_boundary_is_null_for_the_right_reason():
+    _by_attr, rows, _sources, _warn = _extract("3-8", "meters")
+    assert rows[0]["mapped_value"] == ""
+    assert rows[0]["promotion_eligible"] == "FALSE"
+    # Why it was dropped lives in mapping_note; exclusion_reason stays the generic "empty after
+    # normalization". The old failure mode called this negative, which was wrong and misleading.
+    assert "straddles" in rows[0]["mapping_note"]
+    assert "negative" not in rows[0]["mapping_note"]
+
+
+def test_hyphenated_range_in_feet_converts_then_bins():
+    _by_attr, rows, _sources, _warn = _extract("20-40", "feet")
+    assert rows[0]["normalized_value"] == "6.096 to 12.192"
+    assert rows[0]["mapped_value"] == ">5m"
+
+
+def test_a_genuine_negative_still_parses_as_negative():
+    """The range fix must not swallow the leading minus on a real negative value."""
+    from waste_ai_search.unit_converter import parse_numbers
+
+    assert parse_numbers("-5")[0] == [-5.0]
+    _by_attr, rows, _sources, _warn = _extract("-5", "meters")
+    assert rows[0]["mapped_value"] == ""
+    assert rows[0]["promotion_eligible"] == "FALSE"
+
+
+# --- bucket labels are not positional (Copilot review) -------------------------------------
+def test_bucket_labels_do_not_depend_on_database_value_order():
+    """WASTE_DEPTH_VALUES comes from the CHECK constraint, whose order carries no meaning.
+
+    Reversing it must not swap shallow and deep, which indexing [0]/[1] would have done.
+    """
+    import waste_ai_search.schema as schema_module
+
+    original = list(schema_module.WASTE_DEPTH_VALUES)
+    try:
+        schema_module.WASTE_DEPTH_VALUES = list(reversed(original))
+        assert bucket_waste_depth("2")[0] == "<=5m"
+        assert bucket_waste_depth("40")[0] == ">5m"
+    finally:
+        schema_module.WASTE_DEPTH_VALUES = original

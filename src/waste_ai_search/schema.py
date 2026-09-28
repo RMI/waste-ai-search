@@ -256,6 +256,18 @@ GCCS_CURRENT_PROJECT_STATUS_MAP = {
 # The spec's boundary: at or below 5 metres is '<=5m', above it is '>5m'.
 WASTE_DEPTH_BOUNDARY_METERS = 5.0
 
+# Named explicitly rather than indexed out of WASTE_DEPTH_VALUES. That list is generated from the
+# CHECK constraint in the order Postgres happens to render it, which carries no meaning: a
+# harmless reordering of the constraint would silently swap shallow and deep on the next
+# regeneration. The constraint decides which labels are *allowed*, not which is which.
+WASTE_DEPTH_SHALLOW = "<=5m"
+WASTE_DEPTH_DEEP = ">5m"
+
+assert {WASTE_DEPTH_SHALLOW, WASTE_DEPTH_DEEP} <= set(WASTE_DEPTH_VALUES), (
+    f"Depth labels {WASTE_DEPTH_SHALLOW!r}/{WASTE_DEPTH_DEEP!r} are not both permitted by the "
+    f"database, which allows {WASTE_DEPTH_VALUES}. Regenerate db_enums.py, then reconcile."
+)
+
 
 def bucket_waste_depth(meters: Any) -> tuple[str | None, str]:
     """Convert a depth already normalized to metres into the spec's depth category.
@@ -281,7 +293,7 @@ def bucket_waste_depth(meters: Any) -> tuple[str | None, str]:
         )
 
     buckets = {
-        WASTE_DEPTH_VALUES[0] if value <= WASTE_DEPTH_BOUNDARY_METERS else WASTE_DEPTH_VALUES[1]
+        WASTE_DEPTH_SHALLOW if value <= WASTE_DEPTH_BOUNDARY_METERS else WASTE_DEPTH_DEEP
         for value in parsed
     }
     if len(buckets) > 1:

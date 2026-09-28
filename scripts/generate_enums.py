@@ -135,13 +135,14 @@ def main() -> int:
 
     rendered = render_module(f"{config.host}/{config.dbname}", enums, constrained)
 
+    stale = False
     if args.check:
         current = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
         if current == rendered:
             print(f"{TARGET.relative_to(ROOT)} is up to date with {config.host}.")
         else:
             print(f"{TARGET.relative_to(ROOT)} is STALE; re-run without --check.")
-            return 1
+            stale = True
     else:
         TARGET.write_text(rendered, encoding="utf-8")
         print(f"Wrote {TARGET.relative_to(ROOT)}")
@@ -152,11 +153,16 @@ def main() -> int:
         print(f"  {column}: {len(constrained[column])} labels (CHECK) -> {constrained[column]}")
     if unexported:
         print(
-            "\nNote: these columns are constrained to a value list but are not exported here.\n"
-            "Add them to CHECK_CONSTRAINT_COLUMNS if the search pipeline should know about them:"
+            "\nThese columns are constrained to a value list but are not exported here, so "
+            "nothing\ndownstream can see them - the same blind spot that hid `waste_depth`. Add "
+            "each to\nCHECK_CONSTRAINT_COLUMNS, or to the enum_backed map if an enum type "
+            "already covers it:"
         )
         for column in unexported:
             print(f"  {column} -> {constrained[column]}")
+
+    if args.check and (stale or unexported):
+        return 1
     return 0
 
 
