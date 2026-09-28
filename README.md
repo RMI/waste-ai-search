@@ -299,13 +299,17 @@ auto-validate. Once a baseline value exists, only Tier 1-2 may override it.
 
 ### Regenerating the categorical enums
 
-Allowed values come from the live Postgres enum types, not a hand-kept list:
+Allowed values come from the live database, not a hand-kept list — from Postgres enum types where
+one exists, and from CHECK constraints on `consolidated_facility` where one does not
+(`waste_depth` is the latter):
 
 ```bash
 uv run python scripts/generate_enums.py    # rewrites src/waste_ai_search/db_enums.py
 ```
 
-Re-run it whenever the database enums change. See
+Re-run it whenever the database vocabularies change. See
+[Standardized Facility Schema](#standardized-facility-schema) for how this fits with the
+vendored spec, and
 [docs/metadata_search_redesign.md](docs/metadata_search_redesign.md) for the full design and the
 accepted risks.
 
@@ -426,6 +430,49 @@ pre-processing command that writes this cache.
 
 ## Standardized Facility Schema
 
+The schema has **two sources of truth, and they cover different things.** Neither one is enough
+on its own.
+
+| | Authoritative for | Read by |
+|---|---|---|
+| **The database** | Column names, types, and which values a categorical column accepts | `scripts/check_db_schema.py`, `scripts/generate_enums.py` |
+| **The vendored spec** | What a column *means*, its units, its numeric ranges, and how a derived value is produced | `scripts/sync_schema.py` |
+
+The database wins on structure, and a rename there breaks this repo immediately — which is
+exactly what happened when `area` became `area_square_meters`: `refresh-seed` started failing
+with *column does not exist* before anyone had touched the spec.
+
+But the database carries **no column comments and no range constraints** on
+`consolidated_facility`, so it cannot tell you what a column means or what a valid number is. The
+clearest case is `waste_depth`. The database says:
+
+```sql
+CHECK (waste_depth IS NULL OR waste_depth = ANY (ARRAY['<=5m', '>5m']))
+```
+
+That gives the two permitted strings. It does **not** say to convert the source's depth to metres
+first, bin at 5 m, or store NULL for a reported zero. Those rules exist only in the spec's prose,
+and getting them from the constraint alone would write a bogus `<=5m` for every source reporting
+a depth of 0.
+
+### Checking structure against the database
+
+```bash
+uv run python scripts/check_db_schema.py       # do the code's columns and vocabularies match?
+uv run python scripts/generate_enums.py        # regenerate src/waste_ai_search/db_enums.py
+uv run python scripts/generate_enums.py --check  # is the committed copy stale?
+```
+
+Both need database access (so, the VPN). Exit `1` means real drift; exit `2` means the database
+could not be reached, so CI can tell a network blip from a genuine mismatch.
+
+`generate_enums.py` reads allowed values from **both** places they live: Postgres enum types, and
+CHECK constraints on `consolidated_facility`. `waste_depth` is only in the second — it is a `text`
+column with a constraint and no enum type, which is why a generator reading `pg_enum` alone never
+saw the depth vocabulary appear.
+
+### Checking semantics against upstream
+
 `inputs/StandardizedFacilityTableSpecification.md` is **owned by
 `RMI/waste_data_ingestion_pipeline`** (`facility_etl/`), not by this repository. It is vendored
 here and pinned to an exact upstream commit recorded in `inputs/SCHEMA_SOURCE.json`, so a rename
@@ -442,7 +489,7 @@ spec-vs-code column check run offline in the test suite; `--check` runs weekly i
 (`.github/workflows/schema-drift.yml`), which needs a token that can read the private upstream
 repo, stored as the `UPSTREAM_SCHEMA_TOKEN` secret.
 
-When a sync renames or retypes a column, the code bound to it must move in the same commit:
+When either source renames or retypes a column, the code bound to it must move in the same commit:
 `STANDARDIZED_FACILITY_COLUMNS`, `ATTRIBUTE_TO_STANDARD_COLUMN` and the attribute sets in
 `schema.py`, the units and guidance in `prompt_builder.py`, the target sets in `unit_converter.py`,
 and the DB column lists in `seed_source.py`. The column test fails until they agree.

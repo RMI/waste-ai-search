@@ -10,6 +10,7 @@ from .db_enums import (
     FACILITY_TYPE_VALUES,
     GCCS_CURRENT_PROJECT_STATUS_VALUES,
     GCCS_ENERGY_PROJECT_TYPE_VALUES,
+    WASTE_DEPTH_VALUES,
 )
 
 
@@ -240,11 +241,13 @@ GCCS_CURRENT_PROJECT_STATUS_MAP = {
 }
 
 # `waste_depth` is the one categorical the spec derives from a numeric source measurement rather
-# than from a source category, so it has no mapping table and is not in ENUM_MAPS. Its values are
-# spec-defined rather than generated into db_enums.py: the live column is `text`, with no Postgres
-# enum type behind it, so there is nothing for scripts/generate_enums.py to read.
-WASTE_DEPTH_VALUES = ["<=5m", ">5m"]
-
+# than from a source category, so it has no mapping table and is not in ENUM_MAPS. Its values come
+# from db_enums.py like every other vocabulary, but via the CHECK constraint on
+# consolidated_facility rather than a Postgres enum type - there is no enum type for this column.
+#
+# The 5m boundary below is NOT in the database. The constraint states the two permitted strings;
+# only the spec says how to produce one from a measurement in metres.
+#
 # The spec's boundary: at or below 5 metres is '<=5m', above it is '>5m'.
 WASTE_DEPTH_BOUNDARY_METERS = 5.0
 
