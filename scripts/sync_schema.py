@@ -97,21 +97,28 @@ def read_provenance() -> dict | None:
 
 
 def summarize(old: str, new: str) -> str:
-    """Report only the spec's column lines, which are what this codebase binds to."""
+    """Report the spec lines this codebase binds to: column definitions AND allowed values.
+
+    Both matter and they look different in the markdown. A column row is "| `name` | type | ... |";
+    an allowed value is "| 'Value' |" in one of the enum tables. Reporting only the first missed
+    'Transfer Station' being added to `facility_type`, which is exactly the kind of change that
+    needs a decision here.
+    """
     diff = list(
         difflib.unified_diff(
             old.splitlines(), new.splitlines(), lineterm="", n=0
         )
     )
-    # Column rows are markdown table lines: "| `column_name` | type | ... |".
-    columns = [
+    bindings = [
         line
         for line in diff
-        if line[:1] in "+-" and line[1:4] == "| `" and not line.startswith(("---", "+++"))
+        if line[:1] in "+-"
+        and not line.startswith(("---", "+++"))
+        and (line[1:4] == "| `" or line[1:4] == "| '")
     ]
-    if not columns:
-        return "  (prose changed; no column definitions added, removed, or renamed)"
-    return "\n".join(f"  {line}" for line in columns)
+    if not bindings:
+        return "  (prose changed; no column definitions or allowed values changed)"
+    return "\n".join(f"  {line}" for line in bindings)
 
 
 def do_sync(ref: str) -> int:

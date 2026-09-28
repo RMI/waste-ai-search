@@ -190,6 +190,11 @@ FACILITY_TYPE_MAP = {
     "legacy landfill": "Dumpsite",
     "incineration facility": "Incineration Facility",
     "incinerator": "Incineration Facility",
+    # The spec added 'Transfer Station' in upstream 5cfeadfa, but the database has NOT: both the
+    # `facility_type` enum type and `chk_facility_type` still list four values, so a row carrying
+    # it would be rejected on load. Kept as None until the database catches up, at which point
+    # generate_enums.py will pick the value up and this line becomes
+    # "transfer station": "Transfer Station".
     "transfer station": None,
     "unknown": None,
 }

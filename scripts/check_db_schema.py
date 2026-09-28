@@ -41,7 +41,7 @@ def main() -> int:
         fetch_enum_values,
     )
     from waste_ai_search.schema import STANDARDIZED_FACILITY_COLUMNS
-    from waste_ai_search.seed_source import IDENTITY_FIELDS, PROVENANCE_FIELDS, TIME_VARYING_FIELDS
+    from waste_ai_search.seed_source import SELECT_FIELDS
 
     config = DatabaseConfig.from_env()
     try:
@@ -66,7 +66,12 @@ def main() -> int:
 
     # 1. Every column the seed SELECTs must exist on consolidated_facility. This is the check that
     #    would have caught `area` -> `area_square_meters` the day it landed.
-    seed_fields = [*IDENTITY_FIELDS, *TIME_VARYING_FIELDS, *PROVENANCE_FIELDS]
+    #
+    #    SELECT_FIELDS is the list that goes into the SQL verbatim, so it is the right thing to
+    #    check. PROVENANCE_FIELDS are deliberately NOT here: reference_year, source_year_min/max,
+    #    source_row_count and backfilled_fields are computed by the fold, and attribute_sources is
+    #    joined from the ledger. None of them is a column on this table.
+    seed_fields = list(SELECT_FIELDS)
     seed_missing, _ = compare_columns(seed_fields, consolidated)
     label = f"{CONSOLIDATION_SCHEMA}.{CONSOLIDATION_TABLE}"
     if seed_missing:

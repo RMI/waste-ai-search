@@ -155,3 +155,20 @@ def test_waste_depth_is_exported_as_a_check_backed_vocabulary():
     assert "waste_depth" in gen.CHECK_CONSTRAINT_COLUMNS
     assert "waste_depth" not in gen.ENUM_TYPES  # there is no enum type for it
     assert DB_ENUMS["waste_depth"] == ["<=5m", ">5m"]
+
+
+def test_transfer_station_is_not_emitted_while_the_database_rejects_it():
+    """The spec (5cfeadfa) lists 'Transfer Station'; the database enum and CHECK do not.
+
+    Emitting it would fail chk_facility_type on load. This pins the deliberate lag so that
+    mapping it through becomes a conscious change, made once the database has the value.
+    """
+    from waste_ai_search.db_enums import FACILITY_TYPE_VALUES
+    from waste_ai_search.schema import FACILITY_TYPE_MAP
+
+    assert "Transfer Station" not in FACILITY_TYPE_VALUES
+    assert FACILITY_TYPE_MAP["transfer station"] is None
+
+    # Nothing the map emits may fall outside what the database accepts.
+    emitted = {v for v in FACILITY_TYPE_MAP.values() if v is not None}
+    assert emitted <= set(FACILITY_TYPE_VALUES)

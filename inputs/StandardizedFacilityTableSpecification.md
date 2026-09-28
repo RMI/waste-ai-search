@@ -146,6 +146,7 @@ less is not a measurement, so it is left `NULL` rather than assigned to a catego
 | 'Controlled Dumpsite' |
 | 'Dumpsite' |
 | 'Incineration Facility' |
+| 'Transfer Station' |
 
 | `waste_depth` |
 | --- |
@@ -194,6 +195,7 @@ all [valid ISO 3166-1 alpha-3 codes](https://www.iso.org/iso-3166-country-codes.
 | 'lmop_2024' | EPA LMOP data from 2024 | [Direct Download](https://www.epa.gov/system/files/documents/2024-09/lmopcompositedata.xlsx) |
 | 'sinir_2024' | SINIR (Brazilian government waste data) landfill/facility dataset, pulled 2024 | |
 | 'manual_entry' | Facilities entered by hand into the production database with no upstream source. Carries no year suffix because the entry year varies per row - see the `year` column, which is sourced per row from the entry timestamp. | |
+| 'kosovo_klmc_2026' | Kosovo disposal site data from the Kosovo Landfill Management Corporation (KLMC), shared with RMI via GIZ in 2026 on RMI's own site-level data collection template. The year suffix is the year we received the submission; the waste quantities it reports are for 2025 (see the `year` column). | |
 
 ## Run Provenance
 
