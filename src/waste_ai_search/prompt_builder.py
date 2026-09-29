@@ -165,6 +165,8 @@ def build_site_prompt(site: dict[str, Any], attributes: list[str] | None = None)
         for key in (
             "site_id",
             "site_name",
+            "original_site_name",
+            "source_language",
             "country_iso3",
             "latitude",
             "longitude",
@@ -244,6 +246,18 @@ def build_site_prompt(site: dict[str, Any], attributes: list[str] | None = None)
 Task:
 Find source-backed data for this waste disposal site. Search in English and in the
 local language, using the site name, coordinates, municipality, and admin names.
+
+Names:
+- site_name has been machine-translated into English. It is often NOT what local
+  sources call this facility, and searching it alone is the most common reason a
+  real site looks like it has no coverage.
+- original_site_name, when present, is the name the source dataset actually
+  recorded, in source_language. Search THIS name in the local language first -
+  permits, municipal records and local news will use it, not the translation.
+- Search both. Treat them as one facility with two names, never as two
+  candidates: agreeing on the translated name alone is not identity confirmation.
+- Return found_site_name exactly as your source spells it, in whatever script or
+  language that source uses. Do not translate it back.
 
 Only the attributes listed below are wanted. Everything else about this facility is
 already known and must not be researched or returned.

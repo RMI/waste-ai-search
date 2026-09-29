@@ -553,6 +553,35 @@ Output is `inputs/consolidated_sites.csv`, in the same shape `load_sites()` and
 `select_mixed_pilot()` already consume, so it drops straight into the Foundry pipeline via
 `--input-csv`.
 
+### Original (untranslated) facility names
+
+`consolidated_facility.facility_name` has already been machine-translated, so a search on it alone
+looks for a string no local source ever wrote. The clearest case in the corpus: the Mexican site
+`DELICIAS` — a city in Chihuahua — reaches the pipeline as `DELICACIES`.
+
+The seed recovers the source's own spelling via `consolidation.value_resolution_ledger`, which
+records which dataset supplied each facility's name and under what `data_source_facility_id`,
+joined back to that dataset's `raw_data.raw_<source>_translated` table:
+
+| Source | Raw table | Join key |
+|---|---|---|
+| `osm_2022` | `raw_osm_translated` | `id` |
+| `eprtr_2022` | `raw_eprtr_translated` | `facilityinspireid` |
+| `mexico_inegi_2016` | `raw_mexico_inegi_translated` | `sdfn_rsur_cvegeo` |
+| `sinir_2024` | `raw_sinir_cities_served_by_landfills_translated` | `facility_code` |
+
+Only these four went through translation. The other seven sources are English-language, so their
+stored name *is* the original — which is why coverage is 14,692 of 19,492 facilities, and why
+**8,040** end up carrying a genuinely different second name.
+
+OSM is the awkward one: it stores a blob of tags rather than a bare name, in two spellings (JSON
+in `name_left`, a Python dict repr in `fixed_name` and `translated`), so `_osm_tag_name` parses
+both and pulls out `name`.
+
+The seed gains `original_site_name`, `source_language` and `name_data_source`, and the prompt
+carries both names with instructions to search the original in the local language first. A
+facility whose original matches its translation is left blank rather than repeating the string.
+
 ### How duplicate rows are collapsed
 
 Identity columns (`facility_name`, `iso3c_plus`, `area_square_meters`, `latitude`, `longitude`) are
@@ -578,7 +607,8 @@ since upstream `8c0bb3fe`. It is not derived from `cover_types`.
 
 ------
 To-dos:
-1) Use source_id in ledger table to find original language site name so that the search can result better data;
+1) ~~Use source_id in ledger table to find original language site name so that the search can result
+   better data~~ — done: see [Original (untranslated) facility names](#original-untranslated-facility-names);
 2) ~~Update the standardized facility schema~~ — done: realigned to upstream `8c0bb3fe` and
    pinned via `scripts/sync_schema.py`, which reports drift against the ETL repo;
 3) Parallel processing; 
