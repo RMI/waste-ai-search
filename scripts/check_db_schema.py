@@ -31,7 +31,7 @@ FALLBACK_TRANSFORMED_TABLE = "transformed_osm"
 
 
 def main() -> int:
-    from waste_ai_search.db import DatabaseConfig
+    from waste_ai_search.db import DatabaseConfig, fetch_all
     from waste_ai_search.db_enums import DB_ENUMS
     from waste_ai_search.db_introspect import (
         CONSOLIDATION_SCHEMA,
@@ -49,6 +49,11 @@ def main() -> int:
         NUMERIC_ARRAY_TARGET_ATTRIBUTES,
         NUMERIC_TARGET_ATTRIBUTES,
         STANDARDIZED_FACILITY_COLUMNS,
+    )
+    from waste_ai_search.source_names import (
+        LEDGER_NAME_COLUMN,
+        RAW_NAME_SOURCES,
+        source_name_sql,
     )
     from waste_ai_search.standardized import TARGET_TABLE
     from waste_ai_search.seed_source import SELECT_FIELDS
@@ -174,6 +179,30 @@ def main() -> int:
             print(f"FAIL  {name} ({source}): committed {committed} != database {live}")
         else:
             print(f"ok    {name} ({source}): {len(committed)} values")
+
+    # 5. The raw-name joins. Every table, join key, name, translation and language column in
+    #    RAW_NAME_SOURCES is named as a string, so a typo in any of them is invisible to the
+    #    offline tests and to every check above -- it would surface as a failure in the middle of
+    #    seed generation. Running each join proves all five names at once.
+    for data_source, spec in RAW_NAME_SOURCES.items():
+        try:
+            matched = fetch_all(
+                f"SELECT count(*) AS n FROM ({source_name_sql(spec)}) t",
+                (LEDGER_NAME_COLUMN, data_source),
+                config=config,
+            )[0]["n"]
+        except Exception as exc:
+            detail = str(exc).splitlines()[0]
+            problems.append(f"raw name join for {data_source} is broken: {detail}")
+            print(f"FAIL  raw name join {data_source}: {detail}")
+            continue
+
+        if matched == 0:
+            # The SQL is valid but nothing joins, so the key column is the wrong one.
+            problems.append(f"raw name join for {data_source} matched 0 rows")
+            print(f"FAIL  raw name join {data_source}: valid SQL but 0 rows matched")
+        else:
+            print(f"ok    raw name join {data_source}: {matched} rows via {spec.table}")
 
     if problems:
         print(f"\n{len(problems)} problem(s). The database is authoritative for structure:")

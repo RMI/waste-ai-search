@@ -4,9 +4,13 @@
 local source ever wrote. The clearest case in the corpus: the Mexican site 'DELICIAS' -- a city in
 Chihuahua -- reaches the pipeline as 'DELICACIES'. Searching that finds nothing.
 
-These are offline. The joins themselves are exercised by scripts/check_db_schema.py against the
-live database; what is pinned here is the extraction, the differs-from-translation rule, and the
-prompt wiring.
+These are offline, and they cannot see a typo in any of the five table and column names each
+source spec carries -- those are plain strings, so a misspelling passes every assertion here and
+then fails during seed generation. `scripts/check_db_schema.py` runs each join against the live
+database for exactly that reason, and fails both when the SQL is invalid and when it is valid but
+matches nothing, which is what a wrong join key looks like.
+
+What is pinned here is the extraction, the differs-from-translation rule, and the prompt wiring.
 """
 from __future__ import annotations
 
@@ -137,3 +141,51 @@ def test_prompt_omits_the_original_name_when_there_is_none():
         attributes=["found_site_name"],
     )
     assert "original_site_name" not in prompt.split("Site context:")[1]
+
+
+# --- conditional names guidance (Copilot review) --------------------------------------------
+def test_english_source_site_is_not_told_its_name_is_a_translation():
+    """11,452 of 19,492 facilities have no original name because their source was English.
+
+    Telling those the stored name is machine-translated teaches the agent to distrust the only
+    valid name it has.
+    """
+    prompt = build_site_prompt(
+        {"site_id": "7", "site_name": "Greenview Landfill", "country_iso3": "CAN"},
+        attributes=["found_site_name"],
+    )
+    assert "machine-translated" not in prompt
+    assert "it has not\n  been translated" in prompt
+    # Nothing should reference a field this site does not carry.
+    assert "original_site_name" not in prompt
+
+
+def test_translated_source_site_still_gets_the_two_name_guidance():
+    prompt = build_site_prompt(
+        {
+            "site_id": "4",
+            "site_name": "DELICACIES",
+            "original_site_name": "DELICIAS",
+            "source_language": "es",
+            "country_iso3": "MEX",
+        },
+        attributes=["found_site_name"],
+    )
+    assert "machine-translated" in prompt
+    assert "Search THIS name in the local language first" in prompt
+    assert "never as two" in prompt
+
+
+def test_blank_original_name_counts_as_absent():
+    """A seed CSV round-trip fills the column with "" rather than dropping it."""
+    prompt = build_site_prompt(
+        {
+            "site_id": "9",
+            "site_name": "Greenview Landfill",
+            "original_site_name": "",
+            "source_language": "",
+            "country_iso3": "CAN",
+        },
+        attributes=["found_site_name"],
+    )
+    assert "machine-translated" not in prompt
