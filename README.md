@@ -549,9 +549,55 @@ uv run python scripts/seed_metadata_search.py --no-backfill     # latest year ve
 `has_biocover` is defined by the spec as of upstream `8c0bb3fe` and sits next to `has_cover` /
 `cover_types` in `STANDARDIZED_FACILITY_COLUMNS`, matching the spec's own column order.
 
+Regenerate it whenever the schema or the consolidation changes — the checked-in copy is the CLI
+default, so a search runs against whatever was last committed. The regeneration for the
+name-provenance fields also grew the corpus from 15,559 to 19,492 facilities, and brought Brazil
+from 303 sites (all with exact locations) to 4,225, of which **3,913 are flagged inexact**. The
+`COORDINATES_ONLY_ISO3` rule that had never matched anything now fires for all 3,913, scoping each
+to a coordinate-only search.
+
 Output is `inputs/consolidated_sites.csv`, in the same shape `load_sites()` and
 `select_mixed_pilot()` already consume, so it drops straight into the Foundry pipeline via
 `--input-csv`.
+
+### Original (untranslated) facility names
+
+`consolidated_facility.facility_name` has already been machine-translated, so a search on it alone
+looks for a string no local source ever wrote. The clearest case in the corpus: the Mexican site
+`DELICIAS` — a city in Chihuahua — reaches the pipeline as `DELICACIES`.
+
+The seed recovers the source's own spelling via `consolidation.value_resolution_ledger`, which
+records which dataset supplied each facility's name and under what `data_source_facility_id`,
+joined back to that dataset's `raw_data.raw_<source>_translated` table:
+
+| Source | Raw table | Join key |
+|---|---|---|
+| `osm_2022` | `raw_osm_translated` | `id` |
+| `eprtr_2022` | `raw_eprtr_translated` | `facilityinspireid` |
+| `mexico_inegi_2016` | `raw_mexico_inegi_translated` | `sdfn_rsur_cvegeo` |
+| `sinir_2024` | `raw_sinir_cities_served_by_landfills_translated` | `facility_code` |
+
+Only these four went through translation. The other seven sources are English-language, so their
+stored name *is* the original. **14,692** of 19,492 facilities match a raw row, and they split
+three ways: **7,992** carry a genuinely different second name, **4,458** translated to themselves
+but keep a known non-English source language, and **2,242** came from a source already in English.
+
+OSM is the awkward one: it stores a blob of tags rather than a bare name, in two spellings (JSON
+in `name_left`, a Python dict repr in `fixed_name` and `translated`), so `_osm_tag_name` parses
+both and pulls out `name`.
+
+The seed gains `original_site_name`, `source_language` and `name_data_source`. Those are two
+independent facts, and the prompt branches on both:
+
+| Seed state | Guidance the agent gets |
+|---|---|
+| Original differs from translation (7,992) | Both names; search the original in the local language first |
+| Translated source, name unchanged (4,458 non-English) | One name, but search it in the recorded ISO 639-1 language too |
+| English-language source (11,452) | One name, stated plainly as the source's own |
+
+A facility whose original matches its translation is left blank rather than repeating the string —
+but its `source_language` is still recorded, because a Portuguese source that translated to itself
+still needs searching in Portuguese.
 
 ### How duplicate rows are collapsed
 
@@ -578,7 +624,8 @@ since upstream `8c0bb3fe`. It is not derived from `cover_types`.
 
 ------
 To-dos:
-1) Use source_id in ledger table to find original language site name so that the search can result better data;
+1) ~~Use source_id in ledger table to find original language site name so that the search can result
+   better data~~ — done: see [Original (untranslated) facility names](#original-untranslated-facility-names);
 2) ~~Update the standardized facility schema~~ — done: realigned to upstream `8c0bb3fe` and
    pinned via `scripts/sync_schema.py`, which reports drift against the ETL repo;
 3) Parallel processing; 

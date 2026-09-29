@@ -31,6 +31,10 @@ WASTE_SITE_BASE_EXTRA_FIELDS = [
     "country_iso3",
     "input_area_square_meters",
     "pilot_selection_reason",
+    # The source's own name for the facility, before translation, and the language it is in.
+    "original_site_name",
+    "source_language",
+    "name_data_source",
     *GEOCODE_FIELDS,
 ]
 

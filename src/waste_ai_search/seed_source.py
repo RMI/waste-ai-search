@@ -194,6 +194,7 @@ def seed_headers() -> list[str]:
         ["facility_id", "year", *IDENTITY_FIELDS, *TIME_VARYING_FIELDS],
         PROVENANCE_FIELDS,
         ["internal_facility_id", "site_id", "site_name", "country_iso3", "input_area_square_meters", "pilot_selection_reason"],
+        ["original_site_name", "source_language", "name_data_source"],
         list(GEOCODE_FIELDS),
     )
 
@@ -221,6 +222,11 @@ def load_seed_sites(
 
     static, dated = load_attribute_sources(config=config)
     attach_attribute_sources(records, static, dated)
+
+    # The stored facility_name has been translated; the original is what local sources use.
+    from .source_names import attach_name_provenance, load_name_provenance
+
+    attach_name_provenance(records, load_name_provenance(config=config))
     records.sort(key=lambda item: int(item["facility_id"]) if item["facility_id"].isdigit() else 0)
     return records
 
