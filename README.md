@@ -549,6 +549,13 @@ uv run python scripts/seed_metadata_search.py --no-backfill     # latest year ve
 `has_biocover` is defined by the spec as of upstream `8c0bb3fe` and sits next to `has_cover` /
 `cover_types` in `STANDARDIZED_FACILITY_COLUMNS`, matching the spec's own column order.
 
+Regenerate it whenever the schema or the consolidation changes — the checked-in copy is the CLI
+default, so a search runs against whatever was last committed. The regeneration for the
+name-provenance fields also grew the corpus from 15,559 to 19,492 facilities, and brought Brazil
+from 303 sites (all with exact locations) to 4,225, of which **3,913 are flagged inexact**. The
+`COORDINATES_ONLY_ISO3` rule that had never matched anything now fires for all 3,913, scoping each
+to a coordinate-only search.
+
 Output is `inputs/consolidated_sites.csv`, in the same shape `load_sites()` and
 `select_mixed_pilot()` already consume, so it drops straight into the Foundry pipeline via
 `--input-csv`.
@@ -571,8 +578,9 @@ joined back to that dataset's `raw_data.raw_<source>_translated` table:
 | `sinir_2024` | `raw_sinir_cities_served_by_landfills_translated` | `facility_code` |
 
 Only these four went through translation. The other seven sources are English-language, so their
-stored name *is* the original — which is why coverage is 14,692 of 19,492 facilities, and why
-**8,040** end up carrying a genuinely different second name.
+stored name *is* the original. **14,692** of 19,492 facilities match a raw row, and they split
+three ways: **7,992** carry a genuinely different second name, **4,458** translated to themselves
+but keep a known non-English source language, and **2,242** came from a source already in English.
 
 OSM is the awkward one: it stores a blob of tags rather than a bare name, in two spellings (JSON
 in `name_left`, a Python dict repr in `fixed_name` and `translated`), so `_osm_tag_name` parses

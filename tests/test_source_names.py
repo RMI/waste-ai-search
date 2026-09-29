@@ -145,10 +145,12 @@ def test_prompt_omits_the_original_name_when_there_is_none():
 
 # --- conditional names guidance (Copilot review) --------------------------------------------
 def test_english_source_site_is_not_told_its_name_is_a_translation():
-    """11,452 of 19,492 facilities have no original name because their source was English.
+    """A site with no translation provenance at all: no original name and no source language.
 
-    Telling those the stored name is machine-translated teaches the agent to distrust the only
-    valid name it has.
+    That is what an English-language source looks like. It is NOT the only way `original_site_name`
+    comes back empty -- a translated source whose name was unchanged also has none, and is covered
+    by test_translated_source_keeps_its_language_when_the_name_is_unchanged. The distinguishing
+    condition here is the absence of `source_language`, not the absence of a name.
     """
     prompt = build_site_prompt(
         {"site_id": "7", "site_name": "Greenview Landfill", "country_iso3": "CAN"},
@@ -246,3 +248,109 @@ def test_provenance_records_language_even_without_a_second_name():
     assert records[0]["original_site_name"] == ""
     assert records[0]["source_language"] == "pt"
     assert records[0]["name_data_source"] == "sinir_2024"
+
+
+# --- load_name_provenance itself (Copilot review) -------------------------------------------
+def _run_load(monkeypatch, rows_by_source):
+    """Drive load_name_provenance with canned ledger/raw join rows instead of a database."""
+    import waste_ai_search.db as db_module
+    from waste_ai_search.source_names import load_name_provenance
+
+    def fake_fetch_all(sql, params=None, config=None):
+        # params is (column_name, data_source); the second selects which source's rows to serve.
+        return rows_by_source.get(params[1], [])
+
+    monkeypatch.setattr(db_module, "fetch_all", fake_fetch_all)
+    return load_name_provenance()
+
+
+def test_load_emits_a_second_name_when_the_spelling_differs(monkeypatch):
+    found = _run_load(monkeypatch, {
+        "eprtr_2022": [{
+            "internal_facility_id": 17924,
+            "original": "Burgenlandischer Mullverband",
+            "translated": "Burgenland Waste Association",
+            "language": "de",
+        }],
+    })
+    assert found[17924]["original_site_name"] == "Burgenlandischer Mullverband"
+    assert found[17924]["source_language"] == "de"
+    assert found[17924]["name_data_source"] == "eprtr_2022"
+
+
+def test_load_treats_a_case_only_difference_as_unchanged(monkeypatch):
+    """Casefold comparison: 'LA BOCANA' and 'La Bocana' are one name, not two."""
+    found = _run_load(monkeypatch, {
+        "eprtr_2022": [{
+            "internal_facility_id": 43,
+            "original": "LA BOCANA",
+            "translated": "La Bocana",
+            "language": "es",
+        }],
+    })
+    assert found[43]["original_site_name"] == ""
+    # The language survives even though no second name is emitted -- the whole point of the fix.
+    assert found[43]["source_language"] == "es"
+
+
+def test_load_keeps_language_for_an_unchanged_non_english_name(monkeypatch):
+    """4,458 facilities in the corpus look like this: translated source, identical spelling."""
+    found = _run_load(monkeypatch, {
+        "sinir_2024": [{
+            "internal_facility_id": 2210,
+            "original": "Dourados engenharia ambienta ltda",
+            "translated": "Dourados engenharia ambienta ltda",
+            "language": "pt",
+        }],
+    })
+    assert found[2210] == {
+        "original_site_name": "",
+        "source_language": "pt",
+        "name_data_source": "sinir_2024",
+    }
+
+
+def test_load_digs_the_name_out_of_an_osm_blob(monkeypatch):
+    found = _run_load(monkeypatch, {
+        "osm_2022": [{
+            "internal_facility_id": 30,
+            "original": "{'landuse': 'landfill', 'name': 'Basural Municipal'}",
+            "translated": "{'landuse': 'landfill', 'name': 'Municipal Garbage Dump'}",
+            "language": "es",
+        }],
+    })
+    assert found[30]["original_site_name"] == "Basural Municipal"
+
+
+def test_load_records_an_unnameable_osm_row_as_language_only(monkeypatch):
+    """A tag blob with no `name` yields no spelling, but the source language is still known."""
+    found = _run_load(monkeypatch, {
+        "osm_2022": [{
+            "internal_facility_id": 29,
+            "original": "{'landuse': 'landfill'}",
+            "translated": "{'landuse': 'landfill'}",
+            "language": "es",
+        }],
+    })
+    assert found[29]["original_site_name"] == ""
+    assert found[29]["source_language"] == "es"
+
+
+def test_load_keeps_the_first_source_when_a_facility_matches_two(monkeypatch):
+    """A facility can join more than one raw table; the first source wins, deterministically."""
+    found = _run_load(monkeypatch, {
+        "osm_2022": [{
+            "internal_facility_id": 77,
+            "original": "{'name': 'Basural'}",
+            "translated": "{'name': 'Garbage dump'}",
+            "language": "es",
+        }],
+        "eprtr_2022": [{
+            "internal_facility_id": 77,
+            "original": "Something Else",
+            "translated": "Other",
+            "language": "de",
+        }],
+    })
+    assert found[77]["name_data_source"] == "osm_2022"
+    assert found[77]["original_site_name"] == "Basural"

@@ -396,12 +396,22 @@ def test_unknown_location_accuracy_is_not_treated_as_inexact():
     assert requested_attributes(unknown) == []
 
 
-def test_the_whole_seed_currently_yields_no_brazilian_searches():
-    """Documents today's state: is_location_exact is TRUE corpus-wide, so the rule matches none."""
+def test_brazilian_sites_are_scoped_to_coordinates_or_skipped():
+    """The COORDINATES_ONLY_ISO3 rule is live now; it used to match nothing.
+
+    This test previously asserted that NO Brazilian site was searched, because `is_location_exact`
+    was TRUE corpus-wide in the seed of the day. Regenerating the seed changed that: Brazil went
+    from 303 sites, all exact, to 4,225 of which 3,913 are flagged inexact. The rule those
+    facilities were written for now fires for every one of them.
+
+    What must hold either way is the shape of the rule: an inexact Brazilian site is searched for
+    coordinates and nothing else, and an exact one is not searched at all.
+    """
     import csv
     from pathlib import Path as _Path
 
-    from waste_ai_search.prompt_builder import requested_attributes
+    from waste_ai_search.prompt_builder import location_is_inexact, requested_attributes
+    from waste_ai_search.schema import COORDINATE_ATTRIBUTES
 
     seed = _Path(__file__).parents[1] / "inputs" / "consolidated_sites.csv"
     if not seed.exists():
@@ -409,7 +419,17 @@ def test_the_whole_seed_currently_yields_no_brazilian_searches():
     with seed.open(encoding="utf-8-sig") as handle:
         bra = [r for r in csv.DictReader(handle) if r["country_iso3"] == "BRA"]
     assert bra, "expected Brazilian sites in the seed"
-    assert all(requested_attributes(r) == [] for r in bra)
+
+    for site in bra:
+        requested = requested_attributes(site)
+        if location_is_inexact(site):
+            assert requested == list(COORDINATE_ATTRIBUTES), (
+                f"BRA site {site['site_id']} should be scoped to coordinates alone, got {requested}"
+            )
+        else:
+            assert requested == [], (
+                f"BRA site {site['site_id']} has an exact location and should not be searched"
+            )
 
 
 def test_sites_with_nothing_to_ask_are_dropped_from_selection(tmp_path):
