@@ -21,7 +21,7 @@ from waste_ai_search.source_names import (
     RAW_NAME_SOURCES,
     _osm_tag_name,
     _plain,
-    attach_original_names,
+    attach_name_provenance,
     source_name_sql,
 )
 
@@ -93,7 +93,7 @@ def test_generated_sql_joins_the_ledger_to_the_raw_table():
 # --- attaching to seed records ------------------------------------------------------------
 def test_attach_fills_blanks_where_no_original_was_found():
     records = [{"internal_facility_id": "1", "facility_id": "1"}]
-    attach_original_names(records, {})
+    attach_name_provenance(records, {})
     assert records[0]["original_site_name"] == ""
     assert records[0]["source_language"] == ""
 
@@ -101,7 +101,7 @@ def test_attach_fills_blanks_where_no_original_was_found():
 def test_attach_matches_on_the_integer_facility_key():
     """Ledger keys are integers; a seed record has already stringified its ids."""
     records = [{"internal_facility_id": "2210", "facility_id": "2210"}]
-    attach_original_names(
+    attach_name_provenance(
         records,
         {2210: {
             "original_site_name": "Lixao Sede",
@@ -189,3 +189,60 @@ def test_blank_original_name_counts_as_absent():
         attributes=["found_site_name"],
     )
     assert "machine-translated" not in prompt
+
+
+# --- translated source with no second spelling (Copilot review) -----------------------------
+def test_translated_source_keeps_its_language_when_the_name_is_unchanged():
+    """6,700 facilities come from a translated source whose name translated to itself.
+
+    They have no second spelling, but 4,458 of them have a known non-English source language.
+    Treating "no original name" as "not translated" discarded it and told them the wrong thing.
+    """
+    prompt = build_site_prompt(
+        {
+            "site_id": "2210",
+            "site_name": "Lixao Municipal",
+            "original_site_name": "",
+            "source_language": "pt",
+            "country_iso3": "BRA",
+        },
+        attributes=["found_site_name"],
+    )
+    assert "'pt' (ISO 639-1)" in prompt
+    assert "Search it in that language as well as in English" in prompt
+    # It is not a translation-mismatch case, and it is not an untranslated-source case.
+    assert "machine-translated" not in prompt
+    assert "it has not\n  been translated" not in prompt
+
+
+def test_english_language_translated_source_is_treated_as_untranslated():
+    """2,242 matched rows carry language 'en'. There is nothing to translate and no other
+    language to search, so they get the plain guidance."""
+    prompt = build_site_prompt(
+        {
+            "site_id": "5",
+            "site_name": "City Landfill",
+            "original_site_name": "",
+            "source_language": "en",
+            "country_iso3": "GBR",
+        },
+        attributes=["found_site_name"],
+    )
+    assert "it has not\n  been translated" in prompt
+    assert "ISO 639-1" not in prompt
+
+
+def test_provenance_records_language_even_without_a_second_name():
+    """The seed must carry source_language independently of original_site_name."""
+    records = [{"internal_facility_id": "2210", "facility_id": "2210"}]
+    attach_name_provenance(
+        records,
+        {2210: {
+            "original_site_name": "",
+            "source_language": "pt",
+            "name_data_source": "sinir_2024",
+        }},
+    )
+    assert records[0]["original_site_name"] == ""
+    assert records[0]["source_language"] == "pt"
+    assert records[0]["name_data_source"] == "sinir_2024"

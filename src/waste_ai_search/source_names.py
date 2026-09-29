@@ -106,17 +106,28 @@ def source_name_sql(spec: RawNameSource) -> str:
     )
 
 
-def load_original_names(config: Any = None) -> dict[Any, dict[str, str]]:
+def load_name_provenance(config: Any = None) -> dict[Any, dict[str, str]]:
     """{internal_facility_id: {original_site_name, source_language, name_data_source}}.
 
-    A facility is included only when an original name was found AND it differs from the
-    translation. An identical pair adds nothing to the prompt but would cost tokens on every
-    search and invite the agent to treat one string as two independent leads.
+    Every facility whose name came from a translated source is included, whether or not a second
+    spelling is emitted. The two facts are independent and were conflated in the first version of
+    this module:
 
-    The comparison is a plain casefold, not an accent-insensitive one. Measured against the full
-    corpus, only 22 of 8,511 differing pairs differ by diacritics or punctuation alone, so folding
-    them would add a Unicode normalization step to suppress 0.3% of rows -- and those 22 still
-    carry the source's own spelling, which is the thing being searched.
+    - **`source_language`** says the name passed through translation from that language. It is
+      recorded for all 14,692 matched facilities, because it tells the agent which language to
+      search in even when the name itself came through unchanged.
+    - **`original_site_name`** is filled only when the source's spelling actually differs from
+      the translation (7,992 facilities). Repeating an identical string costs tokens on every
+      search and invites the agent to treat one name as two independent leads.
+
+    Keying the prompt off the name alone mislabelled the 6,700 facilities in the gap as
+    untranslated and threw away a known language for the 4,458 of those whose source was not
+    already English.
+
+    The difference test is a plain casefold, not an accent-insensitive one. Measured against the
+    full corpus, only 22 of 8,511 differing pairs differ by diacritics or punctuation alone, so
+    folding them would add a Unicode normalization step to suppress 0.3% of rows -- and those 22
+    still carry the source's own spelling, which is the thing being searched.
     """
     from .db import fetch_all
 
@@ -131,25 +142,24 @@ def load_original_names(config: Any = None) -> dict[Any, dict[str, str]]:
                 continue
             original = spec.extract(row["original"])
             translated = spec.extract(row["translated"])
-            if not original or original.casefold() == translated.casefold():
-                continue
+            differs = bool(original) and original.casefold() != translated.casefold()
             found[facility_id] = {
-                "original_site_name": original,
+                "original_site_name": original if differs else "",
                 "source_language": normalize_scalar(row["language"]),
                 "name_data_source": data_source,
             }
     return found
 
 
-def attach_original_names(
-    records: list[dict[str, Any]], originals: dict[Any, dict[str, str]]
+def attach_name_provenance(
+    records: list[dict[str, Any]], provenance: dict[Any, dict[str, str]]
 ) -> None:
-    """Add the original-name fields to seed records in place, blank where none was found."""
+    """Add the name-provenance fields to seed records in place, blank where none was found."""
     from .seed_source import FACILITY_KEY, as_int
 
     for record in records:
         facility_id = as_int(record.get(FACILITY_KEY)) or as_int(record.get("facility_id"))
-        extra = originals.get(facility_id, {})
+        extra = provenance.get(facility_id, {})
         record["original_site_name"] = extra.get("original_site_name", "")
         record["source_language"] = extra.get("source_language", "")
         record["name_data_source"] = extra.get("name_data_source", "")

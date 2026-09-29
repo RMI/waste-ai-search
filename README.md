@@ -578,9 +578,18 @@ OSM is the awkward one: it stores a blob of tags rather than a bare name, in two
 in `name_left`, a Python dict repr in `fixed_name` and `translated`), so `_osm_tag_name` parses
 both and pulls out `name`.
 
-The seed gains `original_site_name`, `source_language` and `name_data_source`, and the prompt
-carries both names with instructions to search the original in the local language first. A
-facility whose original matches its translation is left blank rather than repeating the string.
+The seed gains `original_site_name`, `source_language` and `name_data_source`. Those are two
+independent facts, and the prompt branches on both:
+
+| Seed state | Guidance the agent gets |
+|---|---|
+| Original differs from translation (7,992) | Both names; search the original in the local language first |
+| Translated source, name unchanged (4,458 non-English) | One name, but search it in the recorded ISO 639-1 language too |
+| English-language source (11,452) | One name, stated plainly as the source's own |
+
+A facility whose original matches its translation is left blank rather than repeating the string —
+but its `source_language` is still recorded, because a Portuguese source that translated to itself
+still needs searching in Portuguese.
 
 ### How duplicate rows are collapsed
 

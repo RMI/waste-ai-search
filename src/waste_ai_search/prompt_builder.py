@@ -188,10 +188,14 @@ def build_site_prompt(site: dict[str, Any], attributes: list[str] | None = None)
         for name in attributes
     ]
 
-    # Only sites from the four translated sources carry an original name. For the rest,
-    # site_name IS what the source wrote, and calling it a machine translation would teach the
-    # agent to distrust the only valid name it has.
-    if not is_blank(site.get("original_site_name")):
+    # Three cases, because "came through translation" and "has a second spelling" are separate
+    # facts. A name from a Portuguese source that translated to itself still needs to be searched
+    # in Portuguese, and calling it untranslated throws that away.
+    original_name = normalize_scalar(site.get("original_site_name"))
+    language = normalize_scalar(site.get("source_language"))
+    translated_source = bool(language) and language.lower() not in {"en", "eng", "english"}
+
+    if original_name:
         names_guidance = """
 Names:
 - site_name has been machine-translated into English. It is often NOT what local
@@ -202,6 +206,22 @@ Names:
   municipal records and local news will use it, not the translation.
 - Search both. Treat them as one facility with two names, never as two
   candidates: agreeing on the translated name alone is not identity confirmation.
+- Return found_site_name exactly as your source spells it, in whatever script or
+  language that source uses. Do not translate it back.
+"""
+    elif translated_source:
+        # The name survived translation unchanged - usually a proper noun - so there is no second
+        # spelling to give. The source language is still known and still worth searching in.
+        # The code is passed through rather than mapped to a language name: the corpus carries
+        # 61 distinct ISO 639-1 codes and a hand-kept table of names would rot as sources arrive.
+        names_guidance = f"""
+Names:
+- site_name came from a source written in '{language}' (ISO 639-1) and was
+  unchanged by translation, so it is also the source's own spelling. There is no
+  second name to search.
+- Search it in that language as well as in English. Local permits, municipal
+  records and news coverage are written in it, and are where this site is
+  documented.
 - Return found_site_name exactly as your source spells it, in whatever script or
   language that source uses. Do not translate it back.
 """
