@@ -10,12 +10,12 @@ from .run_context import PipelineConfig, default_run_dir, default_run_id
 from .search import run_search
 
 
-def default_input_csv() -> Path:
-    return Path(__file__).resolve().parents[2] / "inputs" / "consolidated_sites.csv"
-
-
 def add_common(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--input-csv", default=str(default_input_csv()), help="Seed CSV.")
+    parser.add_argument(
+        "--input-csv",
+        default="",
+        help="Seed CSV. Omit to seed straight from consolidation.consolidated_facility.",
+    )
     parser.add_argument("--run-id", default="", help="Run identifier; also the output directory name.")
     parser.add_argument("--run-dir", default="", help="Override the output directory.")
     parser.add_argument("--dataset-version", default="waste_ai_search_v0.2")
@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
 def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: bool) -> int:
     import csv
 
-    from .input_loader import load_sites
+    from .input_loader import resolve_sites
     from .prompt_builder import requested_attributes
     from .seed_refresh import refresh_sites, write_refreshed_seed
 
@@ -121,7 +121,7 @@ def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: b
         print(f"No resolved.csv in {config.run_dir}. Run arbitrate first.")
         return 1
 
-    sites, headers = load_sites(config.input_csv)
+    sites, headers = resolve_sites(config)
     with resolved_path.open(newline="", encoding="utf-8-sig") as handle:
         resolved_rows = [dict(row) for row in csv.DictReader(handle)]
 
@@ -143,7 +143,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
     run_id = args.run_id or default_run_id()
     run_dir = Path(args.run_dir).expanduser().resolve() if args.run_dir else default_run_dir(run_id)
     return PipelineConfig(
-        input_csv=Path(args.input_csv).expanduser().resolve(),
+        input_csv=Path(args.input_csv).expanduser().resolve() if args.input_csv else None,
         run_dir=run_dir,
         run_id=run_id,
         dataset_version=args.dataset_version,
@@ -174,7 +174,7 @@ def run_everything(config: PipelineConfig, followup: bool = True) -> int:
     import csv
 
     from .arbitrate import run_arbitration
-    from .input_loader import load_sites
+    from .input_loader import resolve_sites
     from .prompt_builder import has_gas_collection
     from .schema import GCCS_ATTRIBUTES, normalize_scalar
     from .search import run_search
@@ -192,7 +192,7 @@ def run_everything(config: PipelineConfig, followup: bool = True) -> int:
     with resolved_path.open(newline="", encoding="utf-8-sig") as handle:
         resolved_rows = [dict(row) for row in csv.DictReader(handle)]
 
-    sites, headers = load_sites(config.input_csv)
+    sites, headers = resolve_sites(config)
     before = {
         normalize_scalar(site.get("site_id")): has_gas_collection(site) for site in sites
     }

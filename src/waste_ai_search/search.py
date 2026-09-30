@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .geocoder import enrich_sites_from_cache
-from .input_loader import load_sites, write_csv_records
+from .input_loader import resolve_sites, snapshot_seed, write_csv_records
 from .pilot_selector import select_mixed_pilot
 from .prompt_builder import build_site_prompt, coordinates_only, requested_attributes
 from .run_context import (
@@ -96,7 +96,13 @@ def run_search(
     `only_attributes` narrows what is asked - a follow-up asks for the attributes the first pass
     unlocked, not the whole set again.
     """
-    sites, _headers = load_sites(config.input_csv)
+    sites, headers = resolve_sites(config)
+    # A database-seeded run has no input file to point back at, so it records the corpus it
+    # actually read. Skipped when a CSV was supplied, which is already that record.
+    snapshot = snapshot_seed(config, sites, headers)
+    if snapshot is not None:
+        print(f"Seeded {len(sites)} facilities from the database; snapshot: {snapshot}")
+
     selected = select_sites(sites, config)
     if not selected:
         raise ValueError("No sites matched the selection filters.")

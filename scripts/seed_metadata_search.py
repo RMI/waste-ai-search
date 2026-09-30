@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output-csv",
-        default=str(ROOT / "inputs" / "consolidated_sites.csv"),
+        default=str(ROOT / "outputs" / "consolidated_sites.csv"),
         help="Destination seed CSV.",
     )
     parser.add_argument(

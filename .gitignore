@@ -9,5 +9,3 @@ data/geocode_cache.jsonl
 
 .DS_Store
 
-# Ad-hoc seeds generated for one-off verification runs.
-inputs/*_test.csv

@@ -3,8 +3,8 @@
 
 The spec is owned by RMI/waste_data_ingestion_pipeline, which generates the
 standardized facility table this repository searches against. Rather than track a
-floating pointer at upstream `main`, the spec is vendored into `inputs/` and pinned to
-the exact upstream commit recorded in `inputs/SCHEMA_SOURCE.json`. A rename or a type
+floating pointer at upstream `main`, the spec is vendored into `schema/` and pinned to
+the exact upstream commit recorded in `schema/SCHEMA_SOURCE.json`. A rename or a type
 change upstream therefore lands as a reviewable diff here instead of silently
 invalidating a run already in flight.
 
@@ -35,8 +35,8 @@ ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_REPO = "RMI/waste_data_ingestion_pipeline"
 UPSTREAM_PATH = "facility_etl/StandardizedFacilityTableSpecification.md"
 
-TARGET = ROOT / "inputs" / "StandardizedFacilityTableSpecification.md"
-PROVENANCE = ROOT / "inputs" / "SCHEMA_SOURCE.json"
+TARGET = ROOT / "schema" / "StandardizedFacilityTableSpecification.md"
+PROVENANCE = ROOT / "schema" / "SCHEMA_SOURCE.json"
 
 
 class UpstreamError(RuntimeError):

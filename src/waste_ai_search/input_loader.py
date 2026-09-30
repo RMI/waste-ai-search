@@ -71,3 +71,37 @@ def write_csv_records(path: Path, rows: list[dict[str, Any]], headers: list[str]
         writer.writeheader()
         writer.writerows(rows)
 
+
+
+def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
+    """The run's seed, from the database by default or from a CSV when one is configured.
+
+    The database is the source of truth, so a run reads it directly rather than depending on a
+    checked-in export that is stale the moment consolidation moves. `--input-csv` stays for two
+    cases that still need a file: pinning an exact corpus, and the gas-collection follow-up,
+    which rewrites the seed between passes.
+
+    Country filtering is pushed into SQL rather than applied after loading, so a single-country
+    run stops pulling the whole corpus to keep a handful of rows.
+    """
+    if config.input_csv is not None:
+        return load_sites(config.input_csv)
+
+    from .seed_source import load_seed_sites, seed_headers
+
+    sites = load_seed_sites(iso3=config.iso3 or None)
+    return sites, seed_headers()
+
+
+def snapshot_seed(config: Any, sites: list[dict[str, Any]], headers: list[str]) -> Path | None:
+    """Record what a database-seeded run actually searched, inside the run directory.
+
+    Without this a run is not reproducible: the corpus moves under you between runs and nothing
+    says which version produced a given output. A CSV-seeded run already has that file, so it is
+    skipped there.
+    """
+    if config.input_csv is not None:
+        return None
+    path = config.run_dir / "seed.csv"
+    write_csv_records(path, sites, headers)
+    return path
