@@ -61,11 +61,39 @@ uv --cache-dir .uv-cache run scripts/check_environment.py
 Default outputs:
 
 ```text
-inputs/pilot_sites.csv
+outputs/runs/<run_id>/seed.csv
 outputs/runs/<run_id>/<run_id>_candidate.xlsx
 outputs/runs/<run_id>/raw_foundry_responses/site_<site_id>.json
 outputs/runs/<run_id>/status/site_<site_id>.json
 ```
+
+## Seeding
+
+`search` and `run` read `consolidation.consolidated_facility` directly. There is no seed file to
+generate or keep current, and no `inputs/` folder — the database is the source of truth, and a
+checked-in export is stale the moment consolidation moves.
+
+```bash
+uv run python -m waste_ai_search.cli run --iso3 MEX      # seeds from the database
+uv run python -m waste_ai_search.cli run --input-csv seed.csv   # pinned corpus instead
+```
+
+`--iso3` is pushed into SQL, so a single-country run reads only that country rather than pulling
+all 19,492 facilities to keep 83.
+
+**A run reads the database once.** The first read is written to
+`outputs/runs/<run_id>/seed.csv`, and every later phase of that run reads the snapshot instead of
+querying again — both arbitrations, the refresh between passes, a resumed search, and a standalone
+`arbitrate`. So every phase sees the corpus the search ran against, `arbitrate` stays offline, and
+`seed_source` in the workbook's Run_Config records where the run is pinned.
+
+A run id is therefore pinned to its corpus. To seed afresh, use a new `--run-id`.
+
+`--input-csv` remains for two cases: pinning an exact corpus, and the gas-collection follow-up,
+which rewrites the seed between passes into the run directory.
+
+A run therefore needs database access. Without the VPN, seed a file first with
+`scripts/seed_metadata_search.py` and pass it with `--input-csv`.
 
 ## Run The Metadata Search
 
@@ -473,9 +501,9 @@ saw the depth vocabulary appear.
 
 ### Checking semantics against upstream
 
-`inputs/StandardizedFacilityTableSpecification.md` is **owned by
+`schema/StandardizedFacilityTableSpecification.md` is **owned by
 `RMI/waste_data_ingestion_pipeline`** (`facility_etl/`), not by this repository. It is vendored
-here and pinned to an exact upstream commit recorded in `inputs/SCHEMA_SOURCE.json`, so a rename
+here and pinned to an exact upstream commit recorded in `schema/SCHEMA_SOURCE.json`, so a rename
 upstream lands as a reviewable diff rather than silently invalidating a run in flight.
 
 ```bash
@@ -556,8 +584,9 @@ from 303 sites (all with exact locations) to 4,225, of which **3,913 are flagged
 `COORDINATES_ONLY_ISO3` rule that had never matched anything now fires for all 3,913, scoping each
 to a coordinate-only search.
 
-Output is `inputs/consolidated_sites.csv`, in the same shape `load_sites()` and
-`select_mixed_pilot()` already consume, so it drops straight into the Foundry pipeline via
+This is now **optional**. `search` and `run` read `consolidation.consolidated_facility` directly,
+so no file is needed to start a run. Use this script only to pin a corpus you want to re-run
+later, or to work offline; it writes to `outputs/consolidated_sites.csv` and is fed back with
 `--input-csv`.
 
 ### Original (untranslated) facility names

@@ -1,7 +1,7 @@
 """Emit a spec-conformant standardized facility table from arbitrated results.
 
-Shape follows `inputs/StandardizedFacilityTableSpecification.md` (vendored and pinned - see
-`inputs/SCHEMA_SOURCE.json`) and the live `transformed.transformed_*` tables: the spec's 43
+Shape follows `schema/StandardizedFacilityTableSpecification.md` (vendored and pinned - see
+`schema/SCHEMA_SOURCE.json`) and the live `transformed.transformed_*` tables: the spec's 43
 columns plus `point`, one `data_source` per table.
 
 Three accepted deviations from the spec, all settled deliberately:

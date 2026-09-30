@@ -15,8 +15,8 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = ROOT / "inputs" / "StandardizedFacilityTableSpecification.md"
-PROVENANCE = ROOT / "inputs" / "SCHEMA_SOURCE.json"
+SPEC = ROOT / "schema" / "StandardizedFacilityTableSpecification.md"
+PROVENANCE = ROOT / "schema" / "SCHEMA_SOURCE.json"
 
 
 @pytest.fixture(scope="module")
@@ -37,7 +37,7 @@ def test_vendored_spec_matches_its_pin(provenance: dict) -> None:
     assert actual == provenance["sha256"], (
         "The vendored spec no longer matches the commit it is pinned to. It is owned by "
         "the upstream ETL repo -- change it there and re-run scripts/sync_schema.py "
-        "rather than editing inputs/ directly."
+        "rather than editing schema/ directly."
     )
 
 

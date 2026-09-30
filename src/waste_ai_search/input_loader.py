@@ -71,3 +71,70 @@ def write_csv_records(path: Path, rows: list[dict[str, Any]], headers: list[str]
         writer.writeheader()
         writer.writerows(rows)
 
+
+
+def run_seed_path(config: Any) -> Path:
+    """Where a database-seeded run keeps the corpus it read."""
+    return config.run_dir / "seed.csv"
+
+
+def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
+    """The run's seed: an explicit CSV, else this run's own snapshot, else the live database.
+
+    The database is the source of truth, so a new run reads it directly rather than depending on
+    a checked-in export that is stale the moment consolidation moves. But it reads it ONCE. The
+    first read is written to the run directory, and every later phase of the same run - both
+    arbitrations, the refresh between passes, a resumed search, a standalone `arbitrate` -
+    reads that snapshot instead of querying again.
+
+    Without that, each phase could see a different corpus from the one the search ran against,
+    the snapshot would record something nothing used, and `arbitrate`, which the CLI promises is
+    offline, would need the database.
+
+    `--input-csv` still wins for the two cases that need a file: pinning a corpus, and the
+    gas-collection follow-up, which rewrites the seed between passes. Country filtering on the
+    first read is pushed into SQL rather than applied after loading.
+    """
+    if config.input_csv is not None:
+        return load_sites(config.input_csv)
+
+    snapshot = run_seed_path(config)
+    if snapshot.exists():
+        return load_sites(snapshot)
+
+    from .seed_source import load_seed_sites, seed_headers
+
+    sites = load_seed_sites(iso3=config.iso3 or None)
+    headers = seed_headers()
+    write_snapshot_atomically(snapshot, sites, headers)
+    return sites, headers
+
+
+def write_snapshot_atomically(path: Path, rows: list[dict[str, Any]], headers: list[str]) -> None:
+    """Write the run's seed so that `path` only ever exists complete.
+
+    The snapshot's existence is what pins a run, so a write interrupted halfway - Ctrl-C, a full
+    disk, or the OneDrive client this repository lives under touching the file mid-write - would
+    otherwise leave a truncated corpus that every later phase trusts and never re-queries. The rows
+    go to a temporary file in the same directory, which is then renamed over `path`; a rename on
+    one filesystem is atomic, so a reader sees the old state or the finished file, never a partial
+    one. On failure the temporary file is removed and `path` is left untouched.
+    """
+    import os
+
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        write_csv_records(temporary, rows, headers)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def describe_seed(config: Any) -> str:
+    """Where resolve_sites WILL read from, for logs and the workbook's Run_Config."""
+    if config.input_csv is not None:
+        return str(config.input_csv)
+    if run_seed_path(config).exists():
+        return f"consolidation.consolidated_facility, pinned in {run_seed_path(config)}"
+    return "consolidation.consolidated_facility (live)"

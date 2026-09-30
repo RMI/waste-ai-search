@@ -26,7 +26,10 @@ SEARCH_TOOL_RETRY_DELAY_SECONDS = 20.0
 
 @dataclass
 class PipelineConfig:
-    input_csv: Path
+    # None means seed straight from consolidation.consolidated_facility. A path is used for a
+    # pinned or offline run, and by the gas-collection follow-up, which writes a modified seed
+    # into the run directory and points pass 2 at it.
+    input_csv: Path | None
     run_dir: Path
     run_id: str
     dataset_version: str = "waste_ai_search_v0.2"
