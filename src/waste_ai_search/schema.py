@@ -103,11 +103,11 @@ NO_CONTRADICTION_FOUND = "No contradiction found"
 SITE_TYPE_CONTRADICTION_VALUES = [SITE_TYPE_CONTRADICTED, NO_CONTRADICTION_FOUND]
 CONTRADICTION_CHECK_ATTRIBUTES = [SITE_TYPE_CONTRADICTION]
 
-# Asked only where nothing independently confirms a disposal site exists. As written in WP-525
-# that is OSM-only facilities: 6,848 of 19,492, all with no operational baseline at all.
-# gpw_2021 (Global Plastic Watch, also Tier 4) meets the same no-corroboration test and would add
-# 1,716 more; it is left out pending a decision on the ticket, and adding it is this one line.
-CONTRADICTION_CHECK_SOURCES = {"osm_2022"}
+# Asked only where nothing independently confirms a disposal site exists: facilities whose every
+# contributing source is one of these Tier 4 datasets. OSM is a crowd-mapped polygon and Global
+# Plastic Watch a satellite detection, and neither says anything about what the site is used for.
+# Together 8,564 of 19,492 facilities, none with an operational baseline.
+CONTRADICTION_CHECK_SOURCES = {"osm_2022", "gpw_2021"}
 
 # What counts as corroboration. `area_square_meters` is deliberately absent: for an OSM site it is
 # measured from the same polygon that is in question, so it corroborates nothing. Once a pass has

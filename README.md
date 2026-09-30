@@ -291,9 +291,10 @@ being forced into a wrong category.
 
 ### Site-type contradictions (WP-525)
 
-6,848 facilities (35% of the corpus) come from OSM alone, with nothing but a name and a
-coordinate. An OSM `landuse=landfill` polygon can be a quarry or a construction yard, so for those
-facilities the agent is also asked `site_type_contradiction`.
+8,564 facilities (44% of the corpus) come only from OSM (6,848) or Global Plastic Watch (1,716),
+with nothing but a name and a coordinate. A crowd-mapped `landuse=landfill` polygon or a satellite
+detection says nothing about what a site is used for — it can be a quarry or a construction yard —
+so for those facilities the agent is also asked `site_type_contradiction`.
 
 It is a **contradiction detector, not a verifier**. The agent answers only when a source
 positively says the site was never a waste facility, and the only value it can return is
@@ -310,9 +311,8 @@ the verdict never reaches the standardized table or the next pass's seed. The wo
 **Contradictions** tab lists them, and flags any where the same run also found the site closed,
 since that is the likeliest misreading.
 
-Only OSM-only facilities with no corroborating attribute are asked, so the other 12,644 prompts
-carry none of this. `gpw_2021` meets the same no-corroboration test (1,716 more facilities) and is
-left out as written; adding it is one line in `CONTRADICTION_CHECK_SOURCES`.
+Only facilities whose every source is in `CONTRADICTION_CHECK_SOURCES` and that have no
+corroborating attribute are asked, so the other 10,928 prompts carry none of this.
 
 ### Outputs
 

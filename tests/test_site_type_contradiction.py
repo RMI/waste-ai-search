@@ -307,10 +307,19 @@ def test_a_site_with_a_second_source_is_not_asked():
     assert not needs_contradiction_check(osm_site(contributing_data_sources="osm_2022+eprtr_2022"))
 
 
-def test_regulator_backed_and_gpw_sites_are_not_asked_as_written():
-    """WP-525 scopes to OSM. gpw_2021 meets the same test and is a one-line decision, not a default."""
+def test_a_gpw_only_site_is_asked_too():
+    """A satellite detection says nothing about use either, so it gets the same check."""
+    assert needs_contradiction_check(osm_site(contributing_data_sources="gpw_2021"))
+
+
+def test_osm_plus_gpw_is_still_uncorroborated():
+    """Two Tier 4 detections of the same polygon do not corroborate what it is used for."""
+    assert needs_contradiction_check(osm_site(contributing_data_sources="osm_2022+gpw_2021"))
+
+
+def test_a_regulator_backed_site_is_not_asked():
     assert not needs_contradiction_check(osm_site(contributing_data_sources="lmop_2024"))
-    assert not needs_contradiction_check(osm_site(contributing_data_sources="gpw_2021"))
+    assert not needs_contradiction_check(osm_site(contributing_data_sources="gpw_2021+eprtr_2022"))
 
 
 def test_a_corroborated_site_prompt_carries_none_of_the_guidance():
