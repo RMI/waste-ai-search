@@ -289,30 +289,35 @@ Allowed categorical values come from the **live Postgres enums** — regenerate 
 `scripts/generate_enums.py`. Anything outside them maps to NULL with a parse warning rather than
 being forced into a wrong category.
 
-### Site-type contradictions (WP-525)
+### Not a waste facility (WP-525)
 
 8,564 facilities (44% of the corpus) come only from OSM (6,848) or Global Plastic Watch (1,716),
 with nothing but a name and a coordinate. A crowd-mapped `landuse=landfill` polygon or a satellite
-detection says nothing about what a site is used for — it can be a quarry or a construction yard —
-so for those facilities the agent is also asked `site_type_contradiction`.
+detection says nothing about what a site is used for — it can be a quarry or a construction yard.
 
-It is a **contradiction detector, not a verifier**. The agent answers only when a source
-positively says the site was never a waste facility, and the only value it can return is
-`Contradicted`. Finding nothing is recorded as *No contradiction found* — never as a negative,
+For those facilities only, `facility_type` has a fifth allowed value, **`Not a Waste Facility`**.
+The agent returns it only when a source positively says the site is, and always was, something
+else. It is a contradiction, not a verification: finding nothing leaves `facility_type` empty,
 because small informal dumps routinely have no web presence at all.
 
 **A closed, capped or redeveloped landfill is not a contradiction.** It keeps emitting methane for
-decades, which is why WasteMAP tracks it. "It's a park now" is reported as `facility_status =
-Inactive` with a `closing_year`. The question is *was this ever a waste disposal site?*, not *is it
-operating today?*
+decades, which is why WasteMAP tracks it. A landfill that is now a park keeps its landfill type,
+with closure in `facility_status = Inactive` and `closing_year`. The question is *was this ever a
+waste disposal site?*, not *is it operating today?*
 
-Every `Contradicted` verdict goes to review, whatever its tier — nothing is deleted or edited, and
-the verdict never reaches the standardized table or the next pass's seed. The workbook's
-**Contradictions** tab lists them, and flags any where the same run also found the site closed,
-since that is the likeliest misreading.
+The value is **promoted like any facility_type**, so it reaches the standardized table and the next
+pass's seed. Every such verdict is also routed to review whatever its tier, and the workbook's
+**Contradictions** tab lists them, flagging any where the same run also found the site closed —
+the likeliest misreading.
 
-Only facilities whose every source is in `CONTRADICTION_CHECK_SOURCES` and that have no
-corroborating attribute are asked, so the other 10,928 prompts carry none of this.
+> **Pending upstream.** The database's `facility_type` enum and `chk_facility_type` do not carry
+> `Not a Waste Facility` yet, so a load containing it will be rejected — and `COPY` is
+> all-or-nothing, so one such row blocks the whole run's load. `check_db_schema.py` warns about it.
+> The value needs adding upstream in `waste_data_ingestion_pipeline`, ideally alongside creating
+> `transformed.transformed_ai_search`, which does not exist yet either.
+
+Facilities with any other source, or any corroborating attribute, are never offered the value, so
+the other 10,928 prompts carry the four database values and none of this guidance.
 
 ### Outputs
 

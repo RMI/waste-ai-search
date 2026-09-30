@@ -7,8 +7,8 @@ from .credibility import SOURCE_TYPES, TIER_DEFINITIONS
 from .schema import (
     CONTRADICTION_CHECK_SOURCES,
     CORROBORATING_ATTRIBUTES,
-    SITE_TYPE_CONTRADICTED,
-    SITE_TYPE_CONTRADICTION,
+    FACILITY_TYPE_ALLOWED,
+    NOT_A_WASTE_FACILITY,
     COORDINATES_ONLY_ISO3,
     COORDINATE_ATTRIBUTES,
     DEFINITION_VALUES,
@@ -97,24 +97,27 @@ ATTRIBUTE_GUIDANCE = {
         "Fraction of generated landfill gas that is collected, as a value between 0 and 1. "
         "If the source gives a percentage, report the number and set unit to '%'."
     ),
-    SITE_TYPE_CONTRADICTION: (
-        f"Return this ONLY if a source positively states this site is, and always was, something "
-        f"other than a waste disposal facility - for example a quarry, a mine, an aggregate or "
-        f"construction yard that never accepted waste, or a feature mapped in the wrong place. "
-        f"The value must be exactly '{SITE_TYPE_CONTRADICTED}'; describe what the site actually is "
-        f"in evidence_summary and quote the source. "
-        f"A CLOSED, CAPPED, RECLAIMED, REVEGETATED OR REDEVELOPED LANDFILL IS STILL A WASTE "
-        f"DISPOSAL FACILITY AND IS NOT A CONTRADICTION: buried waste keeps generating methane for "
-        f"decades, which is why the site is tracked. A landfill that is now a park, a solar farm or "
-        f"a sports ground is reported through facility_status = Inactive and closing_year, and this "
-        f"attribute is omitted. The question is 'was this ever a waste disposal site?', not 'is it "
-        f"operating today?'. If no source says the site was never a waste facility, omit this "
-        f"attribute entirely - finding nothing about a site is not evidence against it."
-    ),
     "found_site_name": "The source's exact official or canonical name for this facility.",
     "found_latitude": "Source-reported latitude only. Never infer from an address or nearby place.",
     "found_longitude": "Source-reported longitude only. Never infer from an address or nearby place.",
 }
+
+
+# Appended to facility_type's guidance only for facilities nothing independently confirms (WP-525).
+NOT_A_WASTE_FACILITY_GUIDANCE = (
+    f" This site is known only from a map or satellite detection, so its type is unconfirmed. If "
+    f"a source positively states it is, and always was, something other than a waste disposal "
+    f"facility - a quarry, a mine, an aggregate or construction yard that never accepted waste, or "
+    f"a feature mapped in the wrong place - return facility_type = '{NOT_A_WASTE_FACILITY}', "
+    f"describe what the site actually is in evidence_summary, and quote the source. "
+    f"A CLOSED, CAPPED, RECLAIMED, REVEGETATED OR REDEVELOPED LANDFILL IS STILL A WASTE DISPOSAL "
+    f"FACILITY: buried waste keeps generating methane for decades, which is why the site is "
+    f"tracked. A landfill that is now a park, a solar farm or a sports ground keeps its landfill "
+    f"or dumpsite type, and its closure goes in facility_status = Inactive and closing_year. The "
+    f"question is 'was this ever a waste disposal site?', not 'is it operating today?'. If no "
+    f"source says the site was never a waste facility, never return '{NOT_A_WASTE_FACILITY}' - "
+    f"finding nothing about a site is not evidence against it."
+)
 
 
 # Name fragments that signal a closed site, so the prompt can push on closing_year up front.
@@ -190,8 +193,6 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
         if field in GCCS_ATTRIBUTES and not gas_present:
             continue
         requested.append(field)
-    if needs_contradiction_check(site):
-        requested.append(SITE_TYPE_CONTRADICTION)
     return requested
 
 
@@ -217,11 +218,24 @@ def build_site_prompt(site: dict[str, Any], attributes: list[str] | None = None)
         if site.get(key)
     }
 
+    # Only a facility nothing confirms is offered "Not a Waste Facility". Every other prompt carries
+    # the four database values and none of the addendum.
+    unconfirmed_type = needs_contradiction_check(site)
+
+    def guidance_for(name: str) -> str:
+        text = ATTRIBUTE_GUIDANCE.get(name, "")
+        if name == "facility_type" and unconfirmed_type:
+            text = (
+                f"Allowed values only: {', '.join(FACILITY_TYPE_ALLOWED)}."
+                + NOT_A_WASTE_FACILITY_GUIDANCE
+            )
+        return text
+
     targets = [
         {
             "attribute_name": name,
             "unit": ATTRIBUTE_UNITS.get(name, ""),
-            "guidance": ATTRIBUTE_GUIDANCE.get(name, ""),
+            "guidance": guidance_for(name),
         }
         for name in attributes
     ]
@@ -324,10 +338,12 @@ Names:
         "value_basis": DEFINITION_VALUES["value_basis"],
         "confidence_score": DEFINITION_VALUES["confidence_score"],
     }
-    if SITE_TYPE_CONTRADICTION in attributes:
-        # Only "Contradicted" is ever returned; "No contradiction found" is what the pipeline
-        # records when the attribute is omitted, so offering it would invite a sourceless answer.
-        definitions[SITE_TYPE_CONTRADICTION] = [SITE_TYPE_CONTRADICTED]
+    if not unconfirmed_type:
+        # DEFINITION_VALUES carries the pending value for the workbook; a prompt that is not
+        # offering it must not list it either.
+        definitions["facility_type"] = [
+            value for value in definitions["facility_type"] if value != NOT_A_WASTE_FACILITY
+        ]
 
     return f"""You are a waste-sector data discovery agent for WasteMAP.
 

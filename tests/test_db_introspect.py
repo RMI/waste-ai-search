@@ -169,9 +169,24 @@ def test_transfer_station_is_not_emitted_while_the_database_rejects_it():
     assert "Transfer Station" not in FACILITY_TYPE_VALUES
     assert FACILITY_TYPE_MAP["transfer station"] is None
 
-    # Nothing the map emits may fall outside what the database accepts.
+    # Nothing the map emits may fall outside what the database accepts - except values explicitly
+    # declared as waiting on an upstream enum change. That list is the only way past this check,
+    # so a stray value still fails here rather than at load time.
+    from waste_ai_search.schema import PENDING_UPSTREAM_FACILITY_TYPES
+
     emitted = {v for v in FACILITY_TYPE_MAP.values() if v is not None}
-    assert emitted <= set(FACILITY_TYPE_VALUES)
+    assert emitted <= set(FACILITY_TYPE_VALUES) | set(PENDING_UPSTREAM_FACILITY_TYPES)
+
+
+def test_the_only_pending_upstream_facility_type_is_not_a_waste_facility():
+    """Pins the exception. Adding to it is a deliberate decision to emit a value the DB rejects."""
+    from waste_ai_search.db_enums import FACILITY_TYPE_VALUES
+    from waste_ai_search.schema import PENDING_UPSTREAM_FACILITY_TYPES
+
+    assert PENDING_UPSTREAM_FACILITY_TYPES == ["Not a Waste Facility"]
+    # Once the database carries it, generate_enums.py picks it up and it stops being pending:
+    # this assertion then fails, prompting its removal from the pending list.
+    assert "Not a Waste Facility" not in FACILITY_TYPE_VALUES
 
 
 def test_first_present_keeps_a_zero(): 

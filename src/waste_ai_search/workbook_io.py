@@ -79,16 +79,18 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": "Contradictions",
         "purpose": (
-            "Facilities a source says were never a waste disposal site - a quarry, a mine, a yard "
-            "that never took waste. Only uncorroborated OSM facilities are checked. A closed, "
-            "capped or redeveloped landfill is NOT a contradiction; closure_also_reported flags "
-            "any verdict where the same run also found the site closed, the likeliest misreading. "
-            "An empty tab means no source contradicted any checked site - NOT that the sites were "
+            "Facilities where facility_type came back 'Not a Waste Facility': a source says the "
+            "site was never a waste disposal site - a quarry, a mine, a yard that never took "
+            "waste. Only facilities known solely from OSM or Global Plastic Watch are offered this "
+            "value. A closed, capped or redeveloped landfill is NOT one; closure_also_reported "
+            "flags any row where the same run also found the site closed, the likeliest "
+            "misreading. The value IS promoted to the standardized table like any facility_type. "
+            "An empty tab means no source contradicted any checked site - NOT that they were "
             "confirmed, since absence of coverage is not evidence against a site."
         ),
         "sme_action": (
-            "Read only. Each row also appears in Review_Queue; record the decision there. Nothing "
-            "here deletes or edits a facility."
+            "Read only. Each row also appears in Review_Queue; record the decision there. "
+            "Reject any row that describes a closed landfill."
         ),
         "editable": "nothing",
     },

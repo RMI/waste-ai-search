@@ -15,11 +15,10 @@ from urllib.parse import urlsplit, urlunsplit
 from .arbitration import calculated_row, needs_review, resolve, routed_to_leads
 from .credibility import assign_source_tier, is_promotable, tier_label
 from .input_loader import describe_seed, resolve_sites, write_csv_records
-from .prompt_builder import requested_attributes
+from .prompt_builder import needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
 from .schema import (
-    SITE_TYPE_CONTRADICTED,
-    SITE_TYPE_CONTRADICTION,
+    NOT_A_WASTE_FACILITY,
     ARRAY_TARGET_ATTRIBUTES,
     ATTRIBUTE_RANGES,
     BOOLEAN_TARGET_ATTRIBUTES,
@@ -301,10 +300,10 @@ def merge_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
 def contradiction_rows(
     resolved: list[dict[str, Any]], evidence: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """The Contradicted verdicts, each beside what the same run found about closure.
+    """The "Not a Waste Facility" verdicts, each beside what the same run found about closure.
 
     The likeliest false positive is a closed landfill misread as "not a landfill" - "it's a park
-    now". A site with a Contradicted verdict AND a reported closure is exactly that shape, so it is
+    now". A site called Not a Waste Facility AND reported closed is exactly that shape, so it is
     flagged for the reviewer rather than left to be noticed.
     """
     by_evidence_id = {row["evidence_id"]: row for row in evidence}
@@ -319,9 +318,9 @@ def contradiction_rows(
 
     out: list[dict[str, Any]] = []
     for row in resolved:
-        if row["attribute_name"] != SITE_TYPE_CONTRADICTION:
+        if row["attribute_name"] != "facility_type":
             continue
-        if normalize_scalar(row.get("resolved_value")) != SITE_TYPE_CONTRADICTED:
+        if normalize_scalar(row.get("resolved_value")) != NOT_A_WASTE_FACILITY:
             continue
         winner = by_evidence_id.get(row.get("winning_evidence_id"), {})
         reported = closure.get(row["site_id"], [])
@@ -330,7 +329,7 @@ def contradiction_rows(
                 "site_id": row["site_id"],
                 "site_name": row["site_name"],
                 "country_iso3": row["country_iso3"],
-                "verdict": SITE_TYPE_CONTRADICTED,
+                "facility_type": NOT_A_WASTE_FACILITY,
                 "winning_source_tier": row["winning_source_tier"],
                 "winning_source_url": row["winning_source_url"],
                 "evidence_summary": winner.get("evidence_summary", ""),
@@ -697,8 +696,10 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         review_queue.append(queue_row)
 
     contradictions = contradiction_rows(resolved_rows, evidence_rows)
+    # How many arbitrated facilities were offered the verdict at all, so an empty Contradictions
+    # tab can be read as "checked N, contradicted none" rather than "never checked".
     contradiction_checks = sum(
-        1 for row in resolved_rows if row["attribute_name"] == SITE_TYPE_CONTRADICTION
+        1 for sid in by_site if sid in sites_by_id and needs_contradiction_check(sites_by_id[sid])
     )
 
     standard_records, standard_notes = build_standard_table(sites_by_id, resolved_rows)
@@ -754,7 +755,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "arbitrated_at", "value": datetime.now().replace(microsecond=0).isoformat()},
             {"setting": "review_queue_rows", "value": len(review_queue)},
             {"setting": "contradiction_checks", "value": contradiction_checks},
-            {"setting": "contradicted", "value": len(contradictions)},
+            {"setting": "not_a_waste_facility", "value": len(contradictions)},
             {"setting": "standardized_records", "value": len(standard_records)},
         ],
         review_queue=review_queue,

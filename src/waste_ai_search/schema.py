@@ -89,19 +89,22 @@ COORDINATES_ONLY_ISO3 = {"BRA"}
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
 
 
-# --- site-type contradiction (WP-525) ---------------------------------------------------------
-# A contradiction detector, not a verifier. The agent answers only when a source positively says
-# the site is something other than a waste facility - a quarry, a mine, a yard that never took
-# waste. Finding nothing is recorded as "No contradiction found", never as a negative.
+# --- not a waste facility (WP-525) -------------------------------------------------------------
+# For facilities nothing independently confirms, facility_type may also come back as
+# "Not a Waste Facility": a source positively says the site is, and always was, something else -
+# a quarry, a mine, a yard that never took waste. It is a contradiction, not a verification:
+# finding nothing leaves facility_type empty, never "Not a Waste Facility".
 #
-# Deliberately outside GAP_FILL_ATTRIBUTES, so seed_refresh never merges an unreviewed verdict
-# into the next pass's seed, and outside ATTRIBUTE_TO_STANDARD_COLUMN, so it can never reach the
-# standardized table: the verdict lives in the review layer only.
-SITE_TYPE_CONTRADICTION = "site_type_contradiction"
-SITE_TYPE_CONTRADICTED = "Contradicted"
-NO_CONTRADICTION_FOUND = "No contradiction found"
-SITE_TYPE_CONTRADICTION_VALUES = [SITE_TYPE_CONTRADICTED, NO_CONTRADICTION_FOUND]
-CONTRADICTION_CHECK_ATTRIBUTES = [SITE_TYPE_CONTRADICTION]
+# It is promoted like any other facility_type value, so it reaches the standardized table and the
+# next pass's seed. It is also always routed to review, so every such verdict is seen by a human.
+#
+# PENDING UPSTREAM: the database's `facility_type` enum and chk_facility_type do not carry this
+# value yet, so a load containing it will be rejected - and COPY is all-or-nothing, so one such
+# row blocks the whole run's load. transformed.transformed_ai_search does not exist yet either,
+# so no load runs today; the enum value should land upstream with that table.
+NOT_A_WASTE_FACILITY = "Not a Waste Facility"
+PENDING_UPSTREAM_FACILITY_TYPES = [NOT_A_WASTE_FACILITY]
+FACILITY_TYPE_ALLOWED = [*FACILITY_TYPE_VALUES, *PENDING_UPSTREAM_FACILITY_TYPES]
 
 # Asked only where nothing independently confirms a disposal site exists: facilities whose every
 # contributing source is one of these Tier 4 datasets. OSM is a crowd-mapped polygon and Global
@@ -122,9 +125,10 @@ CORROBORATING_ATTRIBUTES = [
     "waste_in_place_metric_tonnes",
 ]
 
-# Never signed off by the pipeline, whatever the tier. A Tier 1 regulator calling a site a quarry
-# would otherwise auto-validate as an ordinary empty-baseline fill.
-ALWAYS_REVIEW_ATTRIBUTES = {SITE_TYPE_CONTRADICTION}
+# (attribute, value) pairs never signed off by the pipeline, whatever the tier. A Tier 1 regulator
+# calling a site a quarry would otherwise auto-validate as an ordinary empty-baseline fill. This
+# only sets validation_status - the value is still promoted.
+ALWAYS_REVIEW_VALUES = {("facility_type", NOT_A_WASTE_FACILITY)}
 
 
 # Computed locally from found coordinates. No source, no tier (Q12).
@@ -132,10 +136,8 @@ CALCULATED_ATTRIBUTES = [
     "distance_to_original_coordinates_km",
 ]
 
-TARGET_ATTRIBUTES = [
-    *IDENTITY_ATTRIBUTES, *CALCULATED_ATTRIBUTES, *GAP_FILL_ATTRIBUTES, *CONTRADICTION_CHECK_ATTRIBUTES,
-]
-REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES, *CONTRADICTION_CHECK_ATTRIBUTES]
+TARGET_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *CALCULATED_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
+REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
 
 BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover"}
 ARRAY_TARGET_ATTRIBUTES = {"cover_types", "gccs_energy_project_type", "gccs_current_project_status"}
@@ -240,6 +242,9 @@ FACILITY_TYPE_MAP = {
     # generate_enums.py will pick the value up and this line becomes
     # "transfer station": "Transfer Station".
     "transfer station": None,
+    "not a waste facility": NOT_A_WASTE_FACILITY,
+    "not a waste site": NOT_A_WASTE_FACILITY,
+    "not waste": NOT_A_WASTE_FACILITY,
     "unknown": None,
 }
 
@@ -350,22 +355,9 @@ def bucket_waste_depth(meters: Any) -> tuple[str | None, str]:
     return category, f"Binned {text} metres to {category!r}."
 
 
-SITE_TYPE_CONTRADICTION_MAP = {
-    "contradicted": SITE_TYPE_CONTRADICTED,
-    # The agent is told to omit the attribute when nothing contradicts the site. If it answers
-    # anyway, that answer carries no evidence of anything, so it maps to NULL and is dropped.
-    "no contradiction found": None,
-    "no contradiction": None,
-    "not contradicted": None,
-    "none": None,
-    "no": None,
-    "unknown": None,
-}
-
 ENUM_MAPS = {
     "facility_status": (FACILITY_STATUS_MAP, FACILITY_STATUS_VALUES),
-    SITE_TYPE_CONTRADICTION: (SITE_TYPE_CONTRADICTION_MAP, [SITE_TYPE_CONTRADICTED]),
-    "facility_type": (FACILITY_TYPE_MAP, FACILITY_TYPE_VALUES),
+    "facility_type": (FACILITY_TYPE_MAP, FACILITY_TYPE_ALLOWED),
     "cover_types": (COVER_TYPE_MAP, COVER_TYPE_VALUES),
     "gccs_energy_project_type": (GCCS_ENERGY_PROJECT_TYPE_MAP, GCCS_ENERGY_PROJECT_TYPE_VALUES),
     "gccs_current_project_status": (GCCS_CURRENT_PROJECT_STATUS_MAP, GCCS_CURRENT_PROJECT_STATUS_VALUES),
@@ -428,11 +420,11 @@ FOUNDRY_RUN_LOG_HEADERS = [
 
 PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 
-# A read-only lens on the Review_Queue rows that carry a Contradicted verdict. The decision is
+# A read-only lens on the Review_Queue rows where facility_type came back "Not a Waste Facility". The decision is
 # still recorded on the Review_Queue row; this view exists so the verdicts can be read together,
 # beside what the same run found about closure.
 CONTRADICTION_HEADERS = [
-    "site_id", "site_name", "country_iso3", "verdict", "winning_source_tier",
+    "site_id", "site_name", "country_iso3", "facility_type", "winning_source_tier",
     "winning_source_url", "evidence_summary", "quoted_evidence_short", "closure_also_reported",
     "validation_status",
 ]
@@ -478,10 +470,9 @@ LEAD_ROUTED_RESOLUTIONS = {"Conflict - lower credibility"}
 DEFINITION_VALUES = {
     "attribute_name": REQUESTABLE_ATTRIBUTES,
     "facility_status": FACILITY_STATUS_VALUES,
-    "facility_type": FACILITY_TYPE_VALUES,
+    "facility_type": FACILITY_TYPE_ALLOWED,
     "cover_type": COVER_TYPE_VALUES,
     "waste_depth": WASTE_DEPTH_VALUES,
-    SITE_TYPE_CONTRADICTION: SITE_TYPE_CONTRADICTION_VALUES,
     "gccs_energy_project_type": GCCS_ENERGY_PROJECT_TYPE_VALUES,
     "gccs_current_project_status": GCCS_CURRENT_PROJECT_STATUS_VALUES,
     "boolean_unknown": ["Yes", "No", "Unknown"],
