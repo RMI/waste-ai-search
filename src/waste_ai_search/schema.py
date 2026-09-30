@@ -89,13 +89,53 @@ COORDINATES_ONLY_ISO3 = {"BRA"}
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
 
 
+# --- site-type contradiction (WP-525) ---------------------------------------------------------
+# A contradiction detector, not a verifier. The agent answers only when a source positively says
+# the site is something other than a waste facility - a quarry, a mine, a yard that never took
+# waste. Finding nothing is recorded as "No contradiction found", never as a negative.
+#
+# Deliberately outside GAP_FILL_ATTRIBUTES, so seed_refresh never merges an unreviewed verdict
+# into the next pass's seed, and outside ATTRIBUTE_TO_STANDARD_COLUMN, so it can never reach the
+# standardized table: the verdict lives in the review layer only.
+SITE_TYPE_CONTRADICTION = "site_type_contradiction"
+SITE_TYPE_CONTRADICTED = "Contradicted"
+NO_CONTRADICTION_FOUND = "No contradiction found"
+SITE_TYPE_CONTRADICTION_VALUES = [SITE_TYPE_CONTRADICTED, NO_CONTRADICTION_FOUND]
+CONTRADICTION_CHECK_ATTRIBUTES = [SITE_TYPE_CONTRADICTION]
+
+# Asked only where nothing independently confirms a disposal site exists. As written in WP-525
+# that is OSM-only facilities: 6,848 of 19,492, all with no operational baseline at all.
+# gpw_2021 (Global Plastic Watch, also Tier 4) meets the same no-corroboration test and would add
+# 1,716 more; it is left out pending a decision on the ticket, and adding it is this one line.
+CONTRADICTION_CHECK_SOURCES = {"osm_2022"}
+
+# What counts as corroboration. `area_square_meters` is deliberately absent: for an OSM site it is
+# measured from the same polygon that is in question, so it corroborates nothing. Once a pass has
+# filled any of these, the site is no longer uncorroborated and is not asked again.
+CORROBORATING_ATTRIBUTES = [
+    "facility_status",
+    "facility_type",
+    "opening_year",
+    "closing_year",
+    "has_landfill_gas_collection",
+    "annual_incoming_waste_metric_tonnes",
+    "waste_in_place_metric_tonnes",
+]
+
+# Never signed off by the pipeline, whatever the tier. A Tier 1 regulator calling a site a quarry
+# would otherwise auto-validate as an ordinary empty-baseline fill.
+ALWAYS_REVIEW_ATTRIBUTES = {SITE_TYPE_CONTRADICTION}
+
+
 # Computed locally from found coordinates. No source, no tier (Q12).
 CALCULATED_ATTRIBUTES = [
     "distance_to_original_coordinates_km",
 ]
 
-TARGET_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *CALCULATED_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
-REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
+TARGET_ATTRIBUTES = [
+    *IDENTITY_ATTRIBUTES, *CALCULATED_ATTRIBUTES, *GAP_FILL_ATTRIBUTES, *CONTRADICTION_CHECK_ATTRIBUTES,
+]
+REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES, *CONTRADICTION_CHECK_ATTRIBUTES]
 
 BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover"}
 ARRAY_TARGET_ATTRIBUTES = {"cover_types", "gccs_energy_project_type", "gccs_current_project_status"}
@@ -310,8 +350,21 @@ def bucket_waste_depth(meters: Any) -> tuple[str | None, str]:
     return category, f"Binned {text} metres to {category!r}."
 
 
+SITE_TYPE_CONTRADICTION_MAP = {
+    "contradicted": SITE_TYPE_CONTRADICTED,
+    # The agent is told to omit the attribute when nothing contradicts the site. If it answers
+    # anyway, that answer carries no evidence of anything, so it maps to NULL and is dropped.
+    "no contradiction found": None,
+    "no contradiction": None,
+    "not contradicted": None,
+    "none": None,
+    "no": None,
+    "unknown": None,
+}
+
 ENUM_MAPS = {
     "facility_status": (FACILITY_STATUS_MAP, FACILITY_STATUS_VALUES),
+    SITE_TYPE_CONTRADICTION: (SITE_TYPE_CONTRADICTION_MAP, [SITE_TYPE_CONTRADICTED]),
     "facility_type": (FACILITY_TYPE_MAP, FACILITY_TYPE_VALUES),
     "cover_types": (COVER_TYPE_MAP, COVER_TYPE_VALUES),
     "gccs_energy_project_type": (GCCS_ENERGY_PROJECT_TYPE_MAP, GCCS_ENERGY_PROJECT_TYPE_VALUES),
@@ -375,6 +428,15 @@ FOUNDRY_RUN_LOG_HEADERS = [
 
 PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 
+# A read-only lens on the Review_Queue rows that carry a Contradicted verdict. The decision is
+# still recorded on the Review_Queue row; this view exists so the verdicts can be read together,
+# beside what the same run found about closure.
+CONTRADICTION_HEADERS = [
+    "site_id", "site_name", "country_iso3", "verdict", "winning_source_tier",
+    "winning_source_url", "evidence_summary", "quoted_evidence_short", "closure_also_reported",
+    "validation_status",
+]
+
 
 # --- standardized facility table (Q19) --------------------------------------------------------
 AI_SEARCH_DATA_SOURCE = "ai_search_2026"
@@ -419,6 +481,7 @@ DEFINITION_VALUES = {
     "facility_type": FACILITY_TYPE_VALUES,
     "cover_type": COVER_TYPE_VALUES,
     "waste_depth": WASTE_DEPTH_VALUES,
+    SITE_TYPE_CONTRADICTION: SITE_TYPE_CONTRADICTION_VALUES,
     "gccs_energy_project_type": GCCS_ENERGY_PROJECT_TYPE_VALUES,
     "gccs_current_project_status": GCCS_CURRENT_PROJECT_STATUS_VALUES,
     "boolean_unknown": ["Yes", "No", "Unknown"],

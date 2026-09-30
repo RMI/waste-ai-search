@@ -23,6 +23,7 @@ from .credibility import (
     tier_label,
 )
 from .schema import (
+    ALWAYS_REVIEW_ATTRIBUTES,
     AI_SEARCH_DATA_SOURCE,
     AUTO_REVIEWER,
     GAP_FILL_ATTRIBUTES,
@@ -232,6 +233,15 @@ def resolve(
             "baseline; baseline retained and the candidate routed to leads."
         )
         row["validation_status"] = "Routed to leads"
+
+    # Some verdicts are never the pipeline's to sign off. Without this a Tier 1-2 source calling a
+    # site a quarry would take the ordinary empty-baseline path above and auto-validate.
+    if attribute_name in ALWAYS_REVIEW_ATTRIBUTES and row["resolved_value"]:
+        row["validation_status"] = "Needs review"
+        row["resolution_rule"] = (
+            f"{row['resolution_rule']} Always reviewed: a contradiction verdict is never "
+            "signed off automatically, whatever the tier."
+        )
 
     stamp_auto_review(row, reviewed_on, agent_note=normalize_scalar(winner.get("evidence_summary")))
     return row

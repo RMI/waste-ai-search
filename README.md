@@ -289,6 +289,31 @@ Allowed categorical values come from the **live Postgres enums** — regenerate 
 `scripts/generate_enums.py`. Anything outside them maps to NULL with a parse warning rather than
 being forced into a wrong category.
 
+### Site-type contradictions (WP-525)
+
+6,848 facilities (35% of the corpus) come from OSM alone, with nothing but a name and a
+coordinate. An OSM `landuse=landfill` polygon can be a quarry or a construction yard, so for those
+facilities the agent is also asked `site_type_contradiction`.
+
+It is a **contradiction detector, not a verifier**. The agent answers only when a source
+positively says the site was never a waste facility, and the only value it can return is
+`Contradicted`. Finding nothing is recorded as *No contradiction found* — never as a negative,
+because small informal dumps routinely have no web presence at all.
+
+**A closed, capped or redeveloped landfill is not a contradiction.** It keeps emitting methane for
+decades, which is why WasteMAP tracks it. "It's a park now" is reported as `facility_status =
+Inactive` with a `closing_year`. The question is *was this ever a waste disposal site?*, not *is it
+operating today?*
+
+Every `Contradicted` verdict goes to review, whatever its tier — nothing is deleted or edited, and
+the verdict never reaches the standardized table or the next pass's seed. The workbook's
+**Contradictions** tab lists them, and flags any where the same run also found the site closed,
+since that is the likeliest misreading.
+
+Only OSM-only facilities with no corroborating attribute are asked, so the other 12,644 prompts
+carry none of this. `gpw_2021` meets the same no-corroboration test (1,716 more facilities) and is
+left out as written; adding it is one line in `CONTRADICTION_CHECK_SOURCES`.
+
 ### Outputs
 
 | File | Purpose |

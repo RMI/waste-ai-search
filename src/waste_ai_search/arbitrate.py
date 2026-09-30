@@ -18,6 +18,8 @@ from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .prompt_builder import requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
 from .schema import (
+    SITE_TYPE_CONTRADICTED,
+    SITE_TYPE_CONTRADICTION,
     ARRAY_TARGET_ATTRIBUTES,
     ATTRIBUTE_RANGES,
     BOOLEAN_TARGET_ATTRIBUTES,
@@ -294,6 +296,55 @@ def merge_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
             notes.append(note)
     merged["search_notes"] = " | ".join(notes)
     return merged
+
+
+def contradiction_rows(
+    resolved: list[dict[str, Any]], evidence: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The Contradicted verdicts, each beside what the same run found about closure.
+
+    The likeliest false positive is a closed landfill misread as "not a landfill" - "it's a park
+    now". A site with a Contradicted verdict AND a reported closure is exactly that shape, so it is
+    flagged for the reviewer rather than left to be noticed.
+    """
+    by_evidence_id = {row["evidence_id"]: row for row in evidence}
+    closure: dict[str, list[str]] = {}
+    for row in resolved:
+        attribute = row["attribute_name"]
+        value = normalize_scalar(row.get("resolved_value"))
+        if attribute == "facility_status" and value == "Inactive":
+            closure.setdefault(row["site_id"], []).append("facility_status = Inactive")
+        elif attribute == "closing_year" and value:
+            closure.setdefault(row["site_id"], []).append(f"closing_year = {value}")
+
+    out: list[dict[str, Any]] = []
+    for row in resolved:
+        if row["attribute_name"] != SITE_TYPE_CONTRADICTION:
+            continue
+        if normalize_scalar(row.get("resolved_value")) != SITE_TYPE_CONTRADICTED:
+            continue
+        winner = by_evidence_id.get(row.get("winning_evidence_id"), {})
+        reported = closure.get(row["site_id"], [])
+        out.append(
+            {
+                "site_id": row["site_id"],
+                "site_name": row["site_name"],
+                "country_iso3": row["country_iso3"],
+                "verdict": SITE_TYPE_CONTRADICTED,
+                "winning_source_tier": row["winning_source_tier"],
+                "winning_source_url": row["winning_source_url"],
+                "evidence_summary": winner.get("evidence_summary", ""),
+                "quoted_evidence_short": winner.get("quoted_evidence_short", ""),
+                "closure_also_reported": (
+                    f"CHECK: {'; '.join(reported)} - is this a closed landfill misread as a "
+                    "contradiction?"
+                    if reported
+                    else ""
+                ),
+                "validation_status": row["validation_status"],
+            }
+        )
+    return out
 
 
 def cover_consistency_warnings(resolved: list[dict[str, Any]]) -> list[str]:
@@ -645,6 +696,11 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         queue_row["evidence_summary"] = row.get("resolution_rule", "")
         review_queue.append(queue_row)
 
+    contradictions = contradiction_rows(resolved_rows, evidence_rows)
+    contradiction_checks = sum(
+        1 for row in resolved_rows if row["attribute_name"] == SITE_TYPE_CONTRADICTION
+    )
+
     standard_records, standard_notes = build_standard_table(sites_by_id, resolved_rows)
     for note_site_id, note in standard_notes:
         note_site = sites_by_id.get(note_site_id, {})
@@ -697,9 +753,12 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "sites_arbitrated", "value": len(cached)},
             {"setting": "arbitrated_at", "value": datetime.now().replace(microsecond=0).isoformat()},
             {"setting": "review_queue_rows", "value": len(review_queue)},
+            {"setting": "contradiction_checks", "value": contradiction_checks},
+            {"setting": "contradicted", "value": len(contradictions)},
             {"setting": "standardized_records", "value": len(standard_records)},
         ],
         review_queue=review_queue,
+        contradictions=contradictions,
         leads=leads,
         parse_warnings=parse_warnings,
     )

@@ -5,6 +5,10 @@ from typing import Any
 
 from .credibility import SOURCE_TYPES, TIER_DEFINITIONS
 from .schema import (
+    CONTRADICTION_CHECK_SOURCES,
+    CORROBORATING_ATTRIBUTES,
+    SITE_TYPE_CONTRADICTED,
+    SITE_TYPE_CONTRADICTION,
     COORDINATES_ONLY_ISO3,
     COORDINATE_ATTRIBUTES,
     DEFINITION_VALUES,
@@ -93,6 +97,20 @@ ATTRIBUTE_GUIDANCE = {
         "Fraction of generated landfill gas that is collected, as a value between 0 and 1. "
         "If the source gives a percentage, report the number and set unit to '%'."
     ),
+    SITE_TYPE_CONTRADICTION: (
+        f"Return this ONLY if a source positively states this site is, and always was, something "
+        f"other than a waste disposal facility - for example a quarry, a mine, an aggregate or "
+        f"construction yard that never accepted waste, or a feature mapped in the wrong place. "
+        f"The value must be exactly '{SITE_TYPE_CONTRADICTED}'; describe what the site actually is "
+        f"in evidence_summary and quote the source. "
+        f"A CLOSED, CAPPED, RECLAIMED, REVEGETATED OR REDEVELOPED LANDFILL IS STILL A WASTE "
+        f"DISPOSAL FACILITY AND IS NOT A CONTRADICTION: buried waste keeps generating methane for "
+        f"decades, which is why the site is tracked. A landfill that is now a park, a solar farm or "
+        f"a sports ground is reported through facility_status = Inactive and closing_year, and this "
+        f"attribute is omitted. The question is 'was this ever a waste disposal site?', not 'is it "
+        f"operating today?'. If no source says the site was never a waste facility, omit this "
+        f"attribute entirely - finding nothing about a site is not evidence against it."
+    ),
     "found_site_name": "The source's exact official or canonical name for this facility.",
     "found_latitude": "Source-reported latitude only. Never infer from an address or nearby place.",
     "found_longitude": "Source-reported longitude only. Never infer from an address or nearby place.",
@@ -135,6 +153,24 @@ def location_is_inexact(site: dict[str, Any]) -> bool:
     return parse_tristate_bool(site.get("is_location_exact"))[0] is False
 
 
+def needs_contradiction_check(site: dict[str, Any]) -> bool:
+    """Whether nothing independently confirms this is a disposal site (WP-525).
+
+    True when every contributing source is in CONTRADICTION_CHECK_SOURCES and none of the
+    corroborating attributes has a value. Once a pass fills one of those, the site has
+    corroboration and is not asked again. Corroborated facilities never see the question, so
+    their prompts carry none of its guidance.
+    """
+    sources = [
+        token.strip().lower()
+        for token in normalize_scalar(site.get("contributing_data_sources")).split("+")
+        if token.strip()
+    ]
+    if not sources or not all(source in CONTRADICTION_CHECK_SOURCES for source in sources):
+        return False
+    return all(is_blank(site.get(field)) for field in CORROBORATING_ATTRIBUTES)
+
+
 def requested_attributes(site: dict[str, Any]) -> list[str]:
     """Identity always; metadata only where the facility's baseline is empty (gap-fill, Q29).
 
@@ -154,6 +190,8 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
         if field in GCCS_ATTRIBUTES and not gas_present:
             continue
         requested.append(field)
+    if needs_contradiction_check(site):
+        requested.append(SITE_TYPE_CONTRADICTION)
     return requested
 
 
@@ -286,12 +324,17 @@ Names:
         "value_basis": DEFINITION_VALUES["value_basis"],
         "confidence_score": DEFINITION_VALUES["confidence_score"],
     }
+    if SITE_TYPE_CONTRADICTION in attributes:
+        # Only "Contradicted" is ever returned; "No contradiction found" is what the pipeline
+        # records when the attribute is omitted, so offering it would invite a sourceless answer.
+        definitions[SITE_TYPE_CONTRADICTION] = [SITE_TYPE_CONTRADICTED]
 
     return f"""You are a waste-sector data discovery agent for WasteMAP.
 
 Task:
-Find source-backed data for this waste disposal site. Search in English and in the
-local language, using the site name, coordinates, municipality, and admin names.
+Find source-backed data for this site, recorded as a waste disposal facility. Search
+in English and in the local language, using the site name, coordinates,
+municipality, and admin names.
 {names_guidance}
 Only the attributes listed below are wanted. Everything else about this facility is
 already known and must not be researched or returned.
