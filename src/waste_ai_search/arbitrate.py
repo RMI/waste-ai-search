@@ -477,7 +477,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         site = sites_by_id.get(site_id)
         if site is None:
             parse_warnings.append(
-                {"run_id": config.run_id, "site_id": site_id, "site_name": "", "warning": "Site not in input CSV."}
+                {"run_id": config.run_id, "site_id": site_id, "site_name": "", "warning": "Site not in the seed."}
             )
             continue
 
