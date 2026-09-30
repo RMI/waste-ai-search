@@ -81,10 +81,13 @@ uv run python -m waste_ai_search.cli run --input-csv seed.csv   # pinned corpus 
 `--iso3` is pushed into SQL, so a single-country run reads only that country rather than pulling
 all 19,492 facilities to keep 83.
 
-**Every database-seeded run snapshots what it read** to `outputs/runs/<run_id>/seed.csv`, and
-records `seed_source` in the workbook's Run_Config tab. Without that a run would not be
-reproducible: the corpus moves underneath you and nothing would say which version produced a
-given output — which would undercut the `git_sha` stamped on every standardized row.
+**A run reads the database once.** The first read is written to
+`outputs/runs/<run_id>/seed.csv`, and every later phase of that run reads the snapshot instead of
+querying again — both arbitrations, the refresh between passes, a resumed search, and a standalone
+`arbitrate`. So every phase sees the corpus the search ran against, `arbitrate` stays offline, and
+`seed_source` in the workbook's Run_Config records where the run is pinned.
+
+A run id is therefore pinned to its corpus. To seed afresh, use a new `--run-id`.
 
 `--input-csv` remains for two cases: pinning an exact corpus, and the gas-collection follow-up,
 which rewrites the seed between passes into the run directory.

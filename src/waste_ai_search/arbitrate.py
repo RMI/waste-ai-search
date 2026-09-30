@@ -14,7 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .arbitration import calculated_row, needs_review, resolve, routed_to_leads
 from .credibility import assign_source_tier, is_promotable, tier_label
-from .input_loader import resolve_sites, write_csv_records
+from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .prompt_builder import requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
 from .schema import (
@@ -692,9 +692,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "dataset_version", "value": config.dataset_version},
             {
                 "setting": "seed_source",
-                "value": str(config.input_csv)
-                if config.input_csv is not None
-                else "consolidation.consolidated_facility (live)",
+                "value": describe_seed(config),
             },
             {"setting": "sites_arbitrated", "value": len(cached)},
             {"setting": "arbitrated_at", "value": datetime.now().replace(microsecond=0).isoformat()},

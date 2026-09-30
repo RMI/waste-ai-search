@@ -14,7 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from waste_ai_search.input_loader import resolve_sites, snapshot_seed, write_csv_records
+from waste_ai_search.input_loader import (
+    describe_seed,
+    resolve_sites,
+    run_seed_path,
+    write_csv_records,
+)
 from waste_ai_search.run_context import PipelineConfig
 
 
@@ -90,25 +95,93 @@ def test_no_country_filter_passes_none_rather_than_an_empty_list(tmp_path, monke
     assert seen["iso3"] is None
 
 
-# --- the reproducibility snapshot -----------------------------------------------------------
-def test_a_database_seeded_run_records_what_it_read(tmp_path):
-    """Otherwise the corpus moves between runs and nothing says which version produced an output."""
+# --- the reproducibility snapshot (read back, not just written) -----------------------------
+def _stub_database(monkeypatch, rows):
+    """Serve `rows` on the first database read and fail loudly on any later one."""
+    import waste_ai_search.seed_source as seed_source
+
+    calls = {"n": 0}
+
+    def fake_load(iso3=None, **kwargs):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise AssertionError("queried the database again instead of reading the run snapshot")
+        return rows
+
+    monkeypatch.setattr(seed_source, "load_seed_sites", fake_load)
+    return calls
+
+
+def test_the_first_database_read_writes_the_run_snapshot(tmp_path, monkeypatch):
+    _stub_database(monkeypatch, [{"site_id": "1", "site_name": "A"}])
     config = _config(tmp_path)
-    sites = [{"site_id": "1", "site_name": "A"}, {"site_id": "2", "site_name": "B"}]
 
-    path = snapshot_seed(config, sites, ["site_id", "site_name"])
+    resolve_sites(config)
 
-    assert path == config.run_dir / "seed.csv"
-    assert path.exists()
-    assert path.read_text().count("\n") == 3  # header plus two rows
+    assert run_seed_path(config).exists()
+
+
+def test_every_later_phase_reads_the_snapshot_not_the_database(tmp_path, monkeypatch):
+    """Arbitration, the refresh between passes and a resumed search must all see the corpus the
+    search ran against. A second database query would fail the stub."""
+    calls = _stub_database(monkeypatch, [{"site_id": "1", "site_name": "A"}])
+    config = _config(tmp_path)
+
+    first, _ = resolve_sites(config)       # search
+    second, _ = resolve_sites(config)      # arbitrate
+    third, _ = resolve_sites(config)       # refresh / pass-2 arbitrate
+
+    assert calls["n"] == 1
+    assert [s["site_id"] for s in first] == [s["site_id"] for s in second] == [s["site_id"] for s in third]
+
+
+def test_a_resumed_run_does_not_overwrite_its_snapshot(tmp_path, monkeypatch):
+    """Cached responses from the first attempt must stay matched to the corpus they searched."""
+    _stub_database(monkeypatch, [{"site_id": "1", "site_name": "Original"}])
+    config = _config(tmp_path)
+    resolve_sites(config)
+    before = run_seed_path(config).read_text()
+
+    resolve_sites(config)  # the resume
+
+    assert run_seed_path(config).read_text() == before
+
+
+def test_standalone_arbitrate_needs_no_database_once_a_snapshot_exists(tmp_path, monkeypatch):
+    """The CLI promises arbitrate is offline. With a snapshot present it must not reach the DB."""
+    import waste_ai_search.seed_source as seed_source
+
+    config = _config(tmp_path)
+    write_csv_records(run_seed_path(config), [{"site_id": "7", "site_name": "Pinned"}], ["site_id", "site_name"])
+
+    def no_database(**kwargs):
+        raise AssertionError("arbitrate reached for the database")
+
+    monkeypatch.setattr(seed_source, "load_seed_sites", no_database)
+    sites, _ = resolve_sites(config)
+
+    assert [s["site_id"] for s in sites] == ["7"]
 
 
 def test_a_csv_seeded_run_writes_no_snapshot(tmp_path):
     """The supplied file already is the record; copying it into the run dir adds nothing."""
-    config = _config(tmp_path, input_csv=tmp_path / "given.csv")
+    seed = tmp_path / "given.csv"
+    write_csv_records(seed, [{"site_id": "1"}], ["site_id"])
+    config = _config(tmp_path, input_csv=seed)
 
-    assert snapshot_seed(config, [{"site_id": "1"}], ["site_id"]) is None
-    assert not (config.run_dir / "seed.csv").exists()
+    resolve_sites(config)
+
+    assert not run_seed_path(config).exists()
+
+
+def test_describe_seed_reports_where_the_run_is_pinned(tmp_path, monkeypatch):
+    _stub_database(monkeypatch, [{"site_id": "1"}])
+    config = _config(tmp_path)
+
+    assert describe_seed(config) == "consolidation.consolidated_facility (live)"
+    resolve_sites(config)
+    assert "pinned in" in describe_seed(config)
+    assert str(run_seed_path(config)) in describe_seed(config)
 
 
 # --- the follow-up pass still needs a file --------------------------------------------------

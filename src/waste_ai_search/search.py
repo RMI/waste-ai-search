@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .geocoder import enrich_sites_from_cache
-from .input_loader import resolve_sites, snapshot_seed, write_csv_records
+from .input_loader import resolve_sites, run_seed_path, write_csv_records
 from .pilot_selector import select_mixed_pilot
 from .prompt_builder import build_site_prompt, coordinates_only, requested_attributes
 from .run_context import (
@@ -96,16 +96,23 @@ def run_search(
     `only_attributes` narrows what is asked - a follow-up asks for the attributes the first pass
     unlocked, not the whole set again.
     """
-    sites, headers = resolve_sites(config)
-    # A database-seeded run has no input file to point back at, so it records the corpus it
-    # actually read. Skipped when a CSV was supplied, which is already that record.
-    snapshot = snapshot_seed(config, sites, headers)
-    if snapshot is not None:
-        print(f"Seeded {len(sites)} facilities from the database; snapshot: {snapshot}")
+    # Resuming a search, or re-running one with the same run id, reads this run's pinned seed
+    # rather than a newer database state, so cached responses stay matched to the corpus they
+    # were searched against.
+    reusing = config.input_csv is None and run_seed_path(config).exists()
+    sites, _headers = resolve_sites(config)
+    if config.input_csv is None:
+        verb = "Reusing this run's seed snapshot" if reusing else "Seeded from the database, snapshot"
+        print(f"{verb}: {run_seed_path(config)} ({len(sites)} facilities)")
 
     selected = select_sites(sites, config)
     if not selected:
-        raise ValueError("No sites matched the selection filters.")
+        hint = (
+            f" This run is pinned to {run_seed_path(config)}; use a new --run-id to seed afresh."
+            if reusing
+            else ""
+        )
+        raise ValueError(f"No sites matched the selection filters.{hint}")
 
     # The prompt asks the agent to search using municipality and admin names, so those fields
     # have to be populated or that instruction is asking for context we never supplied.

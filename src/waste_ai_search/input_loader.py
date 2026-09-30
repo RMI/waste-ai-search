@@ -73,35 +73,47 @@ def write_csv_records(path: Path, rows: list[dict[str, Any]], headers: list[str]
 
 
 
+def run_seed_path(config: Any) -> Path:
+    """Where a database-seeded run keeps the corpus it read."""
+    return config.run_dir / "seed.csv"
+
+
 def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
-    """The run's seed, from the database by default or from a CSV when one is configured.
+    """The run's seed: an explicit CSV, else this run's own snapshot, else the live database.
 
-    The database is the source of truth, so a run reads it directly rather than depending on a
-    checked-in export that is stale the moment consolidation moves. `--input-csv` stays for two
-    cases that still need a file: pinning an exact corpus, and the gas-collection follow-up,
-    which rewrites the seed between passes.
+    The database is the source of truth, so a new run reads it directly rather than depending on
+    a checked-in export that is stale the moment consolidation moves. But it reads it ONCE. The
+    first read is written to the run directory, and every later phase of the same run - both
+    arbitrations, the refresh between passes, a resumed search, a standalone `arbitrate` -
+    reads that snapshot instead of querying again.
 
-    Country filtering is pushed into SQL rather than applied after loading, so a single-country
-    run stops pulling the whole corpus to keep a handful of rows.
+    Without that, each phase could see a different corpus from the one the search ran against,
+    the snapshot would record something nothing used, and `arbitrate`, which the CLI promises is
+    offline, would need the database.
+
+    `--input-csv` still wins for the two cases that need a file: pinning a corpus, and the
+    gas-collection follow-up, which rewrites the seed between passes. Country filtering on the
+    first read is pushed into SQL rather than applied after loading.
     """
     if config.input_csv is not None:
         return load_sites(config.input_csv)
 
+    snapshot = run_seed_path(config)
+    if snapshot.exists():
+        return load_sites(snapshot)
+
     from .seed_source import load_seed_sites, seed_headers
 
     sites = load_seed_sites(iso3=config.iso3 or None)
-    return sites, seed_headers()
+    headers = seed_headers()
+    write_csv_records(snapshot, sites, headers)
+    return sites, headers
 
 
-def snapshot_seed(config: Any, sites: list[dict[str, Any]], headers: list[str]) -> Path | None:
-    """Record what a database-seeded run actually searched, inside the run directory.
-
-    Without this a run is not reproducible: the corpus moves under you between runs and nothing
-    says which version produced a given output. A CSV-seeded run already has that file, so it is
-    skipped there.
-    """
+def describe_seed(config: Any) -> str:
+    """Where resolve_sites WILL read from, for logs and the workbook's Run_Config."""
     if config.input_csv is not None:
-        return None
-    path = config.run_dir / "seed.csv"
-    write_csv_records(path, sites, headers)
-    return path
+        return str(config.input_csv)
+    if run_seed_path(config).exists():
+        return f"consolidation.consolidated_facility, pinned in {run_seed_path(config)}"
+    return "consolidation.consolidated_facility (live)"
