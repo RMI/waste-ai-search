@@ -106,8 +106,29 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
 
     sites = load_seed_sites(iso3=config.iso3 or None)
     headers = seed_headers()
-    write_csv_records(snapshot, sites, headers)
+    write_snapshot_atomically(snapshot, sites, headers)
     return sites, headers
+
+
+def write_snapshot_atomically(path: Path, rows: list[dict[str, Any]], headers: list[str]) -> None:
+    """Write the run's seed so that `path` only ever exists complete.
+
+    The snapshot's existence is what pins a run, so a write interrupted halfway - Ctrl-C, a full
+    disk, or the OneDrive client this repository lives under touching the file mid-write - would
+    otherwise leave a truncated corpus that every later phase trusts and never re-queries. The rows
+    go to a temporary file in the same directory, which is then renamed over `path`; a rename on
+    one filesystem is atomic, so a reader sees the old state or the finished file, never a partial
+    one. On failure the temporary file is removed and `path` is left untouched.
+    """
+    import os
+
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        write_csv_records(temporary, rows, headers)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def describe_seed(config: Any) -> str:

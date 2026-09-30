@@ -202,3 +202,97 @@ def test_input_csv_is_optional_on_the_config():
     """The dataclass must accept None, which is what 'seed from the database' means."""
     config = PipelineConfig(input_csv=None, run_dir=Path("/tmp/x"), run_id="t")
     assert config.input_csv is None
+
+
+# --- the snapshot is published atomically (Copilot review) ----------------------------------
+class _ExplodesOnWrite:
+    """A cell value that fails while the CSV is being written, after earlier rows are flushed."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
+    def __str__(self) -> str:
+        raise self.exc
+
+
+def _rows_that_fail_partway(exc: BaseException) -> list[dict]:
+    good = [{"site_id": str(i), "site_name": f"Site {i}"} for i in range(50)]
+    return good + [{"site_id": "bad", "site_name": _ExplodesOnWrite(exc)}]
+
+
+def test_an_interrupted_first_read_leaves_no_pinned_snapshot(tmp_path, monkeypatch):
+    """A truncated seed.csv would be trusted by every later phase and never re-queried."""
+    import waste_ai_search.seed_source as seed_source
+
+    monkeypatch.setattr(
+        seed_source, "load_seed_sites", lambda **kw: _rows_that_fail_partway(OSError("disk full"))
+    )
+    config = _config(tmp_path)
+
+    with pytest.raises(OSError, match="disk full"):
+        resolve_sites(config)
+
+    assert not run_seed_path(config).exists(), "a partial snapshot was published"
+    assert not list(config.run_dir.glob(".seed.csv*.tmp")), "the temporary file was left behind"
+
+
+def test_the_next_attempt_after_an_interruption_queries_again(tmp_path, monkeypatch):
+    """Because nothing was published, the run is not pinned to the broken read."""
+    import waste_ai_search.seed_source as seed_source
+
+    config = _config(tmp_path)
+    monkeypatch.setattr(
+        seed_source, "load_seed_sites", lambda **kw: _rows_that_fail_partway(OSError("disk full"))
+    )
+    with pytest.raises(OSError):
+        resolve_sites(config)
+
+    monkeypatch.setattr(seed_source, "load_seed_sites", lambda **kw: [{"site_id": "1", "site_name": "A"}])
+    sites, _ = resolve_sites(config)
+
+    assert [s["site_id"] for s in sites] == ["1"]
+    assert run_seed_path(config).exists()
+
+
+def test_ctrl_c_during_the_write_also_cleans_up(tmp_path, monkeypatch):
+    """KeyboardInterrupt is a BaseException, not an Exception, and must not strand a partial file."""
+    import waste_ai_search.seed_source as seed_source
+
+    monkeypatch.setattr(
+        seed_source, "load_seed_sites", lambda **kw: _rows_that_fail_partway(KeyboardInterrupt())
+    )
+    config = _config(tmp_path)
+
+    with pytest.raises(KeyboardInterrupt):
+        resolve_sites(config)
+
+    assert not run_seed_path(config).exists()
+    assert not list(config.run_dir.glob(".seed.csv*.tmp"))
+
+
+def test_a_failed_write_never_damages_an_existing_file(tmp_path):
+    from waste_ai_search.input_loader import write_snapshot_atomically
+
+    path = tmp_path / "seed.csv"
+    write_csv_records(path, [{"site_id": "keep"}], ["site_id"])
+    before = path.read_text()
+
+    with pytest.raises(OSError):
+        write_snapshot_atomically(path, _rows_that_fail_partway(OSError("boom")), ["site_id", "site_name"])
+
+    assert path.read_text() == before
+
+
+def test_a_temporary_file_stranded_by_a_hard_crash_is_not_mistaken_for_a_snapshot(tmp_path, monkeypatch):
+    """A kill -9 can skip cleanup. Only the final name pins a run, so the stray is ignored."""
+    import waste_ai_search.seed_source as seed_source
+
+    config = _config(tmp_path)
+    config.run_dir.mkdir(parents=True)
+    (config.run_dir / ".seed.csv.tmp").write_text("site_id\ntruncated")
+
+    monkeypatch.setattr(seed_source, "load_seed_sites", lambda **kw: [{"site_id": "1", "site_name": "A"}])
+    sites, _ = resolve_sites(config)
+
+    assert [s["site_id"] for s in sites] == ["1"]
+    assert "truncated" not in run_seed_path(config).read_text()
