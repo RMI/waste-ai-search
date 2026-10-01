@@ -178,7 +178,7 @@ treated as inexact: only an explicit FALSE triggers a coordinate search.
 
 **3. Everywhere else: gap-fill, plus the gas-capture gate.**
 
-- Identity (`found_site_name`, `found_latitude`, `found_longitude`) is always requested.
+- Identity (`found_facility_name`, `found_latitude`, `found_longitude`) is always requested.
 - Metadata attributes are requested **only where that facility's baseline is empty**.
 - The seven `gccs_*` attributes are requested **only where gas collection is known present** —
   212 to 603 facilities each, not 13,000. See the two-pass note above for why this loses nothing.
@@ -212,7 +212,7 @@ only trustworthy because identity was confirmed.
 
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
-| `found_site_name` | text | — | `facility_name` |
+| `found_facility_name` | text | — | `facility_name` |
 | `found_latitude` | numeric | `decimal degrees` | `latitude` |
 | `found_longitude` | numeric | `decimal degrees` | `longitude` |
 

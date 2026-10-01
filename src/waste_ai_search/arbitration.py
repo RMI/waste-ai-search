@@ -36,7 +36,7 @@ from .schema import (
 
 # Identity attributes compare against the seed columns they would replace.
 IDENTITY_BASELINE_COLUMNS = {
-    "found_site_name": "site_name",
+    "found_facility_name": "site_name",
     "found_latitude": "latitude",
     "found_longitude": "longitude",
 }

@@ -34,7 +34,7 @@ MERGEABLE_RESOLUTIONS = {"Filled empty baseline", "Overrides baseline"}
 
 # Identity findings update the seed's own identity columns rather than a gap-fill attribute.
 IDENTITY_MERGE_COLUMNS = {
-    "found_site_name": "site_name",
+    "found_facility_name": "site_name",
     "found_latitude": "latitude",
     "found_longitude": "longitude",
 }

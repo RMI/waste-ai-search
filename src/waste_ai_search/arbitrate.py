@@ -18,6 +18,7 @@ from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .prompt_builder import needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
 from .schema import (
+    canonical_attribute,
     NOT_A_WASTE_FACILITY,
     ARRAY_TARGET_ATTRIBUTES,
     ATTRIBUTE_RANGES,
@@ -110,7 +111,8 @@ def extract_evidence(
     for attr_index, attribute in enumerate(payload.get("attributes", []) or [], start=1):
         if not isinstance(attribute, dict):
             continue
-        name = normalize_scalar(attribute.get("attribute_name"))
+        # A cached response from before a rename still carries the old attribute name.
+        name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
         if name not in REQUESTABLE_ATTRIBUTES:
             warnings.append(f"Unsupported attribute_name {name!r} dropped.")
             continue

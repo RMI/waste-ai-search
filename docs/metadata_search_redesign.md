@@ -733,7 +733,7 @@ consult it.
 
 ### Identity is always requested
 
-Gap-fill scopes *metadata*, not identity. `found_site_name`, `found_latitude` and `found_longitude`
+Gap-fill scopes *metadata*, not identity. `found_facility_name`, `found_latitude` and `found_longitude`
 are requested for every site even though the seed already has them, because they are the only
 evidence that the agent researched the right facility. Auto-validating a Tier 1–2 fill (Q30) is
 only defensible if identity is confirmed — a genuine regulator document about a neighbouring

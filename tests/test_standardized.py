@@ -90,7 +90,7 @@ def test_coordinates_produce_a_point():
 
 
 def test_identity_name_lands_in_facility_name():
-    record, _notes = build_standard_record(SITE, [resolved("found_site_name", "Olushosun Landfill")], sha="x")
+    record, _notes = build_standard_record(SITE, [resolved("found_facility_name", "Olushosun Landfill")], sha="x")
     assert record["facility_name"] == "Olushosun Landfill"
 
 

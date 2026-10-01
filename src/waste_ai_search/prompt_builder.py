@@ -97,7 +97,7 @@ ATTRIBUTE_GUIDANCE = {
         "Fraction of generated landfill gas that is collected, as a value between 0 and 1. "
         "If the source gives a percentage, report the number and set unit to '%'."
     ),
-    "found_site_name": "The source's exact official or canonical name for this facility.",
+    "found_facility_name": "The source's exact official or canonical name for this facility.",
     "found_latitude": "Source-reported latitude only. Never infer from an address or nearby place.",
     "found_longitude": "Source-reported longitude only. Never infer from an address or nearby place.",
 }
@@ -258,7 +258,7 @@ Names:
   municipal records and local news will use it, not the translation.
 - Search both. Treat them as one facility with two names, never as two
   candidates: agreeing on the translated name alone is not identity confirmation.
-- Return found_site_name exactly as your source spells it, in whatever script or
+- Return found_facility_name exactly as your source spells it, in whatever script or
   language that source uses. Do not translate it back.
 """
     elif translated_source:
@@ -274,7 +274,7 @@ Names:
 - Search it in that language as well as in English. Local permits, municipal
   records and news coverage are written in it, and are where this site is
   documented.
-- Return found_site_name exactly as your source spells it, in whatever script or
+- Return found_facility_name exactly as your source spells it, in whatever script or
   language that source uses. Do not translate it back.
 """
     else:
@@ -282,7 +282,7 @@ Names:
 Names:
 - site_name is the name the source dataset recorded for this facility; it has not
   been translated. Search it as given, and in the local language too.
-- Return found_site_name exactly as your source spells it, in whatever script or
+- Return found_facility_name exactly as your source spells it, in whatever script or
   language that source uses. Do not translate it back.
 """
 
@@ -371,7 +371,7 @@ Status and closure:
   without a closure year is an incomplete answer.
 
 Identity first:
-- found_site_name, found_latitude and found_longitude establish that you found the
+- found_facility_name, found_latitude and found_longitude establish that you found the
   RIGHT facility. Always return them when a source supports them.
 - If you cannot confirm you found this specific facility, return an empty attributes
   list and explain why in search_notes. Do not return data for a different site.

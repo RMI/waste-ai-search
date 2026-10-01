@@ -584,7 +584,7 @@ def test_an_empty_baseline_reports_no_source_and_no_tier():
     s = site(
         facility_status="",
         contributing_data_sources="usa_ghgrp_2026",
-        attribute_sources="found_site_name@usa_ghgrp_2026",
+        attribute_sources="found_facility_name@usa_ghgrp_2026",
     )
     by_attr, _rows, _sources, _warn = extract(s, payload(attribute("facility_status", "active")))
     row = resolve(s, "facility_status", by_attr["facility_status"])

@@ -66,10 +66,27 @@ GAP_FILL_ATTRIBUTES = [
 # Always requested. These are how we know the agent found the *right* facility, so they are not
 # gap-filled: identity confirmation is what makes an auto-validated fill defensible (Q30).
 IDENTITY_ATTRIBUTES = [
-    "found_site_name",
+    "found_facility_name",
     "found_latitude",
     "found_longitude",
 ]
+
+# Attribute names retired in favour of a new spelling, mapped to their replacement. Data written
+# before a rename - cached agent responses, pinned seed snapshots, and the `attribute@dataset`
+# provenance in a seed - still carries the old name, so everything that reads an attribute name
+# from such data goes through canonical_attribute(). Without it, re-arbitrating an older run would
+# drop the attribute as unsupported, silently.
+ATTRIBUTE_ALIASES = {
+    # WP-531: aligned with the upstream `facility_name` column.
+    "found_site_name": "found_facility_name",
+}
+
+
+def canonical_attribute(name: Any) -> str:
+    """The current spelling of an attribute name, accepting retired ones."""
+    text = str(name).strip() if name is not None else ""
+    return ATTRIBUTE_ALIASES.get(text, text)
+
 
 # --- country policy ------------------------------------------------------------------------
 # US facilities are already well covered by usa_ghgrp_2026 and lmop_2024, both Tier 1, so an AI
@@ -190,7 +207,7 @@ ATTRIBUTE_RANGES = {
 
 # Attribute -> standardized facility column it populates.
 ATTRIBUTE_TO_STANDARD_COLUMN = {
-    "found_site_name": "facility_name",
+    "found_facility_name": "facility_name",
     "found_latitude": "latitude",
     "found_longitude": "longitude",
     "facility_status": "facility_status",

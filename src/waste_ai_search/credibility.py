@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .schema import normalize_scalar
+from .schema import canonical_attribute, normalize_scalar
 
 
 # Tier 5 closes the scale: a source we could not classify is weaker than one we classified as
@@ -246,7 +246,8 @@ def ai_filled_tiers(ai_filled_fields: Any) -> dict[str, int]:
             continue
         field, _, label = item.rpartition("@")
         tier = TIER_BY_LABEL.get(label.strip())
-        if field.strip() and tier is not None:
+        field = canonical_attribute(field)
+        if field and tier is not None:
             out[field.strip()] = tier
     return out
 
@@ -259,8 +260,9 @@ def attribute_sources(attribute_sources_text: Any) -> dict[str, str]:
         if "@" not in item:
             continue
         attribute, _, source = item.rpartition("@")
-        if attribute.strip() and source.strip():
-            out[attribute.strip()] = source.strip()
+        attribute = canonical_attribute(attribute)
+        if attribute and source.strip():
+            out[attribute] = source.strip()
     return out
 
 
