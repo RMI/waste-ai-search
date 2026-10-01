@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .credibility import SOURCE_TYPES, TIER_DEFINITIONS
+from .credibility import SOURCE_TYPES, TIER_DEFINITIONS, trusted_baseline_name
 from .schema import (
     CONTRADICTION_CHECK_SOURCES,
     CORROBORATING_ATTRIBUTES,
@@ -185,7 +185,13 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
         # everything else for these facilities is government-sourced and left alone.
         return list(COORDINATE_ATTRIBUTES) if location_is_inexact(site) else []
 
-    requested = list(IDENTITY_ATTRIBUTES)
+    # Identity is always requested, except a name a Tier 1-2 source already supplied (WP-531).
+    # Coordinates are still asked of every facility.
+    requested = [
+        name
+        for name in IDENTITY_ATTRIBUTES
+        if not (name == "found_facility_name" and trusted_baseline_name(site))
+    ]
     gas_present = has_gas_collection(site)
     for field in GAP_FILL_ATTRIBUTES:
         if not is_blank(site.get(field)):
@@ -286,6 +292,24 @@ Names:
   language that source uses. Do not translate it back.
 """
 
+    asks_name = "found_facility_name" in attributes
+    if not asks_name:
+        # The name came from a Tier 1-2 source and is not being searched. Asking the agent to
+        # return one anyway would contradict "only the attributes listed below are wanted".
+        names_guidance = names_guidance.replace(
+            "- Return found_facility_name exactly as your source spells it, in whatever script or\n"
+            "  language that source uses. Do not translate it back.\n",
+            "- site_name is already confirmed by an authoritative source. Use it to search; do not\n"
+            "  return a facility name.\n",
+        )
+    identity_rule = (
+        "- found_facility_name, found_latitude and found_longitude establish that you found the\n"
+        "  RIGHT facility. Always return them when a source supports them."
+        if asks_name
+        else "- found_latitude and found_longitude establish that you found the RIGHT facility.\n"
+        "  Always return them when a source supports them. The name is already confirmed."
+    )
+
     closure_focus = ""
     if "closing_year" in attributes and looks_inactive(site):
         closure_focus = (
@@ -371,8 +395,7 @@ Status and closure:
   without a closure year is an incomplete answer.
 
 Identity first:
-- found_facility_name, found_latitude and found_longitude establish that you found the
-  RIGHT facility. Always return them when a source supports them.
+{identity_rule}
 - If you cannot confirm you found this specific facility, return an empty attributes
   list and explain why in search_notes. Do not return data for a different site.
 

@@ -178,7 +178,7 @@ treated as inexact: only an explicit FALSE triggers a coordinate search.
 
 **3. Everywhere else: gap-fill, plus the gas-capture gate.**
 
-- Identity (`found_facility_name`, `found_latitude`, `found_longitude`) is always requested.
+- Identity coordinates (`found_latitude`, `found_longitude`) are always requested. `found_facility_name` is too, **except** where the seed's name came from a Tier 1–2 source (about 10,600 facilities): there identity rests on coordinates, and the name is not re-searched. This needs per-attribute provenance; with none, the name is still asked.
 - Metadata attributes are requested **only where that facility's baseline is empty**.
 - The seven `gccs_*` attributes are requested **only where gas collection is known present** —
   212 to 603 facilities each, not 13,000. See the two-pass note above for why this loses nothing.
