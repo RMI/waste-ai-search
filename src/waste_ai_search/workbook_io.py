@@ -69,12 +69,16 @@ REVIEW_INSTRUCTIONS = [
             "exists in resolved.csv - nothing lives only in this tab."
         ),
         "sme_action": (
-            "Work top to bottom. Open winning_source_url and check the source says this, about "
-            "THIS facility. Set validation_status to Validated or Rejected, put your name in "
+            "Work top to bottom. Compare site_name with original_site_name - the source's own "
+            "spelling - and note any translation problem in translation_note. Open "
+            "winning_source_url and check the source says this, about THIS facility. Set validation_status to Validated or Rejected, put your name in "
             "reviewer and the date in reviewed_date, and say why in researcher_notes. An empty "
             "queue means nothing needs you."
         ),
-        "editable": "validation_status, reviewer, reviewed_date, researcher_notes - nothing else",
+        "editable": (
+            "validation_status, reviewer, reviewed_date, researcher_notes, translation_note - "
+            "nothing else"
+        ),
     },
     {
         "tab_name": "Contradictions",

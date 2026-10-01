@@ -409,6 +409,8 @@ The five columns that decide your judgement:
 
 Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab.
 
+**Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `resolved.csv` and `evidence.csv`; they are blank where the source was never translated.
+
 ### 3. Decide
 
 | `resolution` | What to check |

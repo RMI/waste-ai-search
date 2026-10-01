@@ -299,6 +299,20 @@ def merge_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
     return merged
 
 
+def attach_site_names(rows: list[dict[str, Any]], sites_by_id: dict[str, dict[str, Any]]) -> None:
+    """Stamp each row with the site's translated name, its own spelling and the source language.
+
+    `site_name` is only filled where a row lacks one: a row built from the site already carries
+    it, and must not be overwritten.
+    """
+    for row in rows:
+        site = sites_by_id.get(normalize_scalar(row.get("site_id")), {})
+        if not normalize_scalar(row.get("site_name")):
+            row["site_name"] = normalize_scalar(site.get("site_name"))
+        row["original_site_name"] = normalize_scalar(site.get("original_site_name"))
+        row["source_language"] = normalize_scalar(site.get("source_language"))
+
+
 def contradiction_rows(
     resolved: list[dict[str, Any]], evidence: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -330,6 +344,8 @@ def contradiction_rows(
             {
                 "site_id": row["site_id"],
                 "site_name": row["site_name"],
+                "original_site_name": row.get("original_site_name", ""),
+                "source_language": row.get("source_language", ""),
                 "country_iso3": row["country_iso3"],
                 "facility_type": NOT_A_WASTE_FACILITY,
                 "winning_source_tier": row["winning_source_tier"],
@@ -688,6 +704,12 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
 
     for lead in payload_leads(cached, sites_by_id, config.run_id):
         leads.append(lead)
+
+    # One pass fills the seed's name fields into every row list, keyed by site. The review queue
+    # and the Contradictions view are both derived from resolved_rows below, so they inherit the
+    # names rather than each builder having to remember them.
+    for rows in (evidence_rows, resolved_rows, leads):
+        attach_site_names(rows, sites_by_id)
 
     review_queue: list[dict[str, Any]] = []
     for row in resolved_rows:

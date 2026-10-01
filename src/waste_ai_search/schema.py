@@ -394,8 +394,12 @@ BOOLEAN_INPUT_MAP = {
 
 
 # --- output levels (Q5) ------------------------------------------------------------------------
+# WP-531: every SME-facing output carries the translated site_name beside the source's own
+# spelling and its language, so a reviewer can check results against the original name.
+SITE_NAME_COLUMNS = ["site_name", "original_site_name", "source_language"]
+
 EVIDENCE_HEADERS = [
-    "evidence_id", "run_id", "dataset_version", "site_id", "internal_facility_id",
+    "evidence_id", "run_id", "dataset_version", "site_id", *SITE_NAME_COLUMNS, "internal_facility_id",
     "attribute_name", "claimed_value", "claimed_unit", "normalized_value", "normalized_unit",
     "unit_conversion_note", "mapped_value", "mapping_note", "value_basis", "value_date",
     "agent_confidence", "source_id", "source_tier", "agent_proposed_tier", "tier_rule_applied",
@@ -404,7 +408,7 @@ EVIDENCE_HEADERS = [
 ]
 
 RESOLVED_HEADERS = [
-    "site_id", "internal_facility_id", "site_name", "country_iso3", "attribute_name",
+    "site_id", "internal_facility_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name",
     "baseline_value", "baseline_source", "baseline_tier",
     "resolved_value", "resolved_unit", "resolution", "resolution_rule",
     "winning_evidence_id", "winning_source_tier", "winning_source_url", "best_tier_available",
@@ -424,14 +428,16 @@ SOURCES_HEADERS = [
 
 # The filtered queue an SME actually works through (Q31).
 REVIEW_QUEUE_HEADERS = [
-    "site_id", "site_name", "country_iso3", "attribute_name", "resolution",
+    # translation_note sits beside the names it is about: the SME compares the two spellings and
+    # records a translation problem there, separately from researcher_notes.
+    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "attribute_name", "resolution",
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
     "winning_source_tier", "winning_source_url", "value_date", "agreeing_source_count",
     "evidence_summary", "validation_status", "reviewer", "reviewed_date", "researcher_notes",
 ]
 
 SUPPLEMENTARY_LEADS_HEADERS = [
-    "run_id", "site_id", "site_name", "country_iso3", "attribute_name", "lead_value",
+    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name", "lead_value",
     "source_tier", "lead_summary", "url", "exclusion_reason",
 ]
 
@@ -447,7 +453,7 @@ PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 # still recorded on the Review_Queue row; this view exists so the verdicts can be read together,
 # beside what the same run found about closure.
 CONTRADICTION_HEADERS = [
-    "site_id", "site_name", "country_iso3", "facility_type", "winning_source_tier",
+    "site_id", *SITE_NAME_COLUMNS, "country_iso3", "facility_type", "winning_source_tier",
     "winning_source_url", "evidence_summary", "quoted_evidence_short", "closure_also_reported",
     "validation_status",
 ]
