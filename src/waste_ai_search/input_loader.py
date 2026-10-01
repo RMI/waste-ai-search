@@ -95,10 +95,17 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
     gas-collection follow-up, which rewrites the seed between passes. Country filtering on the
     first read is pushed into SQL rather than applied after loading.
     """
+    snapshot = run_seed_path(config)
     if config.input_csv is not None:
+        # A supplied file is pinned into the run too. It used to be skipped on the grounds that the
+        # file already is the record - but it often lives somewhere temporary, and once it is gone
+        # the run can no longer be re-arbitrated. A file inside the run directory is the run's own
+        # (the pass-2 follow-up's refreshed seed) and must never replace the original snapshot.
+        if not snapshot.exists() and not _inside(config.input_csv, config.run_dir):
+            copy_snapshot_atomically(config.input_csv, snapshot)
         return load_sites(config.input_csv)
 
-    snapshot = run_seed_path(config)
+
     if snapshot.exists():
         return load_sites(snapshot)
 
@@ -108,6 +115,29 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
     headers = seed_headers()
     write_snapshot_atomically(snapshot, sites, headers)
     return sites, headers
+
+
+def _inside(path: Path, directory: Path) -> bool:
+    try:
+        Path(path).resolve().relative_to(Path(directory).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def copy_snapshot_atomically(source: Path, path: Path) -> None:
+    """Pin a supplied seed file into the run, byte for byte, never as a partial file."""
+    import os
+    import shutil
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        shutil.copyfile(source, temporary)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def write_snapshot_atomically(path: Path, rows: list[dict[str, Any]], headers: list[str]) -> None:
@@ -134,6 +164,8 @@ def write_snapshot_atomically(path: Path, rows: list[dict[str, Any]], headers: l
 def describe_seed(config: Any) -> str:
     """Where resolve_sites WILL read from, for logs and the workbook's Run_Config."""
     if config.input_csv is not None:
+        if run_seed_path(config).exists() and not _inside(config.input_csv, config.run_dir):
+            return f"{config.input_csv}, pinned in {run_seed_path(config)}"
         return str(config.input_csv)
     if run_seed_path(config).exists():
         return f"consolidation.consolidated_facility, pinned in {run_seed_path(config)}"
