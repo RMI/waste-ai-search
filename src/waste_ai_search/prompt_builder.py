@@ -38,9 +38,34 @@ ATTRIBUTE_UNITS = {
     "gccs_collection_efficiency": "fraction between 0 and 1",
 }
 
+# Definitions for each facility_type (WP-531). Labelled with the enum values exactly, since the
+# agent must answer with those strings; the SME's "open dumpsite" is the `Dumpsite` value.
+#
+# Prompted by pilot site 14146, "DIPOSIT CONTROLAT DE MANRESA (II)": the agent read Catalan
+# "dipòsit controlat" literally as Controlled Dumpsite, but the site is a sanitary landfill. The
+# definitions say what each type IS; the last sentence is what stops the name from deciding it.
+FACILITY_TYPE_DEFINITIONS = (
+    " Definitions: "
+    "Dumpsite - an open dumpsite: an unmanaged area where mixed waste is disposed of without "
+    "liners or cover systems, allowing anaerobic decomposition under uncontrolled conditions that "
+    "lead to diffuse methane emissions. "
+    "Controlled Dumpsite - a dumpsite with some operational measures to control emissions, such as "
+    "compaction, limited soil cover, or restricted access; some have simple gas collection "
+    "equipment installed. "
+    "Sanitary Landfill - a fully engineered facility with liners, leachate and groundwater "
+    "management, and often but not necessarily a landfill gas management system. "
+    "Classify from what sources say about the facility's engineering and operation, NEVER from "
+    "words in its name. Names are often regulatory terms or literal translations: Catalan "
+    "'dipòsit controlat' and Spanish 'vertedero controlado' can describe a fully engineered "
+    "sanitary landfill, and 'controlled' in a name is not evidence of a Controlled Dumpsite."
+)
+
 ATTRIBUTE_GUIDANCE = {
     "facility_status": "Allowed values only: Active, Inactive. A closed or former site is Inactive.",
-    "facility_type": "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility.",
+    "facility_type": (
+        "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility."
+        + FACILITY_TYPE_DEFINITIONS
+    ),
     "cover_types": "Array. Allowed members only: clay cover, organic cover, sand cover, other soil mixture.",
     "has_landfill_gas_collection": "Yes, No, or Unknown.",
     "opening_year": "Four-digit year the facility opened.",
@@ -233,6 +258,7 @@ def build_site_prompt(site: dict[str, Any], attributes: list[str] | None = None)
         if name == "facility_type" and unconfirmed_type:
             text = (
                 f"Allowed values only: {', '.join(FACILITY_TYPE_ALLOWED)}."
+                + FACILITY_TYPE_DEFINITIONS
                 + NOT_A_WASTE_FACILITY_GUIDANCE
             )
         return text
