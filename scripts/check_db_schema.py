@@ -180,6 +180,21 @@ def main() -> int:
         else:
             print(f"ok    {name} ({source}): {len(committed)} values")
 
+    # 4b. Values the code emits that the database does not accept yet. Reported, not failed: they
+    #     are declared deliberately in PENDING_UPSTREAM_FACILITY_TYPES. But a load containing one
+    #     is rejected, and COPY is all-or-nothing, so it must never be a surprise.
+    from waste_ai_search.schema import PENDING_UPSTREAM_FACILITY_TYPES
+
+    live_types = constrained.get("facility_type") or enum_values.get("facility_type") or []
+    for value in PENDING_UPSTREAM_FACILITY_TYPES:
+        if value in live_types:
+            print(f"ok    facility_type {value!r}: now accepted by the database - remove it from "
+                  "PENDING_UPSTREAM_FACILITY_TYPES and regenerate db_enums.py")
+        else:
+            print(f"WARN  facility_type {value!r}: emitted by the pipeline but NOT accepted by the "
+                  "database; any load containing it will be rejected until the enum and "
+                  "chk_facility_type are extended upstream")
+
     # 5. The raw-name joins. Every table, join key, name, translation and language column in
     #    RAW_NAME_SOURCES is named as a string, so a typo in any of them is invisible to the
     #    offline tests and to every check above -- it would surface as a failure in the middle of

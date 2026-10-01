@@ -11,6 +11,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
 from .schema import (
+    CONTRADICTION_HEADERS,
     DEFINITION_VALUES,
     FIELD_TO_DEFINITION,
     PARSE_WARNING_HEADERS,
@@ -74,6 +75,24 @@ REVIEW_INSTRUCTIONS = [
             "queue means nothing needs you."
         ),
         "editable": "validation_status, reviewer, reviewed_date, researcher_notes - nothing else",
+    },
+    {
+        "tab_name": "Contradictions",
+        "purpose": (
+            "Facilities where facility_type came back 'Not a Waste Facility': a source says the "
+            "site was never a waste disposal site - a quarry, a mine, a yard that never took "
+            "waste. Only facilities known solely from OSM or Global Plastic Watch are offered this "
+            "value. A closed, capped or redeveloped landfill is NOT one; closure_also_reported "
+            "flags any row where the same run also found the site closed, the likeliest "
+            "misreading. The value IS promoted to the standardized table like any facility_type. "
+            "An empty tab means no source contradicted any checked site - NOT that they were "
+            "confirmed, since absence of coverage is not evidence against a site."
+        ),
+        "sme_action": (
+            "Read only. Each row also appears in Review_Queue; record the decision there. "
+            "Reject any row that describes a closed landfill."
+        ),
+        "editable": "nothing",
     },
     {
         "tab_name": "(file) resolved.csv",
@@ -190,6 +209,7 @@ def write_review_workbook(
     run_config: list[dict[str, Any]],
     review_queue: list[dict[str, Any]],
     leads: list[dict[str, Any]],
+    contradictions: list[dict[str, Any]] | None = None,
     parse_warnings: list[dict[str, Any]],
 ) -> Path:
     """The SME-facing artifact: only rows that need a human decision (Q31).
@@ -208,6 +228,9 @@ def write_review_workbook(
 
     ws_queue = wb.create_sheet("Review_Queue")
     write_sheet(ws_queue, REVIEW_QUEUE_HEADERS, review_queue)
+
+    ws_contradictions = wb.create_sheet("Contradictions")
+    write_sheet(ws_contradictions, CONTRADICTION_HEADERS, contradictions or [])
 
     ws_leads = wb.create_sheet("Leads")
     write_sheet(ws_leads, SUPPLEMENTARY_LEADS_HEADERS, leads)

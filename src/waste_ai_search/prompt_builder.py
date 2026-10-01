@@ -5,6 +5,10 @@ from typing import Any
 
 from .credibility import SOURCE_TYPES, TIER_DEFINITIONS
 from .schema import (
+    CONTRADICTION_CHECK_SOURCES,
+    CORROBORATING_ATTRIBUTES,
+    FACILITY_TYPE_ALLOWED,
+    NOT_A_WASTE_FACILITY,
     COORDINATES_ONLY_ISO3,
     COORDINATE_ATTRIBUTES,
     DEFINITION_VALUES,
@@ -99,6 +103,23 @@ ATTRIBUTE_GUIDANCE = {
 }
 
 
+# Appended to facility_type's guidance only for facilities nothing independently confirms (WP-525).
+NOT_A_WASTE_FACILITY_GUIDANCE = (
+    f" This site is known only from a map or satellite detection, so its type is unconfirmed. If "
+    f"a source positively states it is, and always was, something other than a waste disposal "
+    f"facility - a quarry, a mine, an aggregate or construction yard that never accepted waste, or "
+    f"a feature mapped in the wrong place - return facility_type = '{NOT_A_WASTE_FACILITY}', "
+    f"describe what the site actually is in evidence_summary, and quote the source. "
+    f"A CLOSED, CAPPED, RECLAIMED, REVEGETATED OR REDEVELOPED LANDFILL IS STILL A WASTE DISPOSAL "
+    f"FACILITY: buried waste keeps generating methane for decades, which is why the site is "
+    f"tracked. A landfill that is now a park, a solar farm or a sports ground keeps its landfill "
+    f"or dumpsite type, and its closure goes in facility_status = Inactive and closing_year. The "
+    f"question is 'was this ever a waste disposal site?', not 'is it operating today?'. If no "
+    f"source says the site was never a waste facility, never return '{NOT_A_WASTE_FACILITY}' - "
+    f"finding nothing about a site is not evidence against it."
+)
+
+
 # Name fragments that signal a closed site, so the prompt can push on closing_year up front.
 CLOSURE_NAME_HINTS = ("closed", "close)", "former", "abandoned", "decommission", "shut")
 
@@ -133,6 +154,24 @@ def location_is_inexact(site: dict[str, Any]) -> bool:
     Unknown is not inexact: only an explicit FALSE asks for a coordinate search.
     """
     return parse_tristate_bool(site.get("is_location_exact"))[0] is False
+
+
+def needs_contradiction_check(site: dict[str, Any]) -> bool:
+    """Whether nothing independently confirms this is a disposal site (WP-525).
+
+    True when every contributing source is in CONTRADICTION_CHECK_SOURCES and none of the
+    corroborating attributes has a value. Once a pass fills one of those, the site has
+    corroboration and is not asked again. Corroborated facilities never see the question, so
+    their prompts carry none of its guidance.
+    """
+    sources = [
+        token.strip().lower()
+        for token in normalize_scalar(site.get("contributing_data_sources")).split("+")
+        if token.strip()
+    ]
+    if not sources or not all(source in CONTRADICTION_CHECK_SOURCES for source in sources):
+        return False
+    return all(is_blank(site.get(field)) for field in CORROBORATING_ATTRIBUTES)
 
 
 def requested_attributes(site: dict[str, Any]) -> list[str]:
@@ -179,11 +218,24 @@ def build_site_prompt(site: dict[str, Any], attributes: list[str] | None = None)
         if site.get(key)
     }
 
+    # Only a facility nothing confirms is offered "Not a Waste Facility". Every other prompt carries
+    # the four database values and none of the addendum.
+    unconfirmed_type = needs_contradiction_check(site)
+
+    def guidance_for(name: str) -> str:
+        text = ATTRIBUTE_GUIDANCE.get(name, "")
+        if name == "facility_type" and unconfirmed_type:
+            text = (
+                f"Allowed values only: {', '.join(FACILITY_TYPE_ALLOWED)}."
+                + NOT_A_WASTE_FACILITY_GUIDANCE
+            )
+        return text
+
     targets = [
         {
             "attribute_name": name,
             "unit": ATTRIBUTE_UNITS.get(name, ""),
-            "guidance": ATTRIBUTE_GUIDANCE.get(name, ""),
+            "guidance": guidance_for(name),
         }
         for name in attributes
     ]
@@ -286,12 +338,19 @@ Names:
         "value_basis": DEFINITION_VALUES["value_basis"],
         "confidence_score": DEFINITION_VALUES["confidence_score"],
     }
+    if not unconfirmed_type:
+        # DEFINITION_VALUES carries the pending value for the workbook; a prompt that is not
+        # offering it must not list it either.
+        definitions["facility_type"] = [
+            value for value in definitions["facility_type"] if value != NOT_A_WASTE_FACILITY
+        ]
 
     return f"""You are a waste-sector data discovery agent for WasteMAP.
 
 Task:
-Find source-backed data for this waste disposal site. Search in English and in the
-local language, using the site name, coordinates, municipality, and admin names.
+Find source-backed data for this site, recorded as a waste disposal facility. Search
+in English and in the local language, using the site name, coordinates,
+municipality, and admin names.
 {names_guidance}
 Only the attributes listed below are wanted. Everything else about this facility is
 already known and must not be researched or returned.

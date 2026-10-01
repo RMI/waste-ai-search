@@ -89,6 +89,48 @@ COORDINATES_ONLY_ISO3 = {"BRA"}
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
 
 
+# --- not a waste facility (WP-525) -------------------------------------------------------------
+# For facilities nothing independently confirms, facility_type may also come back as
+# "Not a Waste Facility": a source positively says the site is, and always was, something else -
+# a quarry, a mine, a yard that never took waste. It is a contradiction, not a verification:
+# finding nothing leaves facility_type empty, never "Not a Waste Facility".
+#
+# It is promoted like any other facility_type value, so it reaches the standardized table and the
+# next pass's seed. It is also always routed to review, so every such verdict is seen by a human.
+#
+# PENDING UPSTREAM: the database's `facility_type` enum and chk_facility_type do not carry this
+# value yet, so a load containing it will be rejected - and COPY is all-or-nothing, so one such
+# row blocks the whole run's load. transformed.transformed_ai_search does not exist yet either,
+# so no load runs today; the enum value should land upstream with that table.
+NOT_A_WASTE_FACILITY = "Not a Waste Facility"
+PENDING_UPSTREAM_FACILITY_TYPES = [NOT_A_WASTE_FACILITY]
+FACILITY_TYPE_ALLOWED = [*FACILITY_TYPE_VALUES, *PENDING_UPSTREAM_FACILITY_TYPES]
+
+# Asked only where nothing independently confirms a disposal site exists: facilities whose every
+# contributing source is one of these Tier 4 datasets. OSM is a crowd-mapped polygon and Global
+# Plastic Watch a satellite detection, and neither says anything about what the site is used for.
+# Together 8,564 of 19,492 facilities, none with an operational baseline.
+CONTRADICTION_CHECK_SOURCES = {"osm_2022", "gpw_2021"}
+
+# What counts as corroboration. `area_square_meters` is deliberately absent: for an OSM site it is
+# measured from the same polygon that is in question, so it corroborates nothing. Once a pass has
+# filled any of these, the site is no longer uncorroborated and is not asked again.
+CORROBORATING_ATTRIBUTES = [
+    "facility_status",
+    "facility_type",
+    "opening_year",
+    "closing_year",
+    "has_landfill_gas_collection",
+    "annual_incoming_waste_metric_tonnes",
+    "waste_in_place_metric_tonnes",
+]
+
+# (attribute, value) pairs never signed off by the pipeline, whatever the tier. A Tier 1 regulator
+# calling a site a quarry would otherwise auto-validate as an ordinary empty-baseline fill. This
+# only sets validation_status - the value is still promoted.
+ALWAYS_REVIEW_VALUES = {("facility_type", NOT_A_WASTE_FACILITY)}
+
+
 # Computed locally from found coordinates. No source, no tier (Q12).
 CALCULATED_ATTRIBUTES = [
     "distance_to_original_coordinates_km",
@@ -200,6 +242,9 @@ FACILITY_TYPE_MAP = {
     # generate_enums.py will pick the value up and this line becomes
     # "transfer station": "Transfer Station".
     "transfer station": None,
+    "not a waste facility": NOT_A_WASTE_FACILITY,
+    "not a waste site": NOT_A_WASTE_FACILITY,
+    "not waste": NOT_A_WASTE_FACILITY,
     "unknown": None,
 }
 
@@ -312,7 +357,7 @@ def bucket_waste_depth(meters: Any) -> tuple[str | None, str]:
 
 ENUM_MAPS = {
     "facility_status": (FACILITY_STATUS_MAP, FACILITY_STATUS_VALUES),
-    "facility_type": (FACILITY_TYPE_MAP, FACILITY_TYPE_VALUES),
+    "facility_type": (FACILITY_TYPE_MAP, FACILITY_TYPE_ALLOWED),
     "cover_types": (COVER_TYPE_MAP, COVER_TYPE_VALUES),
     "gccs_energy_project_type": (GCCS_ENERGY_PROJECT_TYPE_MAP, GCCS_ENERGY_PROJECT_TYPE_VALUES),
     "gccs_current_project_status": (GCCS_CURRENT_PROJECT_STATUS_MAP, GCCS_CURRENT_PROJECT_STATUS_VALUES),
@@ -375,6 +420,15 @@ FOUNDRY_RUN_LOG_HEADERS = [
 
 PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 
+# A read-only lens on the Review_Queue rows where facility_type came back "Not a Waste Facility". The decision is
+# still recorded on the Review_Queue row; this view exists so the verdicts can be read together,
+# beside what the same run found about closure.
+CONTRADICTION_HEADERS = [
+    "site_id", "site_name", "country_iso3", "facility_type", "winning_source_tier",
+    "winning_source_url", "evidence_summary", "quoted_evidence_short", "closure_also_reported",
+    "validation_status",
+]
+
 
 # --- standardized facility table (Q19) --------------------------------------------------------
 AI_SEARCH_DATA_SOURCE = "ai_search_2026"
@@ -416,7 +470,7 @@ LEAD_ROUTED_RESOLUTIONS = {"Conflict - lower credibility"}
 DEFINITION_VALUES = {
     "attribute_name": REQUESTABLE_ATTRIBUTES,
     "facility_status": FACILITY_STATUS_VALUES,
-    "facility_type": FACILITY_TYPE_VALUES,
+    "facility_type": FACILITY_TYPE_ALLOWED,
     "cover_type": COVER_TYPE_VALUES,
     "waste_depth": WASTE_DEPTH_VALUES,
     "gccs_energy_project_type": GCCS_ENERGY_PROJECT_TYPE_VALUES,
