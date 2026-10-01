@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
 from waste_ai_search.schema import NOT_A_WASTE_FACILITY
 
@@ -91,3 +93,43 @@ def test_corroborated_sites_still_see_exactly_the_four_database_values():
         "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility."
     )
     assert NOT_A_WASTE_FACILITY not in text
+
+
+# --- after the live check on Manresa (18133) --------------------------------------------------
+def test_the_definitions_say_what_does_not_distinguish_the_types():
+    """The agent found compaction and downgraded an engineered landfill to Controlled Dumpsite."""
+    text = guidance(corroborated_site())
+    assert "Compaction, soil cover and restricted access occur at BOTH" in text
+    assert "What decides it is engineered containment" in text
+
+
+def test_an_eu_site_gets_the_landfill_directive_prior():
+    text = guidance(corroborated_site())  # ESP
+    assert "EU Landfill Directive (1999/31/EC)" in text
+    assert "is therefore a Sanitary Landfill unless a source says it lacks that engineering" in text
+
+
+def test_the_directive_prior_carries_its_2009_limit():
+    """Existing landfills had until July 2009 to comply or close; an older closed site may never
+    have been engineered, so the prior must not be applied to it blindly."""
+    text = guidance(corroborated_site())
+    assert "accepted waste after July 2009" in text
+    assert "closed before July 2009 may predate these requirements" in text
+
+
+@pytest.mark.parametrize("iso3", ["NOR", "ISL", "LIE"])
+def test_eea_states_are_bound_too(iso3):
+    assert "EU Landfill Directive" in guidance(corroborated_site(country_iso3=iso3))
+
+
+@pytest.mark.parametrize("iso3", ["NGA", "MEX", "USA", "GBR", "CHE", "SRB"])
+def test_sites_outside_the_directive_do_not_get_the_prior(iso3):
+    """GBR applies equivalent rules through retained law but is no longer bound by the Directive;
+    CHE and SRB report to E-PRTR without being bound by it."""
+    assert "EU Landfill Directive" not in guidance(corroborated_site(country_iso3=iso3))
+
+
+def test_an_unconfirmed_eu_site_gets_the_prior_and_the_not_a_waste_addendum():
+    text = guidance(unconfirmed_site())  # ESP, osm-only
+    assert "EU Landfill Directive" in text
+    assert NOT_A_WASTE_FACILITY in text
