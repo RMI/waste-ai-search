@@ -44,6 +44,12 @@ WASTE_SITE_BASE_EXTRA_FIELDS = [
 GAP_FILL_ATTRIBUTES = [
     "facility_status",
     "facility_type",
+    # WP-531. Review layer only for now: the upstream standardized spec has no operator column, so
+    # it is deliberately absent from ATTRIBUTE_TO_STANDARD_COLUMN and never reaches the
+    # standardized table. consolidated_facility has no operator either, so the baseline is always
+    # empty and it is asked of every searched facility. Promotion is a follow-up once upstream adds
+    # the column - one entry in ATTRIBUTE_TO_STANDARD_COLUMN and STANDARDIZED_FACILITY_COLUMNS.
+    "operator",
     "opening_year",
     "closing_year",
     "has_landfill_gas_collection",

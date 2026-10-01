@@ -222,6 +222,7 @@ only trustworthy because identity was confirmed.
 |---|---|---|---|
 | `facility_status` | enum | — | `facility_status` |
 | `facility_type` | enum | — | `facility_type` |
+| `operator` ‡ | text | — | *none yet — review layer only* |
 | `opening_year` | integer year | `year` | `opening_year` |
 | `closing_year` | integer year | `year` | `closing_year` |
 | `has_landfill_gas_collection` | boolean | — | `has_landfill_gas_collection` |
@@ -232,6 +233,8 @@ only trustworthy because identity was confirmed.
 | `has_cover` | boolean | — | `has_cover` |
 | `cover_types` | enum array | — | `cover_types` |
 | `has_biocover` | boolean | — | `has_biocover` |
+
+‡ **`operator` is review-layer only.** The upstream standardized spec has no operator column yet, so a found operator reaches `resolved.csv` and the review queue but never the standardized table. Promoting it is a follow-up once upstream adds the column. `consolidated_facility` has no operator either, so it is asked of every searched facility.
 
 `waste_depth` is the only **derived** categorical. The agent still reports a number and its
 unit; the pipeline converts to metres, then bins on the spec's 5 m boundary. The metre value is

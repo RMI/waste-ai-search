@@ -68,6 +68,12 @@ ATTRIBUTE_GUIDANCE = {
     ),
     "cover_types": "Array. Allowed members only: clay cover, organic cover, sand cover, other soil mixture.",
     "has_landfill_gas_collection": "Yes, No, or Unknown.",
+    "operator": (
+        "The organisation that runs the facility day to day - a company, municipality, utility "
+        "or public agency - as the source names it. If the source distinguishes them, give the "
+        "operator, not the owner, landlord or regulator. Text only; if a concession changed hands, "
+        "give the operator for the source's value_date."
+    ),
     "opening_year": "Four-digit year the facility opened.",
     "closing_year": (
         "Four-digit year the facility closed or is expected to close. REQUIRED whenever the "
