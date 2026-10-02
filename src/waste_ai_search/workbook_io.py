@@ -126,6 +126,12 @@ def write_sheet(ws, headers: list[str], rows: list[dict[str, Any]]) -> None:
     ws.append(headers)
     for record in rows:
         ws.append([clean_cell_text(record.get(header, "")) for header in headers])
+        # openpyxl stores any string starting with "=" as a formula, and Excel evaluates it when the
+        # workbook opens. Every value here is agent or source text, so none of it may be a formula:
+        # "=HYPERLINK(...)" in a quote must be shown, not run.
+        for cell in ws[ws.max_row]:
+            if cell.data_type == "f":
+                cell.data_type = "s"
     style_sheet(ws)
 
 

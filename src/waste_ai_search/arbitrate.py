@@ -725,7 +725,11 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         for row in site_evidence:
             if row["promotion_eligible"] == "TRUE" or not row["exclusion_reason"]:
                 continue
-            if row["attribute_name"] in promoted_attributes:
+            # A finding already promoted is not listed again as a lead. A dead-link source is the
+            # exception: it never won anything - it was excluded before resolution - so the lead is
+            # the only place it is recorded, and without this it vanished whenever another source
+            # filled the same attribute.
+            if row["attribute_name"] in promoted_attributes and row.get("link_status") != BROKEN:
                 continue
             leads.append(
                 {

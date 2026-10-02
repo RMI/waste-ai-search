@@ -15,5 +15,7 @@ def no_real_link_checks(monkeypatch, request):
     """
     import waste_ai_search.link_check as link_check
 
+    # Kept so the guard's own tests can exercise the real fetch against a loopback-only server.
+    link_check.__dict__.setdefault("_original_fetch", link_check._fetch)
     monkeypatch.setattr(link_check, "_fetch", lambda session, url, throttle: 200)
     monkeypatch.setattr(link_check, "PER_HOST_DELAY_SECONDS", 0.0)

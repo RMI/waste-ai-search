@@ -13,13 +13,22 @@ from real reviews there:
   literal comma, then the trailing slash toggled. The URL is never blanket-decoded, since most
   percent-encoded URLs work as given.
 
+Agent-cited URLs are untrusted, and this fetches them automatically from a machine that is often
+on the RMI VPN. So a request may only reach a public internet address: every hop, redirects
+included, is resolved and refused if any address is private, loopback, link-local (which includes
+cloud metadata at 169.254.169.254) or otherwise non-global. The connection is then made to the
+address that was checked, never re-resolved, so a hostile DNS answer cannot swap in an internal
+address between the check and the connect. A refused URL is Unverified and is never fetched.
+
 One difference from RDP-63: the fetching happens in the SEARCH phase, which needs the network
 anyway, and the verdicts are kept in `link_check.json` in the run directory. Arbitration only reads
 that file, so `arbitrate` stays offline as the CLI promises.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -77,7 +86,10 @@ def url_variants(url: str) -> list[str]:
     decoded = url.replace("%2C", ",").replace("%2c", ",")
     if decoded != url:
         variants.append(decoded)
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return variants
     if not parsed.query and not parsed.fragment:
         toggled = url.rstrip("/") if url.endswith("/") else url + "/"
         if toggled != url:
@@ -93,10 +105,78 @@ def classify(status: Any) -> str:
     return BROKEN if status == "TooManyRedirects" else UNVERIFIED
 
 
+class BlockedDestination(OSError):
+    """The URL resolves to an address the link checker must not reach."""
+
+
+def _public_address(host: str, port: int) -> str:
+    """Resolve `host` and return an address to connect to, or raise if ANY address is non-public.
+
+    All addresses are checked, not just the first, so a name that resolves to one public and one
+    internal address cannot be used to reach the internal one.
+    """
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError) as exc:
+        raise BlockedDestination(f"{host} does not resolve") from exc
+    addresses = []
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0])
+        mapped = getattr(address, "ipv4_mapped", None)
+        if not (mapped or address).is_global:
+            raise BlockedDestination(f"{host} resolves to non-public address {address}")
+        addresses.append(str(address))
+    if not addresses:
+        raise BlockedDestination(f"{host} has no address")
+    return addresses[0]
+
+
+def _pinned_adapter_class():
+    """An HTTPAdapter that connects only to an address it has checked, and never re-resolves.
+
+    Built lazily so importing this module does not import requests. For HTTPS the TLS handshake
+    still uses the real hostname (SNI) and the certificate is verified against it, so pinning the
+    IP changes where the socket goes, not what is trusted. Redirects pass through `send` hop by
+    hop, so every hop is checked the same way.
+    """
+    import requests
+
+    class PinnedAdapter(requests.adapters.HTTPAdapter):
+        def send(self, request, *args, **kwargs):
+            try:
+                netloc = urlparse(request.url).netloc
+            except ValueError as exc:
+                raise requests.exceptions.InvalidURL(str(exc)) from exc
+            request.headers["Host"] = netloc.rpartition("@")[2]
+            return super().send(request, *args, **kwargs)
+
+        def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+            parsed = urlparse(request.url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                raise requests.exceptions.InvalidURL(request.url)
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            address = _public_address(parsed.hostname, port)
+            _params, pool_kwargs = self.build_connection_pool_key_attributes(request, verify, cert)
+            pool_kwargs = dict(pool_kwargs)
+            if parsed.scheme == "https":
+                pool_kwargs["server_hostname"] = parsed.hostname
+                pool_kwargs["assert_hostname"] = parsed.hostname
+            return self.poolmanager.connection_from_host(
+                address, port=port, scheme=parsed.scheme, pool_kwargs=pool_kwargs
+            )
+
+    return PinnedAdapter
+
+
 def _fetch(session: Any, url: str, throttle: _HostThrottle) -> Any:
     import requests
 
-    throttle.wait(urlparse(url).netloc)
+    try:
+        host = urlparse(url).netloc
+    except ValueError:
+        # One malformed citation must not abort the whole end-of-search pass.
+        return "InvalidURL"
+    throttle.wait(host)
     try:
         response = session.get(url, timeout=TIMEOUT_SECONDS, allow_redirects=True, stream=True)
         status = response.status_code
@@ -104,8 +184,15 @@ def _fetch(session: Any, url: str, throttle: _HostThrottle) -> Any:
         return status
     except requests.TooManyRedirects:
         return "TooManyRedirects"
+    except BlockedDestination:
+        return "BlockedDestination"
     except requests.RequestException as exc:
+        # urllib3 may wrap the guard's error inside a connection error; it is still a refusal.
+        if isinstance(getattr(exc, "__context__", None), BlockedDestination) or "BlockedDestination" in repr(exc):
+            return "BlockedDestination"
         return type(exc).__name__
+    except ValueError:
+        return "InvalidURL"
 
 
 def check_url(session: Any, url: str, throttle: _HostThrottle, fetch=None) -> LinkResult:
@@ -159,7 +246,7 @@ def check_urls(
         throttle = _HostThrottle(PER_HOST_DELAY_SECONDS)
         session = requests.Session()
         session.headers.update({"User-Agent": USER_AGENT})
-        adapter = requests.adapters.HTTPAdapter(pool_connections=max_workers, pool_maxsize=max_workers)
+        adapter = _pinned_adapter_class()(pool_connections=max_workers, pool_maxsize=max_workers)
         session.mount("https://", adapter)
         session.mount("http://", adapter)
         print(f"Checking {len(pending)} source URL(s)")

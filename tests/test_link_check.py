@@ -257,3 +257,158 @@ def test_the_check_links_command_backfills_an_existing_run(tmp_path, monkeypatch
     run_dir = build_run(tmp_path, None)
     assert cli.main(["check-links", "--run-id", "run", "--run-dir", str(run_dir)]) == 0
     assert "https://x.org/gone.pdf" in load_results(run_dir / LINK_CHECK_FILE)
+
+
+# --- Copilot review: only public destinations are ever reached ---------------------------------
+import socket as _socket
+import threading as _threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+def _fake_resolution(monkeypatch, mapping):
+    """Answer getaddrinfo from {host: [addresses]}."""
+    def getaddrinfo(host, port, *args, **kwargs):
+        if host not in mapping:
+            raise _socket.gaierror("unknown host")
+        return [(_socket.AF_INET, _socket.SOCK_STREAM, 6, "", (a, port)) for a in mapping[host]]
+    monkeypatch.setattr(_socket, "getaddrinfo", getaddrinfo)
+
+
+@pytest.mark.parametrize("address", [
+    "127.0.0.1", "10.0.0.5", "172.16.3.4", "192.168.1.1", "169.254.169.254",  # metadata endpoint
+    "100.64.0.1", "0.0.0.0", "::1", "fe80::1", "::ffff:10.0.0.1",
+])
+def test_a_non_public_address_is_refused(monkeypatch, address):
+    from waste_ai_search.link_check import BlockedDestination, _public_address
+
+    _fake_resolution(monkeypatch, {"internal.example": [address]})
+    with pytest.raises(BlockedDestination):
+        _public_address("internal.example", 80)
+
+
+def test_a_name_with_one_public_and_one_internal_address_is_refused(monkeypatch):
+    """Every address is checked, so the internal one cannot be reached by a mixed answer."""
+    from waste_ai_search.link_check import BlockedDestination, _public_address
+
+    _fake_resolution(monkeypatch, {"mixed.example": ["93.184.216.34", "10.0.0.5"]})
+    with pytest.raises(BlockedDestination):
+        _public_address("mixed.example", 443)
+
+
+def test_a_public_address_is_allowed(monkeypatch):
+    from waste_ai_search.link_check import _public_address
+
+    _fake_resolution(monkeypatch, {"public.example": ["93.184.216.34"]})
+    assert _public_address("public.example", 443) == "93.184.216.34"
+
+
+def test_the_connection_goes_to_the_checked_address_not_a_fresh_lookup(monkeypatch):
+    """Pinning: the pool is opened on the validated IP, with the real name kept for TLS - so a
+    second DNS answer cannot swap in an internal address between the check and the connect."""
+    import requests
+    from waste_ai_search.link_check import _pinned_adapter_class
+
+    _fake_resolution(monkeypatch, {"public.example": ["93.184.216.34"]})
+    adapter = _pinned_adapter_class()()
+    seen = {}
+
+    def connection_from_host(host, port=None, scheme=None, pool_kwargs=None):
+        seen.update(host=host, port=port, scheme=scheme, **(pool_kwargs or {}))
+        return object()
+
+    monkeypatch.setattr(adapter.poolmanager, "connection_from_host", connection_from_host)
+    request = requests.Request("GET", "https://public.example/report.pdf").prepare()
+    adapter.get_connection_with_tls_context(request, verify=True)
+
+    assert seen["host"] == "93.184.216.34"
+    assert seen["server_hostname"] == "public.example"
+    assert seen["assert_hostname"] == "public.example"
+
+
+def test_a_redirect_to_an_internal_address_is_refused(monkeypatch):
+    """Each redirect hop passes the same check. A loopback-only server stands in for a public
+    site that redirects to an internal one; nothing leaves this machine."""
+    import waste_ai_search.link_check as lc
+
+    class Redirector(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{internal_port}/secret")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Redirector)
+    public_port = server.server_address[1]
+    internal_port = public_port + 1
+    _threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    real = lc._public_address
+
+    def first_hop_is_public(host, port):
+        return "127.0.0.1" if port == public_port else real(host, port)
+
+    monkeypatch.setattr(lc, "_public_address", first_hop_is_public)
+    try:
+        import requests
+
+        session = requests.Session()
+        adapter = lc._pinned_adapter_class()()
+        session.mount("http://", adapter)
+        status = lc._original_fetch(session, f"http://public.example:{public_port}/", lc._HostThrottle(0))
+    finally:
+        server.shutdown()
+    assert status == "BlockedDestination"
+    assert classify(status) == UNVERIFIED
+
+
+def test_a_blocked_destination_is_unverified_never_broken():
+    """Refusing to fetch is not evidence the page is dead."""
+    assert classify("BlockedDestination") == UNVERIFIED
+
+
+# --- Copilot review: a malformed citation cannot abort the pass --------------------------------
+def test_a_malformed_url_is_unverified_rather_than_fatal():
+    import waste_ai_search.link_check as lc
+
+    assert lc._original_fetch(None, "https://[invalid", lc._HostThrottle(0)) == "InvalidURL"
+    assert url_variants("https://[invalid%2C") == ["https://[invalid%2C", "https://[invalid,"]
+
+
+def test_one_malformed_url_does_not_stop_the_others(monkeypatch):
+    import waste_ai_search.link_check as lc
+
+    def fetch(session, url, throttle):
+        return lc._original_fetch(session, url, throttle) if "[" in url else 200
+
+    results = check_urls(["https://[invalid", "https://fine.example/a"], fetch=fetch)
+    assert results["https://[invalid"].verdict == UNVERIFIED
+    assert results["https://fine.example/a"].verdict == OK
+
+
+# --- Copilot review: a dead source reaches Leads even when the value was filled elsewhere -------
+def test_a_dead_source_reaches_leads_when_a_working_source_filled_the_attribute(tmp_path, monkeypatch):
+    from waste_ai_search.arbitrate import run_arbitration
+    from waste_ai_search.input_loader import write_csv_records
+    from waste_ai_search.run_context import PipelineConfig
+    from waste_ai_search.seed_source import seed_headers
+
+    run_dir = tmp_path / "run"
+    write_csv_records(run_dir / "seed.csv", [dict(site(), facility_id="1", year="2022", facility_name="Landfill",
+                                                  iso3c_plus="NGA")], seed_headers())
+    raw = run_dir / "raw_foundry_responses"
+    raw.mkdir(parents=True)
+    dead, alive = "https://x.org/gone.pdf", "https://y.org/ok"
+    (raw / "site_1.json").write_text(json.dumps(payload(dead, alive)))
+    (run_dir / LINK_CHECK_FILE).write_text(json.dumps({
+        dead: {"url": dead, "verdict": BROKEN, "status": "404", "resolved_url": dead},
+        alive: {"url": alive, "verdict": OK, "status": "200", "resolved_url": alive},
+    }))
+    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
+
+    import csv
+    resolved = [r for r in csv.DictReader((run_dir / "resolved.csv").open()) if r["attribute_name"] == "facility_status"]
+    assert resolved[0]["resolved_value"] == "Active"  # filled from the working source
+    leads = list(csv.DictReader((run_dir / "supplementary_leads.csv").open()))
+    assert [l["url"] for l in leads if "Source link broken" in l["exclusion_reason"]] == [dead]

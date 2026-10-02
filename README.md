@@ -111,6 +111,8 @@ At the end of the search phase, every cited URL is fetched once and given a verd
 A broken URL is retried with a literal comma for `%2C` and with the trailing slash toggled; a
 respelling that works replaces it. Existing escapes are never decoded otherwise.
 
+**Only public addresses are ever contacted.** Cited URLs are untrusted and are fetched from a machine that is often on the VPN, so every hop — redirects included — is resolved first and refused if any address is private, loopback, link-local (including the cloud metadata address) or otherwise non-public. The connection then goes to the address that was checked, so a second DNS answer cannot redirect it. A refused URL is `Unverified` and never fetched; a malformed one is `Unverified` too, rather than stopping the check.
+
 The fetching happens during **search**, which needs the network anyway; `arbitrate` only reads
 `link_check.json`, so it stays offline. A value with one dead source and one working source is still
 promoted from the working one.
