@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 from .arbitration import calculated_row, needs_review, resolve, routed_to_leads
 from .credibility import assign_source_tier, is_promotable, tier_label
 from .input_loader import describe_seed, resolve_sites, write_csv_records
+from .link_check import BROKEN, LINK_CHECK_FILE, LinkResult, load_results
 from .prompt_builder import needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
 from .schema import (
@@ -99,8 +100,17 @@ def extract_evidence(
     run_id: str,
     dataset_version: str,
     access_date: date,
+    link_results: dict[str, LinkResult] | None = None,
+    keep_broken_links: bool = False,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    """Turn one cached response into evidence items grouped by attribute."""
+    """Turn one cached response into evidence items grouped by attribute.
+
+    `link_results` are the run's link-check verdicts (WP-533). A repaired URL replaces the one the
+    agent wrote; the original stays in the raw response. A Broken link is treated like a missing
+    one - the source cannot be promoted and goes to leads - unless keep_broken_links is set.
+    Unverified links are never touched.
+    """
+    link_results = link_results or {}
     site_id = normalize_scalar(site.get("site_id"))
     by_attribute: dict[str, list[dict[str, Any]]] = {}
     evidence_rows: list[dict[str, Any]] = []
@@ -173,7 +183,11 @@ def extract_evidence(
             evidence_id = f"WAIEV-{site_id}-{attr_index:03d}-{source_index:03d}"
             source_id = f"WAISRC-{site_id}-{attr_index:03d}-{source_index:03d}"
             tier, rule = assign_source_tier(source, name)
-            url = normalize_scalar(source.get("url"))
+            raw_url = normalize_scalar(source.get("url"))
+            link = link_results.get(raw_url)
+            url = link.resolved_url if link else raw_url
+            link_status = link.verdict if link else ""
+            dead_link = link_status == BROKEN and not keep_broken_links
 
             item = {
                 "evidence_id": evidence_id,
@@ -183,17 +197,22 @@ def extract_evidence(
                 "tier": tier,
                 "order": order,
                 "url": url,
+                "link_status": link_status,
                 "value_date": normalize_scalar(attribute.get("value_date")),
                 "confidence": normalize_scalar(attribute.get("confidence_score")),
                 "evidence_summary": normalize_scalar(attribute.get("evidence_summary")),
             }
-            if url and not is_blank(value) and not numeric_note:
+            if url and not dead_link and not is_blank(value) and not numeric_note:
                 by_attribute.setdefault(name, []).append(item)
 
-            promotable = bool(url) and not is_blank(value) and is_promotable(tier) and not numeric_note
+            promotable = (
+                bool(url) and not dead_link and not is_blank(value) and is_promotable(tier) and not numeric_note
+            )
             exclusion = ""
             if not url:
                 exclusion = "No clickable source URL."
+            elif dead_link:
+                exclusion = f"Source link broken ({link.status}); not promoted."
             elif is_blank(value):
                 exclusion = "Value empty after normalization."
             elif numeric_note:
@@ -220,6 +239,7 @@ def extract_evidence(
                     "value_date": normalize_scalar(attribute.get("value_date")),
                     "agent_confidence": normalize_scalar(attribute.get("confidence_score")),
                     "source_id": source_id,
+                    "link_status": link_status,
                     "url": url,
                     "source_tier": tier_label(tier),
                     "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
@@ -297,6 +317,23 @@ def merge_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
             notes.append(note)
     merged["search_notes"] = " | ".join(notes)
     return merged
+
+
+def cached_source_urls(run_dir: Path) -> list[str]:
+    """Every source URL in a run's cached responses, read the way arbitration reads them."""
+    urls: list[str] = []
+    for path in sorted(raw_dir(run_dir).glob("site_*.json")):
+        try:
+            payload = merge_payloads([load_json(path)])
+        except (OSError, json.JSONDecodeError):
+            continue
+        for attribute in payload.get("attributes", []) or []:
+            if not isinstance(attribute, dict):
+                continue
+            for source in attribute.get("sources") or []:
+                if isinstance(source, dict) and normalize_scalar(source.get("url")):
+                    urls.append(normalize_scalar(source.get("url")))
+    return list(dict.fromkeys(urls))
 
 
 def attach_site_names(rows: list[dict[str, Any]], sites_by_id: dict[str, dict[str, Any]]) -> None:
@@ -526,6 +563,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
 
     cached = sorted(raw_dir(config.run_dir).glob("site_*.json"))
+    # Read only: the search phase did the fetching, so arbitration stays offline.
+    link_results = load_results(config.run_dir / LINK_CHECK_FILE)
     if not cached:
         raise ValueError(f"No cached responses in {raw_dir(config.run_dir)}. Run the search phase first.")
 
@@ -596,7 +635,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             )
 
         by_attribute, site_evidence, site_sources, warnings = extract_evidence(
-            site, payload, config.run_id, config.dataset_version, access_date
+            site, payload, config.run_id, config.dataset_version, access_date,
+            link_results=link_results, keep_broken_links=config.keep_broken_links,
         )
         source_entries.extend(site_sources)
         for warning in warnings:
@@ -778,6 +818,13 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "sites_arbitrated", "value": len(cached)},
             {"setting": "arbitrated_at", "value": datetime.now().replace(microsecond=0).isoformat()},
             {"setting": "review_queue_rows", "value": len(review_queue)},
+            {"setting": "links_checked", "value": len(link_results)},
+            {"setting": "links_broken", "value": sum(1 for r in link_results.values() if r.verdict == BROKEN)},
+            {"setting": "links_repaired", "value": sum(1 for r in link_results.values() if r.resolved_url != r.url)},
+            {
+                "setting": "broken_link_route",
+                "value": "kept promotable" if config.keep_broken_links else "routed to leads",
+            },
             {"setting": "contradiction_checks", "value": contradiction_checks},
             {"setting": "not_a_waste_facility", "value": len(contradictions)},
             {"setting": "standardized_records", "value": len(standard_records)},

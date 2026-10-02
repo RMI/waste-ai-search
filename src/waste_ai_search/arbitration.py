@@ -132,6 +132,7 @@ def resolve(
         "winning_evidence_id": "",
         "winning_source_tier": "",
         "winning_source_url": "",
+        "winning_link_status": "",
         "best_tier_available": "",
         "agreeing_source_count": 0,
         "dissenting_source_count": 0,
@@ -187,6 +188,9 @@ def resolve(
     row["winning_evidence_id"] = normalize_scalar(winner.get("evidence_id"))
     row["winning_source_tier"] = tier_label(win_tier)
     row["winning_source_url"] = normalize_scalar(winner.get("url"))
+    # OK, Unverified, or blank when the run has no link check. Unverified usually means a server
+    # refusing bots, so the SME is told the link may not open for them either.
+    row["winning_link_status"] = normalize_scalar(winner.get("link_status"))
     row["agreeing_source_count"] = counts[win_key]
     row["dissenting_source_count"] = sum(n for key, n in counts.items() if key != win_key)
     row["value_date"] = normalize_scalar(winner.get("value_date"))
