@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -18,6 +20,74 @@ from .schema import (
     REVIEW_QUEUE_HEADERS,
     SUPPLEMENTARY_LEADS_HEADERS,
 )
+
+
+# Excel will not follow a hyperlink longer than this; the text stays, the link is not made.
+MAX_HYPERLINK_LENGTH = 2079
+
+# Only these become clickable. Agent output is untrusted, and a `javascript:` or `file:` link must
+# never turn into something an SME can click in the review workbook.
+HYPERLINK_SCHEMES = {"http", "https"}
+
+# Characters left as-is when encoding a link target. `%` is among them on purpose: existing escapes
+# are never decoded or re-encoded. The sibling refining-ai-search repo (RDP-63) found that a
+# blanket decode breaks links that work - most percent-encoded URLs there served fine as given.
+_SAFE_PATH = "/:@!$&'()*+,;=%-._~"
+_SAFE_QUERY = _SAFE_PATH + "?"
+
+
+def clean_cell_text(value: Any) -> Any:
+    """Make a value safe to write to a worksheet.
+
+    openpyxl refuses control characters (vertical tab, form feed and the like) with
+    IllegalCharacterError, and the error aborts the WHOLE workbook - every row of the run, after
+    every agent call has been paid for. Quotes copied out of PDFs are where they come from. They are
+    replaced with a space rather than dropped, so words either side do not run together.
+    """
+    if isinstance(value, str):
+        return ILLEGAL_CHARACTERS_RE.sub(" ", value)
+    return value
+
+
+def hyperlink_target(url: Any) -> str | None:
+    """The link target to attach to a URL cell, or None if it should not be clickable.
+
+    The cell keeps showing exactly what the source said; only the target is made safe. Raw spaces
+    and non-ASCII characters are percent-encoded as UTF-8, and a non-ASCII host is converted to its
+    ASCII (IDNA) form, which is what a browser does when the link is followed.
+    """
+    text = clean_cell_text(str(url).strip()) if url is not None else ""
+    if not text or len(text) > MAX_HYPERLINK_LENGTH:
+        return None
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in HYPERLINK_SCHEMES or not parts.netloc:
+        return None
+
+    # Only the host is IDNA-encoded; user info and port are kept, and a bracketed IPv6 literal is
+    # left whole rather than split on its colons.
+    userinfo, at, hostport = parts.netloc.rpartition("@")
+    if hostport.startswith("["):
+        host, colon, port = hostport, "", ""
+    else:
+        host, colon, port = hostport.partition(":")
+    if not host.isascii():
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return None
+    netloc = f"{userinfo}{at}{host}{colon}{port}"
+
+    target = urlunsplit((
+        parts.scheme,
+        netloc,
+        quote(parts.path, safe=_SAFE_PATH),
+        quote(parts.query, safe=_SAFE_QUERY),
+        quote(parts.fragment, safe=_SAFE_QUERY),
+    ))
+    return target if len(target) <= MAX_HYPERLINK_LENGTH else None
 
 
 def style_sheet(ws) -> None:
@@ -35,8 +105,10 @@ def style_sheet(ws) -> None:
                 cell.number_format = "yyyy-mm-dd"
             header = ws.cell(1, cell.column).value
             if header and "url" in str(header).lower() and cell.value:
-                cell.hyperlink = str(cell.value)
-                cell.style = "Hyperlink"
+                target = hyperlink_target(cell.value)
+                if target:
+                    cell.hyperlink = target
+                    cell.style = "Hyperlink"
     for idx, col in enumerate(ws.columns, start=1):
         header = ws.cell(1, idx).value or ""
         max_len = len(str(header))
@@ -53,7 +125,7 @@ def style_sheet(ws) -> None:
 def write_sheet(ws, headers: list[str], rows: list[dict[str, Any]]) -> None:
     ws.append(headers)
     for record in rows:
-        ws.append([record.get(header, "") for header in headers])
+        ws.append([clean_cell_text(record.get(header, "")) for header in headers])
     style_sheet(ws)
 
 
