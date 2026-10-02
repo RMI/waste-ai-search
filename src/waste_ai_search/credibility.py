@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .schema import normalize_scalar
+from .schema import canonical_attribute, normalize_scalar
 
 
 # Tier 5 closes the scale: a source we could not classify is weaker than one we classified as
@@ -246,7 +246,8 @@ def ai_filled_tiers(ai_filled_fields: Any) -> dict[str, int]:
             continue
         field, _, label = item.rpartition("@")
         tier = TIER_BY_LABEL.get(label.strip())
-        if field.strip() and tier is not None:
+        field = canonical_attribute(field)
+        if field and tier is not None:
             out[field.strip()] = tier
     return out
 
@@ -259,9 +260,40 @@ def attribute_sources(attribute_sources_text: Any) -> dict[str, str]:
         if "@" not in item:
             continue
         attribute, _, source = item.rpartition("@")
-        if attribute.strip() and source.strip():
-            out[attribute.strip()] = source.strip()
+        attribute = canonical_attribute(attribute)
+        if attribute and source.strip():
+            out[attribute] = source.strip()
     return out
+
+
+# A baseline facility_name this credible is not re-searched (WP-531). It reverses Q30 - which made
+# the name an identity attribute requested for every facility - for these facilities only, so
+# their identity confirmation rests on coordinates. The Q34 identity gate already uses only
+# coordinates, so it is unaffected. The gain: many such names come from translated sources, and
+# comparing the agent's local-language name with the English seed name produced conflicts that
+# were translation noise rather than real disagreement.
+TRUSTED_NAME_MAX_TIER = TIER_2
+
+
+def trusted_baseline_name(site: dict[str, Any]) -> bool:
+    """Whether the seed's facility_name is known to come from a Tier 1-2 source.
+
+    Needs positive, per-attribute provenance: a name a previous pass supplied is tiered by the
+    source that supplied it, otherwise by the ledger's per-attribute dataset. With neither, the
+    answer is False and the name is still searched - the facility-wide composite takes the best
+    tier of everything a facility draws on, and would credit an OSM name with a regulator's tier.
+    """
+    if normalize_scalar(site.get("site_name")) == "":
+        return False
+    name = "found_facility_name"
+    ai_tier = ai_filled_tiers(site.get("ai_filled_fields")).get(name)
+    if ai_tier is not None:
+        return ai_tier <= TRUSTED_NAME_MAX_TIER
+    source = attribute_sources(site.get("attribute_sources")).get(name)
+    if not source:
+        return False
+    tier, _note = attribute_baseline_tier(source)
+    return tier <= TRUSTED_NAME_MAX_TIER
 
 
 def attribute_baseline_tier(source_token: Any) -> tuple[int, str]:

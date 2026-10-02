@@ -163,15 +163,151 @@ def test_standalone_arbitrate_needs_no_database_once_a_snapshot_exists(tmp_path,
     assert [s["site_id"] for s in sites] == ["7"]
 
 
-def test_a_csv_seeded_run_writes_no_snapshot(tmp_path):
-    """The supplied file already is the record; copying it into the run dir adds nothing."""
+def test_a_csv_seeded_run_pins_the_supplied_file_byte_for_byte(tmp_path):
+    """The supplied file is often temporary; once it is gone the run could not be re-arbitrated."""
     seed = tmp_path / "given.csv"
-    write_csv_records(seed, [{"site_id": "1"}], ["site_id"])
+    write_csv_records(seed, [{"site_id": "1", "site_name": "A"}], ["site_id", "site_name"])
     config = _config(tmp_path, input_csv=seed)
 
     resolve_sites(config)
 
-    assert not run_seed_path(config).exists()
+    assert run_seed_path(config).read_bytes() == seed.read_bytes()
+
+
+def test_a_csv_seeded_run_survives_the_supplied_file_being_deleted(tmp_path):
+    """The case that prompted this: a seed in a scratch directory that is later cleared."""
+    seed = tmp_path / "scratch" / "given.csv"
+    write_csv_records(seed, [{"site_id": "9", "site_name": "Pinned"}], ["site_id", "site_name"])
+    resolve_sites(_config(tmp_path, input_csv=seed))
+    seed.unlink()
+
+    sites, _ = resolve_sites(_config(tmp_path))  # a later `arbitrate`, no --input-csv
+    assert [s["site_id"] for s in sites] == ["9"]
+
+
+def test_the_pass_two_seed_inside_the_run_never_replaces_the_original(tmp_path):
+    """The follow-up rewrites the seed into the run dir and points the config at it. The run's
+    record must stay the corpus pass 1 searched, not the refreshed one."""
+    original = tmp_path / "given.csv"
+    write_csv_records(original, [{"site_id": "1", "site_name": "Original"}], ["site_id", "site_name"])
+    config = _config(tmp_path, input_csv=original)
+    resolve_sites(config)
+    before = run_seed_path(config).read_bytes()
+
+    refreshed = config.run_dir / "refreshed_seed.csv"
+    write_csv_records(refreshed, [{"site_id": "1", "site_name": "Refreshed"}], ["site_id", "site_name"])
+    resolve_sites(_config(tmp_path, input_csv=refreshed))
+
+    assert run_seed_path(config).read_bytes() == before
+
+
+def test_a_first_run_from_a_csv_stored_inside_the_run_is_still_pinned(tmp_path):
+    """Copilot review: exempting every in-run CSV meant a first run wrote no seed.csv, so a later
+    arbitrate without --input-csv fell through to the live database."""
+    import waste_ai_search.seed_source as seed_source
+
+    config = _config(tmp_path)
+    stored = config.run_dir / "my_seed.csv"
+    write_csv_records(stored, [{"site_id": "7", "site_name": "Stored in run"}], ["site_id", "site_name"])
+    resolve_sites(_config(tmp_path, input_csv=stored))
+
+    assert run_seed_path(config).read_bytes() == stored.read_bytes()
+
+    def no_database(**kwargs):
+        raise AssertionError("a later arbitrate reached the live database")
+
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    mp.setattr(seed_source, "load_seed_sites", no_database)
+    try:
+        sites, _ = resolve_sites(config)
+    finally:
+        mp.undo()
+    assert [s["site_id"] for s in sites] == ["7"]
+
+
+def test_an_in_run_csv_other_than_the_refreshed_seed_is_guarded(tmp_path):
+    """It must not slip past the mismatch check just because of where it is stored."""
+    config = _config(tmp_path)
+    original = tmp_path / "original.csv"
+    write_csv_records(original, [{"site_id": "1"}], ["site_id"])
+    resolve_sites(_config(tmp_path, input_csv=original))
+
+    stray = config.run_dir / "something_else.csv"
+    write_csv_records(stray, [{"site_id": "2"}], ["site_id"])
+    with pytest.raises(ValueError, match="Use a new --run-id"):
+        resolve_sites(_config(tmp_path, input_csv=stray))
+
+
+def test_a_refreshed_seed_with_no_snapshot_yet_is_pinned_normally(tmp_path):
+    """The bypass needs the original snapshot to exist; without one there is nothing to protect."""
+    config = _config(tmp_path)
+    refreshed = config.run_dir / "refreshed_seed.csv"
+    write_csv_records(refreshed, [{"site_id": "3"}], ["site_id"])
+
+    resolve_sites(_config(tmp_path, input_csv=refreshed))
+
+    assert run_seed_path(config).read_bytes() == refreshed.read_bytes()
+
+
+def test_the_refresh_seed_command_runs_end_to_end(tmp_path):
+    """Its default output path is resolved inside main(); exercises the import that path needs."""
+    from waste_ai_search import cli
+    from waste_ai_search.schema import RESOLVED_HEADERS
+
+    run_dir = tmp_path / "run"
+    write_csv_records(run_dir / "seed.csv", [{"site_id": "1", "site_name": "A", "country_iso3": "NGA"}],
+                      ["site_id", "site_name", "country_iso3"])
+    write_csv_records(run_dir / "resolved.csv", [], RESOLVED_HEADERS)
+
+    assert cli.main(["refresh-seed", "--run-id", "r", "--run-dir", str(run_dir)]) == 0
+    assert (run_dir / "refreshed_seed.csv").exists()
+
+
+def test_a_different_csv_on_a_pinned_run_is_refused_not_silently_used(tmp_path):
+    """Copilot review: the rerun searched the new file while seed.csv kept the old one, so a later
+    arbitrate loaded the wrong corpus. A different file now stops the run instead."""
+    config = _config(tmp_path)
+    first = tmp_path / "first.csv"
+    write_csv_records(first, [{"site_id": "keep"}], ["site_id"])
+    resolve_sites(_config(tmp_path, input_csv=first))
+    before = run_seed_path(config).read_bytes()
+
+    other = tmp_path / "other.csv"
+    write_csv_records(other, [{"site_id": "new"}], ["site_id"])
+    with pytest.raises(ValueError, match="pinned to .* Use a new --run-id"):
+        resolve_sites(_config(tmp_path, input_csv=other))
+
+    assert run_seed_path(config).read_bytes() == before
+
+
+def test_rerunning_with_the_same_csv_reads_the_snapshot(tmp_path):
+    """A resumed search with the identical file is fine, and every phase sees one corpus."""
+    seed = tmp_path / "given.csv"
+    write_csv_records(seed, [{"site_id": "1", "site_name": "A"}], ["site_id", "site_name"])
+    first, _ = resolve_sites(_config(tmp_path, input_csv=seed))
+    again, _ = resolve_sites(_config(tmp_path, input_csv=seed))
+    later, _ = resolve_sites(_config(tmp_path))
+    assert [s["site_id"] for s in first] == [s["site_id"] for s in again] == [s["site_id"] for s in later]
+
+
+def test_rerunning_after_the_supplied_file_is_deleted_reads_the_snapshot(tmp_path):
+    seed = tmp_path / "scratch.csv"
+    write_csv_records(seed, [{"site_id": "9"}], ["site_id"])
+    resolve_sites(_config(tmp_path, input_csv=seed))
+    seed.unlink()
+
+    sites, _ = resolve_sites(_config(tmp_path, input_csv=seed))
+    assert [s["site_id"] for s in sites] == ["9"]
+
+
+def test_describe_seed_names_the_file_and_where_it_is_pinned(tmp_path):
+    seed = tmp_path / "given.csv"
+    write_csv_records(seed, [{"site_id": "1"}], ["site_id"])
+    config = _config(tmp_path, input_csv=seed)
+    resolve_sites(config)
+
+    assert describe_seed(config) == f"{seed}, pinned in {run_seed_path(config)}"
 
 
 def test_describe_seed_reports_where_the_run_is_pinned(tmp_path, monkeypatch):

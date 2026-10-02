@@ -44,6 +44,12 @@ WASTE_SITE_BASE_EXTRA_FIELDS = [
 GAP_FILL_ATTRIBUTES = [
     "facility_status",
     "facility_type",
+    # WP-531. Review layer only for now: the upstream standardized spec has no operator column, so
+    # it is deliberately absent from ATTRIBUTE_TO_STANDARD_COLUMN and never reaches the
+    # standardized table. consolidated_facility has no operator either, so the baseline is always
+    # empty and it is asked of every searched facility. Promotion is a follow-up once upstream adds
+    # the column - one entry in ATTRIBUTE_TO_STANDARD_COLUMN and STANDARDIZED_FACILITY_COLUMNS.
+    "operator",
     "opening_year",
     "closing_year",
     "has_landfill_gas_collection",
@@ -66,10 +72,27 @@ GAP_FILL_ATTRIBUTES = [
 # Always requested. These are how we know the agent found the *right* facility, so they are not
 # gap-filled: identity confirmation is what makes an auto-validated fill defensible (Q30).
 IDENTITY_ATTRIBUTES = [
-    "found_site_name",
+    "found_facility_name",
     "found_latitude",
     "found_longitude",
 ]
+
+# Attribute names retired in favour of a new spelling, mapped to their replacement. Data written
+# before a rename - cached agent responses, pinned seed snapshots, and the `attribute@dataset`
+# provenance in a seed - still carries the old name, so everything that reads an attribute name
+# from such data goes through canonical_attribute(). Without it, re-arbitrating an older run would
+# drop the attribute as unsupported, silently.
+ATTRIBUTE_ALIASES = {
+    # WP-531: aligned with the upstream `facility_name` column.
+    "found_site_name": "found_facility_name",
+}
+
+
+def canonical_attribute(name: Any) -> str:
+    """The current spelling of an attribute name, accepting retired ones."""
+    text = str(name).strip() if name is not None else ""
+    return ATTRIBUTE_ALIASES.get(text, text)
+
 
 # --- country policy ------------------------------------------------------------------------
 # US facilities are already well covered by usa_ghgrp_2026 and lmop_2024, both Tier 1, so an AI
@@ -190,7 +213,7 @@ ATTRIBUTE_RANGES = {
 
 # Attribute -> standardized facility column it populates.
 ATTRIBUTE_TO_STANDARD_COLUMN = {
-    "found_site_name": "facility_name",
+    "found_facility_name": "facility_name",
     "found_latitude": "latitude",
     "found_longitude": "longitude",
     "facility_status": "facility_status",
@@ -371,8 +394,12 @@ BOOLEAN_INPUT_MAP = {
 
 
 # --- output levels (Q5) ------------------------------------------------------------------------
+# WP-531: every SME-facing output carries the translated site_name beside the source's own
+# spelling and its language, so a reviewer can check results against the original name.
+SITE_NAME_COLUMNS = ["site_name", "original_site_name", "source_language"]
+
 EVIDENCE_HEADERS = [
-    "evidence_id", "run_id", "dataset_version", "site_id", "internal_facility_id",
+    "evidence_id", "run_id", "dataset_version", "site_id", *SITE_NAME_COLUMNS, "internal_facility_id",
     "attribute_name", "claimed_value", "claimed_unit", "normalized_value", "normalized_unit",
     "unit_conversion_note", "mapped_value", "mapping_note", "value_basis", "value_date",
     "agent_confidence", "source_id", "source_tier", "agent_proposed_tier", "tier_rule_applied",
@@ -381,7 +408,7 @@ EVIDENCE_HEADERS = [
 ]
 
 RESOLVED_HEADERS = [
-    "site_id", "internal_facility_id", "site_name", "country_iso3", "attribute_name",
+    "site_id", "internal_facility_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name",
     "baseline_value", "baseline_source", "baseline_tier",
     "resolved_value", "resolved_unit", "resolution", "resolution_rule",
     "winning_evidence_id", "winning_source_tier", "winning_source_url", "best_tier_available",
@@ -401,14 +428,16 @@ SOURCES_HEADERS = [
 
 # The filtered queue an SME actually works through (Q31).
 REVIEW_QUEUE_HEADERS = [
-    "site_id", "site_name", "country_iso3", "attribute_name", "resolution",
+    # translation_note sits beside the names it is about: the SME compares the two spellings and
+    # records a translation problem there, separately from researcher_notes.
+    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "attribute_name", "resolution",
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
     "winning_source_tier", "winning_source_url", "value_date", "agreeing_source_count",
     "evidence_summary", "validation_status", "reviewer", "reviewed_date", "researcher_notes",
 ]
 
 SUPPLEMENTARY_LEADS_HEADERS = [
-    "run_id", "site_id", "site_name", "country_iso3", "attribute_name", "lead_value",
+    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name", "lead_value",
     "source_tier", "lead_summary", "url", "exclusion_reason",
 ]
 
@@ -424,7 +453,7 @@ PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 # still recorded on the Review_Queue row; this view exists so the verdicts can be read together,
 # beside what the same run found about closure.
 CONTRADICTION_HEADERS = [
-    "site_id", "site_name", "country_iso3", "facility_type", "winning_source_tier",
+    "site_id", *SITE_NAME_COLUMNS, "country_iso3", "facility_type", "winning_source_tier",
     "winning_source_url", "evidence_summary", "quoted_evidence_short", "closure_also_reported",
     "validation_status",
 ]
@@ -587,7 +616,9 @@ def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
         for field in FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS:
             if field not in attribute:
                 warnings.append(f"attributes[{idx}] missing required field {field!r}.")
-        name = normalize_scalar(attribute.get("attribute_name"))
+        # Same canonicalisation as extract_evidence, so a pre-rename cached response is not
+        # reported as unsupported by one and accepted by the other.
+        name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
         if name and name not in REQUESTABLE_ATTRIBUTES:
             warnings.append(f"attributes[{idx}] has unsupported attribute_name {name!r}.")
         sources = attribute.get("sources", [])

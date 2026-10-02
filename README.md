@@ -89,6 +89,8 @@ querying again — both arbitrations, the refresh between passes, a resumed sear
 
 A run id is therefore pinned to its corpus. To seed afresh, use a new `--run-id`.
 
+A run seeded with `--input-csv` is pinned the same way: the supplied file is copied, byte for byte, into the run's `seed.csv` on first use, and every later phase reads that copy — so the run can still be re-arbitrated after the file is moved or deleted. Passing a *different* file to an existing run id stops with an error rather than searching one corpus while the snapshot records another; use a new `--run-id`. The one exception is the pass-2 follow-up's `refreshed_seed.csv`, which is read as given once the original snapshot exists and never replaces it. Any other CSV is pinned and checked against the snapshot, even one stored inside the run directory.
+
 `--input-csv` remains for two cases: pinning an exact corpus, and the gas-collection follow-up,
 which rewrites the seed between passes into the run directory.
 
@@ -178,7 +180,7 @@ treated as inexact: only an explicit FALSE triggers a coordinate search.
 
 **3. Everywhere else: gap-fill, plus the gas-capture gate.**
 
-- Identity (`found_site_name`, `found_latitude`, `found_longitude`) is always requested.
+- Identity coordinates (`found_latitude`, `found_longitude`) are always requested. `found_facility_name` is too, **except** where the seed's name came from a Tier 1–2 source (about 10,600 facilities): there identity rests on coordinates, and the name is not re-searched. This needs per-attribute provenance; with none, the name is still asked.
 - Metadata attributes are requested **only where that facility's baseline is empty**.
 - The seven `gccs_*` attributes are requested **only where gas collection is known present** —
   212 to 603 facilities each, not 13,000. See the two-pass note above for why this loses nothing.
@@ -212,7 +214,7 @@ only trustworthy because identity was confirmed.
 
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
-| `found_site_name` | text | — | `facility_name` |
+| `found_facility_name` | text | — | `facility_name` |
 | `found_latitude` | numeric | `decimal degrees` | `latitude` |
 | `found_longitude` | numeric | `decimal degrees` | `longitude` |
 
@@ -222,6 +224,7 @@ only trustworthy because identity was confirmed.
 |---|---|---|---|
 | `facility_status` | enum | — | `facility_status` |
 | `facility_type` | enum | — | `facility_type` |
+| `operator` ‡ | text | — | *none yet — review layer only* |
 | `opening_year` | integer year | `year` | `opening_year` |
 | `closing_year` | integer year | `year` | `closing_year` |
 | `has_landfill_gas_collection` | boolean | — | `has_landfill_gas_collection` |
@@ -232,6 +235,8 @@ only trustworthy because identity was confirmed.
 | `has_cover` | boolean | — | `has_cover` |
 | `cover_types` | enum array | — | `cover_types` |
 | `has_biocover` | boolean | — | `has_biocover` |
+
+‡ **`operator` is review-layer only.** The upstream standardized spec has no operator column yet, so a found operator reaches `resolved.csv` but never the standardized table. Like every attribute, a Tier 1–2 operator auto-validates and appears only in `resolved.csv`; Tier 3 and below also reach the review queue. Promoting it is a follow-up once upstream adds the column. `consolidated_facility` has no operator either, so it is asked of every searched facility.
 
 `waste_depth` is the only **derived** categorical. The agent still reports a number and its
 unit; the pipeline converts to metres, then bins on the spec's 5 m boundary. The metre value is
@@ -405,6 +410,8 @@ The five columns that decide your judgement:
 | `evidence_summary` | The pipeline's one-line explanation of the decision |
 
 Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab.
+
+**Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `resolved.csv` and `evidence.csv`; they are blank where the source was never translated.
 
 ### 3. Decide
 

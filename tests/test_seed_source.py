@@ -132,7 +132,7 @@ def test_static_attributes_join_the_ledger_on_the_facility_alone():
 
     record = {"internal_facility_id": "42", "reference_year": "2016"}
     static = {(42, "facility_name"): "lmop_2024"}
-    assert attribute_source_for(record, "found_site_name", static, {}, {}) == "lmop_2024"
+    assert attribute_source_for(record, "found_facility_name", static, {}, {}) == "lmop_2024"
 
 
 def test_year_varying_attributes_join_on_the_year_the_value_came_from():
@@ -176,4 +176,4 @@ def test_attach_only_stamps_attributes_that_have_a_value():
 
     attach_attribute_sources(records, static, {})
 
-    assert records[0]["attribute_sources"] == "found_site_name@osm_2022"
+    assert records[0]["attribute_sources"] == "found_facility_name@osm_2022"

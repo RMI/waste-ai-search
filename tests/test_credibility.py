@@ -182,8 +182,8 @@ def test_unrecognized_type_falls_to_tier_5_and_says_why():
 def test_per_attribute_source_is_tiered_from_one_dataset_token():
     from waste_ai_search.credibility import attribute_baseline_tier, attribute_sources
 
-    parsed = attribute_sources("facility_status@osm_2022; found_site_name@lmop_2024")
-    assert parsed == {"facility_status": "osm_2022", "found_site_name": "lmop_2024"}
+    parsed = attribute_sources("facility_status@osm_2022; found_facility_name@lmop_2024")
+    assert parsed == {"facility_status": "osm_2022", "found_facility_name": "lmop_2024"}
     assert attribute_baseline_tier("osm_2022")[0] == TIER_4
     assert attribute_baseline_tier("lmop_2024")[0] == TIER_1
 

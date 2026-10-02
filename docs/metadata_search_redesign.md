@@ -350,6 +350,10 @@ All settled. Where an answer overrode my recommendation it is marked.
 | F15 | Schema realigned to upstream `8c0bb3fe` | `area` → `area_square_meters`; `waste_depth_meters` (numeric) → `waste_depth` (derived category `<=5m` / `>5m`); `has_biocover` is now spec-defined rather than a local 44th column, and is read from `consolidated_facility` instead of always gap-filled. The spec is vendored against a pinned upstream commit (`scripts/sync_schema.py`), so F6 and F13 above record the pre-rename state. |
 | F16 | Seeded from the database, not a file | `search` and `run` read `consolidation.consolidated_facility` directly; `inputs/` is gone. `--input-csv` remains for a pinned or offline corpus and for the pass-2 follow-up. Each database-seeded run writes `seed.csv` into its own run directory, so what it searched is still recoverable. The rows above describing `inputs/` record the pre-F16 layout. |
 | F17 | Not a Waste Facility (WP-525) | Facilities known only from OSM or Global Plastic Watch may get `facility_type = Not a Waste Facility` when a source says the site was never a waste site. Silence leaves facility_type empty, never a negative. Closure is explicitly not a contradiction. Promoted like any facility_type and always routed to review. The value is pending upstream: the DB enum and `chk_facility_type` reject it until extended. The prompt premise no longer asserts every site is a disposal facility. |
+| F18 | Trusted names are not re-searched (WP-531) | `found_facility_name` is skipped where the seed's name came from a Tier 1–2 source — about 10,609 of 19,492 facilities. Reverses Q30 for those facilities only: identity rests on coordinates, which are still requested everywhere, so the Q34 gate is unaffected. Accepted because those names mostly came through translation, and comparing the agent's local-language name with the English seed name produced conflicts that were translation noise. Requires per-attribute provenance; the facility-wide composite is never used, since it would credit an OSM name with a regulator's tier. |
+| F19 | Operator searched, review layer only (WP-531) | `operator` is a gap-fill attribute: the company, municipality or agency running the site, not the owner or regulator. The upstream spec has no column for it, so it is kept out of the standardized table until one exists. |
+| F20 | Original names in every output (WP-531) | `site_name`, `original_site_name` and `source_language` sit side by side in Review_Queue, Leads, Contradictions, `resolved.csv` and `evidence.csv`, filled in one pass keyed by site. Review_Queue gains an editable `translation_note` beside them. |
+| F21 | What distinguishes the facility types (WP-531) | A live check on Manresa (18133) found the new definitions alone still yielded Controlled Dumpsite, auto-validated from a Tier 1 source: the agent read compaction against the Controlled Dumpsite definition. The guidance now states that compaction, cover and access control occur at both types and only engineered containment decides it, and - for the EU27 and EEA only - that a landfill accepting waste after July 2009 is bound by the Landfill Directive and is a Sanitary Landfill unless a source says otherwise. Re-checked on five Catalan sites: 5/5 Sanitary Landfill, two from described engineering and three from the Directive, all routed to review. |
 | F11 | Tier 5 replaces the Unrated sentinel | An unclassifiable source now sits on the ordered scale at Tier 5 rather than out-of-band at 99. `Other` removed from `source_type`: 15 types, no catch-all. |
 
 ### Accepted risks
@@ -733,9 +737,11 @@ consult it.
 
 ### Identity is always requested
 
-Gap-fill scopes *metadata*, not identity. `found_site_name`, `found_latitude` and `found_longitude`
+Gap-fill scopes *metadata*, not identity. `found_facility_name`, `found_latitude` and `found_longitude`
 are requested for every site even though the seed already has them, because they are the only
 evidence that the agent researched the right facility. Auto-validating a Tier 1–2 fill (Q30) is
 only defensible if identity is confirmed — a genuine regulator document about a neighbouring
 landfill is the failure mode tier cannot detect.
+
+**Superseded in part by F18 (WP-531):** `found_facility_name` is no longer requested where the seed's name came from a Tier 1–2 source. Coordinates remain requested for every facility, so the Q34 identity gate is unaffected; what changes is that those facilities' identity rests on coordinates alone.
 

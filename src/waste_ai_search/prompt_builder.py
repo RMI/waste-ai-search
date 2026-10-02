@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .credibility import SOURCE_TYPES, TIER_DEFINITIONS
+from .credibility import SOURCE_TYPES, TIER_DEFINITIONS, trusted_baseline_name
 from .schema import (
     CONTRADICTION_CHECK_SOURCES,
     CORROBORATING_ATTRIBUTES,
@@ -38,11 +38,47 @@ ATTRIBUTE_UNITS = {
     "gccs_collection_efficiency": "fraction between 0 and 1",
 }
 
+# Definitions for each facility_type (WP-531). Labelled with the enum values exactly, since the
+# agent must answer with those strings; the SME's "open dumpsite" is the `Dumpsite` value.
+#
+# Prompted by pilot site 14146, "DIPOSIT CONTROLAT DE MANRESA (II)": the agent read Catalan
+# "dipòsit controlat" literally as Controlled Dumpsite, but the site is a sanitary landfill. The
+# definitions say what each type IS; the last sentence is what stops the name from deciding it.
+FACILITY_TYPE_DEFINITIONS = (
+    " Definitions: "
+    "Dumpsite - an open dumpsite: an unmanaged area where mixed waste is disposed of without "
+    "liners or cover systems, allowing anaerobic decomposition under uncontrolled conditions that "
+    "lead to diffuse methane emissions. "
+    "Controlled Dumpsite - a dumpsite with some operational measures to control emissions, such as "
+    "compaction, limited soil cover, or restricted access; some have simple gas collection "
+    "equipment installed. "
+    "Sanitary Landfill - a fully engineered facility with liners, leachate and groundwater "
+    "management, and often but not necessarily a landfill gas management system. "
+    # Added after the live check on Manresa (18133): the agent found compaction, read it against the
+    # Controlled Dumpsite definition, and downgraded an engineered landfill.
+    "Compaction, soil cover and restricted access occur at BOTH controlled dumpsites and sanitary "
+    "landfills, so none of them distinguishes the two. What decides it is engineered containment: "
+    "a liner, leachate collection and groundwater monitoring. "
+    "Classify from what sources say about the facility's engineering and operation, NEVER from "
+    "words in its name. Names are often regulatory terms or literal translations: Catalan "
+    "'dipòsit controlat' and Spanish 'vertedero controlado' can describe a fully engineered "
+    "sanitary landfill, and 'controlled' in a name is not evidence of a Controlled Dumpsite."
+)
+
 ATTRIBUTE_GUIDANCE = {
     "facility_status": "Allowed values only: Active, Inactive. A closed or former site is Inactive.",
-    "facility_type": "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility.",
+    "facility_type": (
+        "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility."
+        + FACILITY_TYPE_DEFINITIONS
+    ),
     "cover_types": "Array. Allowed members only: clay cover, organic cover, sand cover, other soil mixture.",
     "has_landfill_gas_collection": "Yes, No, or Unknown.",
+    "operator": (
+        "The organisation that runs the facility day to day - a company, municipality, utility "
+        "or public agency - as the source names it. If the source distinguishes them, give the "
+        "operator, not the owner, landlord or regulator. Text only; if a concession changed hands, "
+        "give the operator for the source's value_date."
+    ),
     "opening_year": "Four-digit year the facility opened.",
     "closing_year": (
         "Four-digit year the facility closed or is expected to close. REQUIRED whenever the "
@@ -97,10 +133,33 @@ ATTRIBUTE_GUIDANCE = {
         "Fraction of generated landfill gas that is collected, as a value between 0 and 1. "
         "If the source gives a percentage, report the number and set unit to '%'."
     ),
-    "found_site_name": "The source's exact official or canonical name for this facility.",
+    "found_facility_name": "The source's exact official or canonical name for this facility.",
     "found_latitude": "Source-reported latitude only. Never infer from an address or nearby place.",
     "found_longitude": "Source-reported longitude only. Never infer from an address or nearby place.",
 }
+
+
+# Countries bound by the EU Landfill Directive (1999/31/EC): the EU27, plus Norway, Iceland and
+# Liechtenstein through the EEA agreement. The UK is deliberately absent - it applies equivalent
+# rules through retained domestic law, but is no longer bound by the Directive itself.
+LANDFILL_DIRECTIVE_ISO3 = {
+    "AUT", "BEL", "BGR", "HRV", "CYP", "CZE", "DNK", "EST", "FIN", "FRA", "DEU", "GRC", "HUN",
+    "IRL", "ITA", "LVA", "LTU", "LUX", "MLT", "NLD", "POL", "PRT", "ROU", "SVK", "SVN", "ESP",
+    "SWE", "ISL", "LIE", "NOR",
+}
+
+# Appended to facility_type's guidance for sites in those countries (WP-531). Existing landfills
+# had until 16 July 2009 to meet the Directive or close, so the prior covers sites that accepted
+# waste after that; an older closed site may never have been engineered.
+LANDFILL_DIRECTIVE_GUIDANCE = (
+    " This site is in a country bound by the EU Landfill Directive (1999/31/EC), which requires "
+    "every landfill accepting non-hazardous waste to have a liner and leachate management. A "
+    "landfill that accepted waste after July 2009 is therefore a Sanitary Landfill unless a source "
+    "says it lacks that engineering; in this country that includes every landfill reporting to "
+    "E-PRTR. A site that "
+    "closed before July 2009 may predate these requirements; classify it from its described "
+    "engineering instead."
+)
 
 
 # Appended to facility_type's guidance only for facilities nothing independently confirms (WP-525).
@@ -185,7 +244,13 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
         # everything else for these facilities is government-sourced and left alone.
         return list(COORDINATE_ATTRIBUTES) if location_is_inexact(site) else []
 
-    requested = list(IDENTITY_ATTRIBUTES)
+    # Identity is always requested, except a name a Tier 1-2 source already supplied (WP-531).
+    # Coordinates are still asked of every facility.
+    requested = [
+        name
+        for name in IDENTITY_ATTRIBUTES
+        if not (name == "found_facility_name" and trusted_baseline_name(site))
+    ]
     gas_present = has_gas_collection(site)
     for field in GAP_FILL_ATTRIBUTES:
         if not is_blank(site.get(field)):
@@ -222,13 +287,20 @@ def build_site_prompt(site: dict[str, Any], attributes: list[str] | None = None)
     # the four database values and none of the addendum.
     unconfirmed_type = needs_contradiction_check(site)
 
+    under_landfill_directive = (
+        normalize_scalar(site.get("country_iso3")).upper() in LANDFILL_DIRECTIVE_ISO3
+    )
+
     def guidance_for(name: str) -> str:
         text = ATTRIBUTE_GUIDANCE.get(name, "")
         if name == "facility_type" and unconfirmed_type:
             text = (
                 f"Allowed values only: {', '.join(FACILITY_TYPE_ALLOWED)}."
+                + FACILITY_TYPE_DEFINITIONS
                 + NOT_A_WASTE_FACILITY_GUIDANCE
             )
+        if name == "facility_type" and under_landfill_directive:
+            text += LANDFILL_DIRECTIVE_GUIDANCE
         return text
 
     targets = [
@@ -258,7 +330,7 @@ Names:
   municipal records and local news will use it, not the translation.
 - Search both. Treat them as one facility with two names, never as two
   candidates: agreeing on the translated name alone is not identity confirmation.
-- Return found_site_name exactly as your source spells it, in whatever script or
+- Return found_facility_name exactly as your source spells it, in whatever script or
   language that source uses. Do not translate it back.
 """
     elif translated_source:
@@ -274,7 +346,7 @@ Names:
 - Search it in that language as well as in English. Local permits, municipal
   records and news coverage are written in it, and are where this site is
   documented.
-- Return found_site_name exactly as your source spells it, in whatever script or
+- Return found_facility_name exactly as your source spells it, in whatever script or
   language that source uses. Do not translate it back.
 """
     else:
@@ -282,9 +354,27 @@ Names:
 Names:
 - site_name is the name the source dataset recorded for this facility; it has not
   been translated. Search it as given, and in the local language too.
-- Return found_site_name exactly as your source spells it, in whatever script or
+- Return found_facility_name exactly as your source spells it, in whatever script or
   language that source uses. Do not translate it back.
 """
+
+    asks_name = "found_facility_name" in attributes
+    if not asks_name:
+        # The name came from a Tier 1-2 source and is not being searched. Asking the agent to
+        # return one anyway would contradict "only the attributes listed below are wanted".
+        names_guidance = names_guidance.replace(
+            "- Return found_facility_name exactly as your source spells it, in whatever script or\n"
+            "  language that source uses. Do not translate it back.\n",
+            "- site_name is already confirmed by an authoritative source. Use it to search; do not\n"
+            "  return a facility name.\n",
+        )
+    identity_rule = (
+        "- found_facility_name, found_latitude and found_longitude establish that you found the\n"
+        "  RIGHT facility. Always return them when a source supports them."
+        if asks_name
+        else "- found_latitude and found_longitude establish that you found the RIGHT facility.\n"
+        "  Always return them when a source supports them. The name is already confirmed."
+    )
 
     closure_focus = ""
     if "closing_year" in attributes and looks_inactive(site):
@@ -371,8 +461,7 @@ Status and closure:
   without a closure year is an incomplete answer.
 
 Identity first:
-- found_site_name, found_latitude and found_longitude establish that you found the
-  RIGHT facility. Always return them when a source supports them.
+{identity_rule}
 - If you cannot confirm you found this specific facility, return an empty attributes
   list and explain why in search_notes. Do not return data for a different site.
 

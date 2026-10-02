@@ -108,7 +108,7 @@ def test_next_pass_tiers_an_ai_filled_baseline_by_its_own_source():
 
 
 def test_identity_is_only_merged_when_asked():
-    rows = [resolved("found_site_name", "Real Name Landfill")]
+    rows = [resolved("found_facility_name", "Real Name Landfill")]
 
     without, _ = refresh_sites([site()], rows, "run1")
     assert without[0]["site_name"] == "Test Landfill"

@@ -124,7 +124,7 @@ def test_prompt_carries_both_names_and_says_to_search_both():
             "source_language": "es",
             "country_iso3": "MEX",
         },
-        attributes=["found_site_name"],
+        attributes=["found_facility_name"],
     )
     assert '"site_name": "DELICACIES"' in prompt
     assert '"original_site_name": "DELICIAS"' in prompt
@@ -138,7 +138,7 @@ def test_prompt_omits_the_original_name_when_there_is_none():
     """Sites from English-language sources must not carry an empty field into the context."""
     prompt = build_site_prompt(
         {"site_id": "7", "site_name": "Greenview Landfill", "country_iso3": "USA"},
-        attributes=["found_site_name"],
+        attributes=["found_facility_name"],
     )
     assert "original_site_name" not in prompt.split("Site context:")[1]
 
@@ -154,7 +154,7 @@ def test_english_source_site_is_not_told_its_name_is_a_translation():
     """
     prompt = build_site_prompt(
         {"site_id": "7", "site_name": "Greenview Landfill", "country_iso3": "CAN"},
-        attributes=["found_site_name"],
+        attributes=["found_facility_name"],
     )
     assert "machine-translated" not in prompt
     assert "it has not\n  been translated" in prompt
@@ -171,7 +171,7 @@ def test_translated_source_site_still_gets_the_two_name_guidance():
             "source_language": "es",
             "country_iso3": "MEX",
         },
-        attributes=["found_site_name"],
+        attributes=["found_facility_name"],
     )
     assert "machine-translated" in prompt
     assert "Search THIS name in the local language first" in prompt
@@ -188,7 +188,7 @@ def test_blank_original_name_counts_as_absent():
             "source_language": "",
             "country_iso3": "CAN",
         },
-        attributes=["found_site_name"],
+        attributes=["found_facility_name"],
     )
     assert "machine-translated" not in prompt
 
@@ -208,7 +208,7 @@ def test_translated_source_keeps_its_language_when_the_name_is_unchanged():
             "source_language": "pt",
             "country_iso3": "BRA",
         },
-        attributes=["found_site_name"],
+        attributes=["found_facility_name"],
     )
     assert "'pt' (ISO 639-1)" in prompt
     assert "Search it in that language as well as in English" in prompt
@@ -228,7 +228,7 @@ def test_english_language_translated_source_is_treated_as_untranslated():
             "source_language": "en",
             "country_iso3": "GBR",
         },
-        attributes=["found_site_name"],
+        attributes=["found_facility_name"],
     )
     assert "it has not\n  been translated" in prompt
     assert "ISO 639-1" not in prompt

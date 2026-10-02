@@ -73,6 +73,14 @@ def write_csv_records(path: Path, rows: list[dict[str, Any]], headers: list[str]
 
 
 
+REFRESHED_SEED_NAME = "refreshed_seed.csv"
+
+
+def refreshed_seed_path(config: Any) -> Path:
+    """Where the gas-collection follow-up writes the seed it rewrote between passes."""
+    return config.run_dir / REFRESHED_SEED_NAME
+
+
 def run_seed_path(config: Any) -> Path:
     """Where a database-seeded run keeps the corpus it read."""
     return config.run_dir / "seed.csv"
@@ -95,10 +103,37 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
     gas-collection follow-up, which rewrites the seed between passes. Country filtering on the
     first read is pushed into SQL rather than applied after loading.
     """
-    if config.input_csv is not None:
-        return load_sites(config.input_csv)
-
     snapshot = run_seed_path(config)
+    if config.input_csv is not None:
+        # The one file that bypasses the snapshot is the pass-2 follow-up's refreshed seed: the
+        # gas-collection pass rewrites the seed between passes and must read that rewrite, while
+        # seed.csv stays the corpus pass 1 searched. It applies only to that exact file, and only
+        # once the original snapshot exists. Any other CSV - even one stored inside the run
+        # directory - is pinned and guarded like any supplied file; exempting all of them let a
+        # first run skip writing seed.csv, so a later arbitrate fell through to the live database.
+        if Path(config.input_csv).resolve() == refreshed_seed_path(config).resolve() and snapshot.exists():
+            return load_sites(config.input_csv)
+
+        # A supplied file is pinned into the run on first use, since it often lives somewhere
+        # temporary and the run must stay re-arbitrable after it is gone.
+        if not snapshot.exists():
+            copy_snapshot_atomically(config.input_csv, snapshot)
+            return load_sites(snapshot)
+
+        # Once pinned, the run reads its snapshot, exactly as a database-seeded run does. Reading
+        # the supplied file instead would let a rerun search one corpus while seed.csv records
+        # another, and a later arbitrate would then load the wrong one. A DIFFERENT file is an
+        # error rather than silently ignored: the run id is pinned, and searching another corpus
+        # needs a new one.
+        supplied = Path(config.input_csv)
+        if supplied.exists() and supplied.read_bytes() != snapshot.read_bytes():
+            raise ValueError(
+                f"Run {config.run_id!r} is pinned to {snapshot}, which differs from "
+                f"--input-csv {supplied}. Use a new --run-id to search a different corpus."
+            )
+        return load_sites(snapshot)
+
+
     if snapshot.exists():
         return load_sites(snapshot)
 
@@ -108,6 +143,21 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
     headers = seed_headers()
     write_snapshot_atomically(snapshot, sites, headers)
     return sites, headers
+
+
+def copy_snapshot_atomically(source: Path, path: Path) -> None:
+    """Pin a supplied seed file into the run, byte for byte, never as a partial file."""
+    import os
+    import shutil
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        shutil.copyfile(source, temporary)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def write_snapshot_atomically(path: Path, rows: list[dict[str, Any]], headers: list[str]) -> None:
@@ -134,6 +184,9 @@ def write_snapshot_atomically(path: Path, rows: list[dict[str, Any]], headers: l
 def describe_seed(config: Any) -> str:
     """Where resolve_sites WILL read from, for logs and the workbook's Run_Config."""
     if config.input_csv is not None:
+        is_followup = Path(config.input_csv).resolve() == refreshed_seed_path(config).resolve()
+        if run_seed_path(config).exists() and not is_followup:
+            return f"{config.input_csv}, pinned in {run_seed_path(config)}"
         return str(config.input_csv)
     if run_seed_path(config).exists():
         return f"consolidation.consolidated_facility, pinned in {run_seed_path(config)}"
