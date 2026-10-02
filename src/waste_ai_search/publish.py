@@ -77,6 +77,22 @@ def _open_in_excel(path: Path) -> bool:
     return (path.parent / f"~${path.name}").exists()
 
 
+def _unused_sibling(destination: Path, workbook: Path) -> Path:
+    """A timestamped name beside `destination` that nothing occupies yet.
+
+    The timestamp alone is not enough: two publishes in the same second would produce the same
+    name, and replacing that file could destroy edits an SME has made to it. A counter is added
+    until the name is free.
+    """
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate = destination.with_name(f"{workbook.stem}_{stamp}{workbook.suffix}")
+    counter = 2
+    while candidate.exists() or (candidate.parent / f"~${candidate.name}").exists():
+        candidate = destination.with_name(f"{workbook.stem}_{stamp}_{counter}{workbook.suffix}")
+        counter += 1
+    return candidate
+
+
 def publish_review(run_dir: Path, run_id: str, target_dir: Path | None = None) -> Path | None:
     """Copy the run's review workbook into SharePoint. Returns where it went, or None if skipped."""
     target_dir = target_dir or review_dir()
@@ -105,8 +121,7 @@ def publish_review(run_dir: Path, run_id: str, target_dir: Path | None = None) -
         ours_and_untouched = current == _ledger(run_dir).get(str(destination))
         if not ours_and_untouched or _open_in_excel(destination):
             reason = "is open in Excel" if _open_in_excel(destination) else "has been edited since it was published"
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            destination = destination.with_name(f"{workbook.stem}_{stamp}{workbook.suffix}")
+            destination = _unused_sibling(destination, workbook)
             print(f"The SharePoint copy {reason}; leaving it untouched and publishing beside it.")
 
     _copy_atomically(workbook, destination)

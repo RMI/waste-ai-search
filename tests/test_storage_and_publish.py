@@ -283,3 +283,72 @@ def test_publishing_leaves_no_temporary_file_for_onedrive_to_upload(tmp_path):
     sharepoint.mkdir()
     publish_review(run, "r", target_dir=sharepoint)
     assert not list(sharepoint.rglob("*.tmp"))
+
+
+# --- Copilot review on WP-534 -------------------------------------------------------------------
+def test_two_versioned_publishes_in_one_second_never_collide(tmp_path, monkeypatch):
+    """A timestamp alone repeats within a second; replacing that file could destroy SME edits."""
+    import waste_ai_search.publish as pub
+
+    class FrozenNow:
+        @staticmethod
+        def now():
+            from datetime import datetime as real
+            return real(2026, 10, 2, 9, 0, 0)
+
+    monkeypatch.setattr(pub, "datetime", FrozenNow)
+    run, sharepoint = run_folder(tmp_path), tmp_path / "sp"
+    sharepoint.mkdir()
+    published = publish_review(run, "r", target_dir=sharepoint)
+    published.write_bytes(b"SME decisions")                 # forces versioned publishing
+
+    (run / "r_review.xlsx").write_bytes(b"version 2")
+    first = publish_review(run, "r", target_dir=sharepoint)
+    first.write_bytes(b"SME edited version 2 too")           # an SME works in the versioned copy
+
+    (run / "r_review.xlsx").write_bytes(b"version 3")
+    second = publish_review(run, "r", target_dir=sharepoint)
+
+    assert first.name == "r_review_20261002_090000.xlsx"
+    assert second.name == "r_review_20261002_090000_2.xlsx"
+    assert first.read_bytes() == b"SME edited version 2 too"
+    assert published.read_bytes() == b"SME decisions"
+
+
+@pytest.mark.parametrize("hostile", [
+    "outputs/runs/r/../../outside.txt",
+    "outputs/runs/r/sub/../../../escape.txt",
+    "outputs/runs/r/",
+    "outputs/runs/r//etc/passwd",
+])
+def test_a_blob_name_cannot_write_outside_the_run_folder(tmp_path, hostile):
+    target = tmp_path / "base" / "run"
+    container = FakeContainer({hostile: b"payload", "outputs/runs/r/ok.json": b"{}"})
+    storage.pull("outputs/runs/r", target, client=container)
+
+    assert (target / "ok.json").exists()
+    written = [p for p in tmp_path.rglob("*") if p.is_file()]
+    assert all(target in p.parents for p in written), written
+    assert not (tmp_path / "base" / "outside.txt").exists()
+    assert not (tmp_path / "escape.txt").exists()
+
+
+@pytest.mark.parametrize("hidden", [".cache/token", "sub/.git/config", "raw_foundry_responses/.secret/a.json"])
+def test_nothing_inside_a_hidden_directory_is_uploaded(tmp_path, hidden):
+    run = run_folder(tmp_path)
+    (run / hidden).parent.mkdir(parents=True, exist_ok=True)
+    (run / hidden).write_text("x")
+    container = FakeContainer()
+    storage.push(run, "outputs/runs/r", client=container)
+    assert f"outputs/runs/r/{hidden}" not in container.blobs
+    assert "outputs/runs/r/raw_foundry_responses/site_1.json" in container.blobs  # ordinary nesting kept
+
+
+def test_the_cli_no_longer_promises_an_unconditionally_offline_arbitrate():
+    """Once blob is configured, arbitrate pulls from storage, so it is not offline unless --local."""
+    from waste_ai_search.cli import build_parser
+
+    text = " ".join(build_parser().format_help().split())
+    assert "Offline, free, and repeatable" not in text
+    assert "arbitrate is offline" not in text
+    assert "pass --local to stay fully offline" in text

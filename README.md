@@ -84,7 +84,7 @@ all 19,492 facilities to keep 83.
 **A run reads the database once.** The first read is written to
 `outputs/runs/<run_id>/seed.csv`, and every later phase of that run reads the snapshot instead of
 querying again — both arbitrations, the refresh between passes, a resumed search, and a standalone
-`arbitrate`. So every phase sees the corpus the search ran against, `arbitrate` stays offline, and
+`arbitrate`. So every phase sees the corpus the search ran against, `arbitrate` never needs the database (it makes no agent calls; with blob storage configured it pulls from blob, so pass `--local` to stay fully offline), and
 `seed_source` in the workbook's Run_Config records where the run is pinned.
 
 A run id is therefore pinned to its corpus. To seed afresh, use a new `--run-id`.
@@ -158,7 +158,8 @@ uv run waste-ai-search search --run-id pilot10 --iso3 NGA PHL --limit 10
 # deliberately includes generic-named hard cases.
 uv run waste-ai-search search --run-id pilot10 --pilot-size 10
 
-# Phase 2 - rebuild every output from the cached responses. Free, offline, re-runnable.
+# Phase 2 - rebuild every output from the cached responses. No agent calls, re-runnable.
+# With blob storage configured this pulls from blob first (VPN); add --local to stay fully offline.
 uv run waste-ai-search arbitrate --run-id pilot10
 
 # Phase 3 - what `run` does for you: fold promoted values back into the seed and search again.

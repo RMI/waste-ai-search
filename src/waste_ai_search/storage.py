@@ -121,16 +121,44 @@ def container_client() -> Any:
     return client
 
 
-def _skip(path: Path) -> bool:
-    """Files that must never be uploaded: Excel lock files, dotfiles and temporaries."""
+def _skip(path: Path, root: Path) -> bool:
+    """Files that must never be uploaded: Excel lock files, hidden content and temporaries.
+
+    Every component of the path below the run folder is checked, not just the file name, so
+    nothing inside a hidden directory such as `.cache/` is uploaded either.
+    """
+    parts = path.relative_to(root).parts
+    if any(part.startswith(".") for part in parts):
+        return True
     name = path.name
-    return name.startswith("~$") or name.startswith(".") or name.endswith(".tmp")
+    return name.startswith("~$") or name.endswith(".tmp")
+
+
+def _safe_local_path(name: str, prefix: str, target: Path) -> Path | None:
+    """Where a blob may be written under `target`, or None if its name would escape it.
+
+    Blob names are not trusted as paths: one such as `outputs/runs/r/../../outside` matches the
+    prefix but would write outside the run folder. Empty, absolute and `..` names are refused, and
+    the result must still sit inside `target` once resolved.
+    """
+    relative = name[len(prefix) + 1:]
+    if not relative or relative.startswith(("/", "\\")):
+        return None
+    parts = Path(relative).parts
+    if any(part in ("..", "") for part in parts) or Path(relative).is_absolute():
+        return None
+    path = (target / relative)
+    try:
+        path.resolve().relative_to(target.resolve())
+    except ValueError:
+        return None
+    return path
 
 
 def push(source: Path, prefix: str, client: Any = None) -> int:
     """Upload every file under `source` to `prefix/...`, overwriting. Returns the count."""
     client = client or container_client()
-    files = [p for p in sorted(source.rglob("*")) if p.is_file() and not _skip(p)]
+    files = [p for p in sorted(source.rglob("*")) if p.is_file() and not _skip(p, source)]
 
     def upload(path: Path) -> None:
         name = f"{prefix}/{path.relative_to(source).as_posix()}"
@@ -151,8 +179,14 @@ def pull(prefix: str, target: Path, client: Any = None) -> int:
     """
     client = client or container_client()
     names = [blob.name for blob in client.list_blobs(name_starts_with=f"{prefix}/")]
-    wanted = [(name, target / name[len(prefix) + 1:]) for name in names]
-    wanted = [(name, path) for name, path in wanted if not path.exists()]
+    wanted = []
+    for name in names:
+        path = _safe_local_path(name, prefix, target)
+        if path is None:
+            print(f"Skipped blob {name!r}: its name would write outside {target}.")
+            continue
+        if not path.exists():
+            wanted.append((name, path))
 
     def download(item: tuple[str, Path]) -> None:
         name, path = item

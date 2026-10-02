@@ -35,7 +35,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="waste-ai-search",
-        description="Waste site AI metadata search. Search caches responses; arbitrate is offline.",
+        description="Waste site AI metadata search. Search caches responses; arbitrate makes no agent calls.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -79,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     arbitrate = subparsers.add_parser(
         "arbitrate",
-        help="Rebuild all outputs from cached responses. Offline, free, and repeatable.",
+        help="Rebuild all outputs from cached responses. No agent calls; needs blob storage (and the VPN) only when blob is configured - pass --local to stay fully offline.",
     )
     add_common(arbitrate)
 
