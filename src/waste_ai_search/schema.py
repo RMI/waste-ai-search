@@ -616,7 +616,9 @@ def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
         for field in FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS:
             if field not in attribute:
                 warnings.append(f"attributes[{idx}] missing required field {field!r}.")
-        name = normalize_scalar(attribute.get("attribute_name"))
+        # Same canonicalisation as extract_evidence, so a pre-rename cached response is not
+        # reported as unsupported by one and accepted by the other.
+        name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
         if name and name not in REQUESTABLE_ATTRIBUTES:
             warnings.append(f"attributes[{idx}] has unsupported attribute_name {name!r}.")
         sources = attribute.get("sources", [])

@@ -97,13 +97,29 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
     """
     snapshot = run_seed_path(config)
     if config.input_csv is not None:
-        # A supplied file is pinned into the run too. It used to be skipped on the grounds that the
-        # file already is the record - but it often lives somewhere temporary, and once it is gone
-        # the run can no longer be re-arbitrated. A file inside the run directory is the run's own
-        # (the pass-2 follow-up's refreshed seed) and must never replace the original snapshot.
-        if not snapshot.exists() and not _inside(config.input_csv, config.run_dir):
+        # A file inside the run directory is the run's own - the pass-2 follow-up's refreshed seed
+        # - and is read as given. It never replaces the original snapshot.
+        if _inside(config.input_csv, config.run_dir):
+            return load_sites(config.input_csv)
+
+        # A supplied file is pinned into the run on first use, since it often lives somewhere
+        # temporary and the run must stay re-arbitrable after it is gone.
+        if not snapshot.exists():
             copy_snapshot_atomically(config.input_csv, snapshot)
-        return load_sites(config.input_csv)
+            return load_sites(snapshot)
+
+        # Once pinned, the run reads its snapshot, exactly as a database-seeded run does. Reading
+        # the supplied file instead would let a rerun search one corpus while seed.csv records
+        # another, and a later arbitrate would then load the wrong one. A DIFFERENT file is an
+        # error rather than silently ignored: the run id is pinned, and searching another corpus
+        # needs a new one.
+        supplied = Path(config.input_csv)
+        if supplied.exists() and supplied.read_bytes() != snapshot.read_bytes():
+            raise ValueError(
+                f"Run {config.run_id!r} is pinned to {snapshot}, which differs from "
+                f"--input-csv {supplied}. Use a new --run-id to search a different corpus."
+            )
+        return load_sites(snapshot)
 
 
     if snapshot.exists():

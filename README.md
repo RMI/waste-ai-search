@@ -89,7 +89,7 @@ querying again — both arbitrations, the refresh between passes, a resumed sear
 
 A run id is therefore pinned to its corpus. To seed afresh, use a new `--run-id`.
 
-A run seeded with `--input-csv` is pinned the same way: the supplied file is copied, byte for byte, into the run's `seed.csv`, so the run can still be re-arbitrated after that file is moved or deleted. The one exception is a file already inside the run directory — the pass-2 follow-up's refreshed seed — which never replaces the original snapshot.
+A run seeded with `--input-csv` is pinned the same way: the supplied file is copied, byte for byte, into the run's `seed.csv` on first use, and every later phase reads that copy — so the run can still be re-arbitrated after the file is moved or deleted. Passing a *different* file to an existing run id stops with an error rather than searching one corpus while the snapshot records another; use a new `--run-id`. The one exception is a file already inside the run directory — the pass-2 follow-up's refreshed seed — which never replaces the original snapshot.
 
 `--input-csv` remains for two cases: pinning an exact corpus, and the gas-collection follow-up,
 which rewrites the seed between passes into the run directory.
@@ -236,7 +236,7 @@ only trustworthy because identity was confirmed.
 | `cover_types` | enum array | — | `cover_types` |
 | `has_biocover` | boolean | — | `has_biocover` |
 
-‡ **`operator` is review-layer only.** The upstream standardized spec has no operator column yet, so a found operator reaches `resolved.csv` and the review queue but never the standardized table. Promoting it is a follow-up once upstream adds the column. `consolidated_facility` has no operator either, so it is asked of every searched facility.
+‡ **`operator` is review-layer only.** The upstream standardized spec has no operator column yet, so a found operator reaches `resolved.csv` but never the standardized table. Like every attribute, a Tier 1–2 operator auto-validates and appears only in `resolved.csv`; Tier 3 and below also reach the review queue. Promoting it is a follow-up once upstream adds the column. `consolidated_facility` has no operator either, so it is asked of every searched facility.
 
 `waste_depth` is the only **derived** categorical. The agent still reports a number and its
 unit; the pipeline converts to metres, then bins on the spec's 5 m boundary. The metre value is

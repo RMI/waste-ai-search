@@ -109,3 +109,32 @@ def test_real_cached_responses_from_earlier_runs_still_parse():
         names = {a.get("attribute_name") for a in payload["attributes"]}
         if "found_site_name" in names and any(s.get("url") for a in payload["attributes"] for s in a.get("sources", [])):
             assert "found_site_name" not in by_attr, path.name
+
+
+def test_payload_validation_accepts_the_old_name_too():
+    """Copilot review: extraction accepted found_site_name but validation still warned about it,
+    so every pre-rename response put a false 'unsupported' line in Parse_Warnings."""
+    from waste_ai_search.schema import validate_foundry_payload
+
+    payload = {"attributes": [{
+        "attribute_name": "found_site_name",
+        "value": "Olushosun Landfill",
+        "value_basis": "Direct",
+        "confidence_score": "High",
+        "sources": [REGULATOR],
+    }]}
+    assert not [w for w in validate_foundry_payload(payload) if "unsupported" in w]
+
+
+def test_real_pre_rename_responses_raise_no_validation_warning():
+    from waste_ai_search.schema import validate_foundry_payload
+
+    root = Path(__file__).resolve().parents[1] / "outputs" / "runs"
+    files = [p for p in root.glob("*/raw_foundry_responses/*.json") if '"found_site_name"' in p.read_text()]
+    if not files:
+        pytest.skip("no cached responses from before the rename on this machine")
+    for path in files:
+        data = json.loads(path.read_text())
+        payload = data.get("parsed") or data.get("payload") or data
+        if isinstance(payload, dict) and payload.get("attributes"):
+            assert not [w for w in validate_foundry_payload(payload) if "found_site_name" in w], path.name

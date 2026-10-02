@@ -212,16 +212,41 @@ def test_a_first_pass_seeded_from_a_file_inside_the_run_writes_no_snapshot(tmp_p
     assert not run_seed_path(config).exists()
 
 
-def test_an_existing_snapshot_is_never_overwritten_by_a_later_csv(tmp_path):
+def test_a_different_csv_on_a_pinned_run_is_refused_not_silently_used(tmp_path):
+    """Copilot review: the rerun searched the new file while seed.csv kept the old one, so a later
+    arbitrate loaded the wrong corpus. A different file now stops the run instead."""
     config = _config(tmp_path)
-    write_csv_records(run_seed_path(config), [{"site_id": "keep"}], ["site_id"])
+    first = tmp_path / "first.csv"
+    write_csv_records(first, [{"site_id": "keep"}], ["site_id"])
+    resolve_sites(_config(tmp_path, input_csv=first))
     before = run_seed_path(config).read_bytes()
 
     other = tmp_path / "other.csv"
     write_csv_records(other, [{"site_id": "new"}], ["site_id"])
-    resolve_sites(_config(tmp_path, input_csv=other))
+    with pytest.raises(ValueError, match="pinned to .* Use a new --run-id"):
+        resolve_sites(_config(tmp_path, input_csv=other))
 
     assert run_seed_path(config).read_bytes() == before
+
+
+def test_rerunning_with_the_same_csv_reads_the_snapshot(tmp_path):
+    """A resumed search with the identical file is fine, and every phase sees one corpus."""
+    seed = tmp_path / "given.csv"
+    write_csv_records(seed, [{"site_id": "1", "site_name": "A"}], ["site_id", "site_name"])
+    first, _ = resolve_sites(_config(tmp_path, input_csv=seed))
+    again, _ = resolve_sites(_config(tmp_path, input_csv=seed))
+    later, _ = resolve_sites(_config(tmp_path))
+    assert [s["site_id"] for s in first] == [s["site_id"] for s in again] == [s["site_id"] for s in later]
+
+
+def test_rerunning_after_the_supplied_file_is_deleted_reads_the_snapshot(tmp_path):
+    seed = tmp_path / "scratch.csv"
+    write_csv_records(seed, [{"site_id": "9"}], ["site_id"])
+    resolve_sites(_config(tmp_path, input_csv=seed))
+    seed.unlink()
+
+    sites, _ = resolve_sites(_config(tmp_path, input_csv=seed))
+    assert [s["site_id"] for s in sites] == ["9"]
 
 
 def test_describe_seed_names_the_file_and_where_it_is_pinned(tmp_path):

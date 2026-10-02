@@ -116,3 +116,14 @@ def test_a_found_operator_is_carried_into_the_next_pass_seed():
 
     assert refreshed["operator"] == "Lagos Waste Management Authority"
     assert "operator" not in requested_attributes(refreshed)
+
+
+def test_a_tier_1_operator_auto_validates_and_stays_out_of_the_review_queue():
+    """Pins the behaviour the README now describes. Copilot flagged the old wording, which said every
+    found operator reached the review queue; like any attribute, a Tier 1-2 fill auto-validates."""
+    from waste_ai_search.arbitration import needs_review
+
+    regulator = dict(NEWS, source_type="Regulator", url="https://agency.example.gov/permit")
+    _s, row = resolve_operator("Lagos Waste Management Authority", [regulator])
+    assert row["validation_status"] == "Auto-validated"
+    assert not needs_review(row)
