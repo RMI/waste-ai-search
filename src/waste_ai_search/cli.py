@@ -20,6 +20,16 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-id", default="", help="Run identifier; also the output directory name.")
     parser.add_argument("--run-dir", default="", help="Override the output directory.")
     parser.add_argument("--dataset-version", default="waste_ai_search_v0.2")
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Read and write the local run folder only, never blob storage (also WASTE_AI_SEARCH_LOCAL=1).",
+    )
+    parser.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="Do not copy the review workbook to the SharePoint folder.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -164,7 +174,56 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
     )
 
 
-def run_everything(config: PipelineConfig, followup: bool = True) -> int:
+class RunSync:
+    """Mirror one run folder to blob storage (WP-534). A no-op when blob is not in use."""
+
+    def __init__(self, config: PipelineConfig, local: bool) -> None:
+        from . import storage
+
+        self.config = config
+        self.client = None
+        if local or storage.forced_local():
+            return
+        if not storage.configured():
+            # Said on every run, so local-only results are never mistaken for persisted ones.
+            print("Blob storage not configured (AZURE_STORAGE_ACCOUNT unset): results stay local only.")
+            return
+        self.client = storage.container_client()  # checks the connection once, up front
+
+    @property
+    def prefix(self) -> str:
+        from .storage import run_prefix
+
+        return run_prefix(self.config.run_id)
+
+    def down(self) -> None:
+        """Bring down an earlier attempt at this run, so its responses are reused, not re-bought."""
+        if self.client is None:
+            return
+        from .storage import pull
+
+        count = pull(self.prefix, self.config.run_dir, client=self.client)
+        if count:
+            print(f"Pulled {count} file(s) of an earlier attempt from blob {self.prefix}/")
+
+    def up(self) -> None:
+        if self.client is None:
+            return
+        from .storage import push
+
+        count = push(self.config.run_dir, self.prefix, client=self.client)
+        print(f"Pushed {count} file(s) to blob {self.prefix}/")
+
+
+def publish(config: PipelineConfig, enabled: bool) -> None:
+    if not enabled:
+        return
+    from .publish import publish_review
+
+    publish_review(config.run_dir, config.run_id)
+
+
+def run_everything(config: PipelineConfig, followup: bool = True, after_search=None) -> int:
     """The whole loop in one command, in one run directory.
 
     Gas-capture attributes are only asked of facilities known to have a collection system, and
@@ -181,8 +240,11 @@ def run_everything(config: PipelineConfig, followup: bool = True) -> int:
     from .search import run_search
     from .seed_refresh import refresh_sites, write_refreshed_seed
 
+    after_search = after_search or (lambda: None)
+
     print("== pass 1: search ==")
     run_search(config)
+    after_search()
     print("\n== pass 1: arbitrate ==")
     run_arbitration(config)
 
@@ -219,6 +281,7 @@ def run_everything(config: PipelineConfig, followup: bool = True) -> int:
         pilot_size=0,
     )
     run_search(followup_config, pass_label="gccs", only_attributes=sorted(GCCS_ATTRIBUTES))
+    after_search()
 
     print("\n== pass 2: arbitrate ==")
     run_arbitration(config)
@@ -228,14 +291,36 @@ def run_everything(config: PipelineConfig, followup: bool = True) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config = make_config(args)
+    try:
+        return dispatch(args, config)
+    except Exception as exc:  # noqa: BLE001
+        from .storage import StorageError
+
+        if isinstance(exc, StorageError):
+            # A firewall block or a missing container is an instruction to the user, not a bug.
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        raise
+
+
+def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
+    publishing = not getattr(args, "no_publish", False)
 
     if args.command == "search":
+        sync = RunSync(config, local=args.local)
+        sync.down()
         run_search(config)
+        sync.up()
         print(f"\nNow arbitrate:\n  uv run waste-ai-search arbitrate --run-id {config.run_id}")
         return 0
 
     if args.command == "run":
-        return run_everything(config, followup=not args.no_followup)
+        sync = RunSync(config, local=args.local)
+        sync.down()
+        code = run_everything(config, followup=not args.no_followup, after_search=sync.up)
+        sync.up()
+        publish(config, publishing)
+        return code
 
     if args.command == "refresh-seed":
         output = (
@@ -246,10 +331,14 @@ def main(argv: list[str] | None = None) -> int:
         return run_refresh_seed(config, output, args.merge_identity)
 
     if args.command == "arbitrate":
+        sync = RunSync(config, local=args.local)
+        sync.down()  # so a run searched on another machine can be arbitrated here
         paths = run_arbitration(config)
         print("\nOutputs:")
         for name, path in paths.items():
             print(f"  {name:<14} {path}")
+        sync.up()
+        publish(config, publishing)
         return 0
 
     return 2

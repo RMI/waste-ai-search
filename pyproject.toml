@@ -9,6 +9,7 @@ dependencies = [
   "azure-identity",
   "python-dotenv",
   "psycopg[binary]",
+  "azure-storage-blob",
 ]
 
 [dependency-groups]

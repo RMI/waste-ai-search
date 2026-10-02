@@ -97,6 +97,36 @@ which rewrites the seed between passes into the run directory.
 A run therefore needs database access. Without the VPN, seed a file first with
 `scripts/seed_metadata_search.py` and pass it with `--input-csv`.
 
+## Storage and sharing
+
+### Run results in Azure Blob Storage
+
+Each run folder is mirrored to blob storage at `outputs/runs/<run_id>/` (adapted from
+refining-ai-search RDP-52):
+
+- **Before searching**, any earlier attempt at the same `--run-id` is pulled down, so responses
+  already in storage are reused instead of paid for again. Local files are never overwritten.
+- **Raw responses go up as soon as a search pass finishes**, so paid-for results are safe even if
+  arbitration fails; the whole folder goes up again after arbitration.
+- `arbitrate` pulls first, so a run searched on another machine can be arbitrated here.
+
+Blob is used **once it is configured** — set `AZURE_STORAGE_ACCOUNT` (signed in with `az login`) or
+`AZURE_STORAGE_CONNECTION_STRING`. Until then every run says *"results stay local only"*. `--local`
+or `WASTE_AI_SEARCH_LOCAL=1` keeps a run local regardless.
+
+The account sits behind a firewall: off the `RMI-SP-FLEX-VNET` VPN, Azure answers
+`AuthorizationFailure`, which looks like a credential problem but is not. The CLI says so and exits.
+
+### Review workbooks in SharePoint
+
+After arbitration, the review workbook is copied to `WASTE_AI_SEARCH_REVIEW_DIR/<run_id>/`, a
+SharePoint folder synced locally by OneDrive, which uploads it. `--no-publish` skips this.
+
+**An SME's work is never overwritten.** Every published file is fingerprinted in the run's
+`published.json`. Republishing replaces a SharePoint copy only if nobody has saved it since; a copy
+that has been edited, or is open in Excel, is left alone, and the new version is written beside it
+with a timestamp.
+
 ## Run The Metadata Search
 
 **One command does everything:**

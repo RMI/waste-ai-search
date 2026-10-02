@@ -1035,6 +1035,7 @@ source = { editable = "." }
 dependencies = [
     { name = "azure-ai-projects" },
     { name = "azure-identity" },
+    { name = "azure-storage-blob" },
     { name = "openpyxl" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
@@ -1049,6 +1050,7 @@ dev = [
 requires-dist = [
     { name = "azure-ai-projects" },
     { name = "azure-identity" },
+    { name = "azure-storage-blob" },
     { name = "openpyxl" },
     { name = "psycopg", extras = ["binary"] },
     { name = "python-dotenv" },
