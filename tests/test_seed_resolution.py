@@ -201,15 +201,67 @@ def test_the_pass_two_seed_inside_the_run_never_replaces_the_original(tmp_path):
     assert run_seed_path(config).read_bytes() == before
 
 
-def test_a_first_pass_seeded_from_a_file_inside_the_run_writes_no_snapshot(tmp_path):
-    """A file already in the run directory is the run's own; copying it would add nothing."""
+def test_a_first_run_from_a_csv_stored_inside_the_run_is_still_pinned(tmp_path):
+    """Copilot review: exempting every in-run CSV meant a first run wrote no seed.csv, so a later
+    arbitrate without --input-csv fell through to the live database."""
+    import waste_ai_search.seed_source as seed_source
+
     config = _config(tmp_path)
-    inside = config.run_dir / "refreshed_seed.csv"
-    write_csv_records(inside, [{"site_id": "1"}], ["site_id"])
+    stored = config.run_dir / "my_seed.csv"
+    write_csv_records(stored, [{"site_id": "7", "site_name": "Stored in run"}], ["site_id", "site_name"])
+    resolve_sites(_config(tmp_path, input_csv=stored))
 
-    resolve_sites(_config(tmp_path, input_csv=inside))
+    assert run_seed_path(config).read_bytes() == stored.read_bytes()
 
-    assert not run_seed_path(config).exists()
+    def no_database(**kwargs):
+        raise AssertionError("a later arbitrate reached the live database")
+
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    mp.setattr(seed_source, "load_seed_sites", no_database)
+    try:
+        sites, _ = resolve_sites(config)
+    finally:
+        mp.undo()
+    assert [s["site_id"] for s in sites] == ["7"]
+
+
+def test_an_in_run_csv_other_than_the_refreshed_seed_is_guarded(tmp_path):
+    """It must not slip past the mismatch check just because of where it is stored."""
+    config = _config(tmp_path)
+    original = tmp_path / "original.csv"
+    write_csv_records(original, [{"site_id": "1"}], ["site_id"])
+    resolve_sites(_config(tmp_path, input_csv=original))
+
+    stray = config.run_dir / "something_else.csv"
+    write_csv_records(stray, [{"site_id": "2"}], ["site_id"])
+    with pytest.raises(ValueError, match="Use a new --run-id"):
+        resolve_sites(_config(tmp_path, input_csv=stray))
+
+
+def test_a_refreshed_seed_with_no_snapshot_yet_is_pinned_normally(tmp_path):
+    """The bypass needs the original snapshot to exist; without one there is nothing to protect."""
+    config = _config(tmp_path)
+    refreshed = config.run_dir / "refreshed_seed.csv"
+    write_csv_records(refreshed, [{"site_id": "3"}], ["site_id"])
+
+    resolve_sites(_config(tmp_path, input_csv=refreshed))
+
+    assert run_seed_path(config).read_bytes() == refreshed.read_bytes()
+
+
+def test_the_refresh_seed_command_runs_end_to_end(tmp_path):
+    """Its default output path is resolved inside main(); exercises the import that path needs."""
+    from waste_ai_search import cli
+    from waste_ai_search.schema import RESOLVED_HEADERS
+
+    run_dir = tmp_path / "run"
+    write_csv_records(run_dir / "seed.csv", [{"site_id": "1", "site_name": "A", "country_iso3": "NGA"}],
+                      ["site_id", "site_name", "country_iso3"])
+    write_csv_records(run_dir / "resolved.csv", [], RESOLVED_HEADERS)
+
+    assert cli.main(["refresh-seed", "--run-id", "r", "--run-dir", str(run_dir)]) == 0
+    assert (run_dir / "refreshed_seed.csv").exists()
 
 
 def test_a_different_csv_on_a_pinned_run_is_refused_not_silently_used(tmp_path):

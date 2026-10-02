@@ -73,6 +73,14 @@ def write_csv_records(path: Path, rows: list[dict[str, Any]], headers: list[str]
 
 
 
+REFRESHED_SEED_NAME = "refreshed_seed.csv"
+
+
+def refreshed_seed_path(config: Any) -> Path:
+    """Where the gas-collection follow-up writes the seed it rewrote between passes."""
+    return config.run_dir / REFRESHED_SEED_NAME
+
+
 def run_seed_path(config: Any) -> Path:
     """Where a database-seeded run keeps the corpus it read."""
     return config.run_dir / "seed.csv"
@@ -97,9 +105,13 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
     """
     snapshot = run_seed_path(config)
     if config.input_csv is not None:
-        # A file inside the run directory is the run's own - the pass-2 follow-up's refreshed seed
-        # - and is read as given. It never replaces the original snapshot.
-        if _inside(config.input_csv, config.run_dir):
+        # The one file that bypasses the snapshot is the pass-2 follow-up's refreshed seed: the
+        # gas-collection pass rewrites the seed between passes and must read that rewrite, while
+        # seed.csv stays the corpus pass 1 searched. It applies only to that exact file, and only
+        # once the original snapshot exists. Any other CSV - even one stored inside the run
+        # directory - is pinned and guarded like any supplied file; exempting all of them let a
+        # first run skip writing seed.csv, so a later arbitrate fell through to the live database.
+        if Path(config.input_csv).resolve() == refreshed_seed_path(config).resolve() and snapshot.exists():
             return load_sites(config.input_csv)
 
         # A supplied file is pinned into the run on first use, since it often lives somewhere
@@ -131,14 +143,6 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
     headers = seed_headers()
     write_snapshot_atomically(snapshot, sites, headers)
     return sites, headers
-
-
-def _inside(path: Path, directory: Path) -> bool:
-    try:
-        Path(path).resolve().relative_to(Path(directory).resolve())
-        return True
-    except ValueError:
-        return False
 
 
 def copy_snapshot_atomically(source: Path, path: Path) -> None:
@@ -180,7 +184,8 @@ def write_snapshot_atomically(path: Path, rows: list[dict[str, Any]], headers: l
 def describe_seed(config: Any) -> str:
     """Where resolve_sites WILL read from, for logs and the workbook's Run_Config."""
     if config.input_csv is not None:
-        if run_seed_path(config).exists() and not _inside(config.input_csv, config.run_dir):
+        is_followup = Path(config.input_csv).resolve() == refreshed_seed_path(config).resolve()
+        if run_seed_path(config).exists() and not is_followup:
             return f"{config.input_csv}, pinned in {run_seed_path(config)}"
         return str(config.input_csv)
     if run_seed_path(config).exists():

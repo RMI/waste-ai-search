@@ -89,7 +89,7 @@ querying again — both arbitrations, the refresh between passes, a resumed sear
 
 A run id is therefore pinned to its corpus. To seed afresh, use a new `--run-id`.
 
-A run seeded with `--input-csv` is pinned the same way: the supplied file is copied, byte for byte, into the run's `seed.csv` on first use, and every later phase reads that copy — so the run can still be re-arbitrated after the file is moved or deleted. Passing a *different* file to an existing run id stops with an error rather than searching one corpus while the snapshot records another; use a new `--run-id`. The one exception is a file already inside the run directory — the pass-2 follow-up's refreshed seed — which never replaces the original snapshot.
+A run seeded with `--input-csv` is pinned the same way: the supplied file is copied, byte for byte, into the run's `seed.csv` on first use, and every later phase reads that copy — so the run can still be re-arbitrated after the file is moved or deleted. Passing a *different* file to an existing run id stops with an error rather than searching one corpus while the snapshot records another; use a new `--run-id`. The one exception is the pass-2 follow-up's `refreshed_seed.csv`, which is read as given once the original snapshot exists and never replaces it. Any other CSV is pinned and checked against the snapshot, even one stored inside the run directory.
 
 `--input-csv` remains for two cases: pinning an exact corpus, and the gas-collection follow-up,
 which rewrites the seed between passes into the run directory.

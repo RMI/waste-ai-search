@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .arbitrate import run_arbitration
 from .run_context import PipelineConfig, default_run_dir, default_run_id
+from .input_loader import refreshed_seed_path
 from .search import run_search
 
 
@@ -208,7 +209,7 @@ def run_everything(config: PipelineConfig, followup: bool = True) -> int:
         return 0
 
     print(f"\n== pass 2: {len(unlocked)} site(s) revealed a gas collection system ==")
-    seed_path = write_refreshed_seed(config.run_dir / "refreshed_seed.csv", refreshed, headers)
+    seed_path = write_refreshed_seed(refreshed_seed_path(config), refreshed, headers)
     followup_config = replace(
         config,
         input_csv=seed_path,
@@ -240,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         output = (
             Path(args.output_csv).expanduser().resolve()
             if args.output_csv
-            else config.run_dir / "refreshed_seed.csv"
+            else refreshed_seed_path(config)
         )
         return run_refresh_seed(config, output, args.merge_identity)
 
