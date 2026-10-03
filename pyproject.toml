@@ -10,6 +10,7 @@ dependencies = [
   "python-dotenv",
   "psycopg[binary]",
   "requests",
+  "azure-storage-blob",
 ]
 
 [dependency-groups]

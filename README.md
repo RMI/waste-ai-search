@@ -84,7 +84,7 @@ all 19,492 facilities to keep 83.
 **A run reads the database once.** The first read is written to
 `outputs/runs/<run_id>/seed.csv`, and every later phase of that run reads the snapshot instead of
 querying again — both arbitrations, the refresh between passes, a resumed search, and a standalone
-`arbitrate`. So every phase sees the corpus the search ran against, `arbitrate` stays offline, and
+`arbitrate`. So every phase sees the corpus the search ran against, `arbitrate` never needs the database (it makes no agent calls; with blob storage configured it pulls from blob, so pass `--local` to stay fully offline), and
 `seed_source` in the workbook's Run_Config records where the run is pinned.
 
 A run id is therefore pinned to its corpus. To seed afresh, use a new `--run-id`.
@@ -126,6 +126,36 @@ uv run waste-ai-search arbitrate --keep-broken-link-evidence ...  # let dead sou
 Run_Config records `links_checked`, `links_broken`, `links_repaired` and `broken_link_route`, so
 every workbook states which policy produced it.
 
+## Storage and sharing
+
+### Run results in Azure Blob Storage
+
+Each run folder is mirrored to blob storage at `outputs/runs/<run_id>/` (adapted from
+refining-ai-search RDP-52):
+
+- **Before searching**, any earlier attempt at the same `--run-id` is pulled down, so responses
+  already in storage are reused instead of paid for again. Local files are never overwritten.
+- **Raw responses go up as soon as a search pass finishes**, so paid-for results are safe even if
+  arbitration fails; the whole folder goes up again after arbitration.
+- `arbitrate` pulls first, so a run searched on another machine can be arbitrated here.
+
+Blob is used **once it is configured** — set `AZURE_STORAGE_ACCOUNT` (signed in with `az login`) or
+`AZURE_STORAGE_CONNECTION_STRING`. Until then every run says *"results stay local only"*. `--local`
+or `WASTE_AI_SEARCH_LOCAL=1` keeps a run local regardless.
+
+The account sits behind a firewall: off the `RMI-SP-FLEX-VNET` VPN, Azure answers
+`AuthorizationFailure`, which looks like a credential problem but is not. The CLI says so and exits.
+
+### Review workbooks in SharePoint
+
+After arbitration, the review workbook is copied to `WASTE_AI_SEARCH_REVIEW_DIR/<run_id>/`, a
+SharePoint folder synced locally by OneDrive, which uploads it. `--no-publish` skips this.
+
+**An SME's work is never overwritten.** Every published file is fingerprinted in the run's
+`published.json`. Republishing replaces a SharePoint copy only if nobody has saved it since; a copy
+that has been edited, or is open in Excel, is left alone, and the new version is written beside it
+with a timestamp.
+
 ## Run The Metadata Search
 
 **One command does everything:**
@@ -157,7 +187,8 @@ uv run waste-ai-search search --run-id pilot10 --iso3 NGA PHL --limit 10
 # deliberately includes generic-named hard cases.
 uv run waste-ai-search search --run-id pilot10 --pilot-size 10
 
-# Phase 2 - rebuild every output from the cached responses. Free, offline, re-runnable.
+# Phase 2 - rebuild every output from the cached responses. No agent calls, re-runnable.
+# With blob storage configured this pulls from blob first (VPN); add --local to stay fully offline.
 uv run waste-ai-search arbitrate --run-id pilot10
 
 # Phase 3 - what `run` does for you: fold promoted values back into the seed and search again.
