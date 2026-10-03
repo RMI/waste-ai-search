@@ -354,3 +354,26 @@ def test_load_keeps_the_first_source_when_a_facility_matches_two(monkeypatch):
     })
     assert found[77]["name_data_source"] == "osm_2022"
     assert found[77]["original_site_name"] == "Basural"
+
+
+# --- SINIR municipality (WP-543) ----------------------------------------------------------------
+def test_sinir_municipality_reaches_the_seed_and_the_prompt(monkeypatch):
+    """Site 1116 is "Aterro Sanitário" in Araguari; without the town the agent searched Goiânia."""
+    import waste_ai_search.db as db_module
+    from waste_ai_search.prompt_builder import build_site_prompt
+    from waste_ai_search.source_names import attach_municipalities, load_sinir_municipalities
+
+    rows = [{"internal_facility_id": 1116, "city_name": "Araguari", "state_name": "Minas Gerais"}]
+    monkeypatch.setattr(db_module, "fetch_all", lambda sql, params=None, config=None: rows)
+    records = [
+        {"internal_facility_id": "1116", "site_id": "1116", "site_name": "Sanitary ware",
+         "original_site_name": "Atero Sanitário", "country_iso3": "BRA", "municipality": "", "admin1": ""},
+        {"internal_facility_id": "9", "site_id": "9", "site_name": "Other", "country_iso3": "BRA",
+         "municipality": "", "admin1": ""},
+    ]
+    attach_municipalities(records, load_sinir_municipalities())
+
+    assert (records[0]["municipality"], records[0]["admin1"]) == ("Araguari", "Minas Gerais")
+    assert (records[1]["municipality"], records[1]["admin1"]) == ("", "")
+    prompt = build_site_prompt(records[0], ["found_latitude", "found_longitude"])
+    assert '"municipality": "Araguari"' in prompt and '"admin1": "Minas Gerais"' in prompt

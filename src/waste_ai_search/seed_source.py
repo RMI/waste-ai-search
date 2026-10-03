@@ -224,9 +224,15 @@ def load_seed_sites(
     attach_attribute_sources(records, static, dated)
 
     # The stored facility_name has been translated; the original is what local sources use.
-    from .source_names import attach_name_provenance, load_name_provenance
+    from .source_names import (
+        attach_municipalities,
+        attach_name_provenance,
+        load_name_provenance,
+        load_sinir_municipalities,
+    )
 
     attach_name_provenance(records, load_name_provenance(config=config))
+    attach_municipalities(records, load_sinir_municipalities(config=config))
     records.sort(key=lambda item: int(item["facility_id"]) if item["facility_id"].isdigit() else 0)
     return records
 

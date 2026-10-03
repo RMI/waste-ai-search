@@ -331,11 +331,15 @@ def selected_ids(seed, **kwargs):
         return [s["site_id"] for s in select_sites(sites, config)]
 
 
-def test_us_sites_are_excluded_by_default(tmp_path):
-    """US facilities are already Tier 1 covered by GHGRP and LMOP."""
+def test_us_and_brazil_sites_are_excluded_by_default(tmp_path):
+    """US facilities are Tier 1 covered; Brazil's yielded no coordinates on the WP-543 test."""
     seed = seed_with_countries(tmp_path, "USA", "PHL", "USA", "BRA")
-    # The Brazilian row survives only because the fixture flags its location inexact.
-    assert selected_ids(seed) == ["2", "4"]
+    assert selected_ids(seed) == ["2"]
+
+
+def test_naming_brazil_still_searches_its_inexact_sites(tmp_path):
+    seed = seed_with_countries(tmp_path, "USA", "PHL", "USA", "BRA")
+    assert selected_ids(seed, iso3=["BRA"]) == ["4"]
 
 
 def test_brazil_with_an_exact_location_drops_out_of_selection_entirely(tmp_path):
@@ -442,7 +446,7 @@ def test_sites_with_nothing_to_ask_are_dropped_from_selection(tmp_path):
         "3,Philippine Site,PHL,TRUE,1.0,2.0\n",
         encoding="utf-8",
     )
-    assert selected_ids(seed) == ["2", "3"]
+    assert selected_ids(seed, include_excluded_countries=True) == ["2", "3"]
 
 
 def test_other_countries_are_unaffected_by_the_brazil_rule():
