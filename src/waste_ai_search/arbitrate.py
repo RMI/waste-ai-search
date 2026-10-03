@@ -42,7 +42,7 @@ from .schema import (
     parse_tristate_bool,
     validate_foundry_payload,
 )
-from .standardized import build_standard_table, to_csv_row, write_load_statement
+from .standardized import PROMOTED_RESOLUTIONS, build_standard_table, to_csv_row, write_load_statement
 from .unit_converter import convert_attribute_value
 from .workbook_io import write_review_workbook
 
@@ -794,7 +794,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         "retry": out / "sites_to_retry.csv",
     }
     write_csv_records(paths["evidence"], evidence_rows, EVIDENCE_HEADERS)
-    write_csv_records(paths["resolved"], resolved_rows, RESOLVED_HEADERS)
+    write_csv_records(paths["resolved"], auto_validated_rows(resolved_rows), RESOLVED_HEADERS)
     write_csv_records(paths["sources"], dedupe_sources(source_entries), SOURCES_HEADERS)
     write_csv_records(paths["review_queue"], review_queue, REVIEW_QUEUE_HEADERS)
     write_csv_records(paths["leads"], leads, SUPPLEMENTARY_LEADS_HEADERS)
@@ -845,6 +845,22 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     return paths
 
 
+def auto_validated_rows(resolved_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows resolved.csv keeps: a value the agent found that our rules accepted without a human.
+
+    "Not found" rows carry no value, and rows awaiting review belong in the review workbook until an
+    SME promotes them, so neither is written. Those rows are still built in memory - the review
+    queue, the Contradictions view and the standardized table are derived from them.
+    """
+    return [
+        row
+        for row in resolved_rows
+        if normalize_scalar(row.get("resolution")) in PROMOTED_RESOLUTIONS
+        and normalize_scalar(row.get("validation_status")) == "Auto-validated"
+        and normalize_scalar(row.get("resolved_value"))
+    ]
+
+
 def print_summary(
     cached, resolved_rows, evidence_rows, review_queue, standard_records, leads, warnings, retry_sites
 ) -> None:
@@ -854,7 +870,8 @@ def print_summary(
     tiers = Counter(row["source_tier"] for row in evidence_rows)
     print(f"\nSites arbitrated:        {len(cached)}")
     print(f"Evidence rows:           {len(evidence_rows)}")
-    print(f"Resolved rows:           {len(resolved_rows)}")
+    print(f"Attributes arbitrated:   {len(resolved_rows)}")
+    print(f"Auto-validated rows:     {len(auto_validated_rows(resolved_rows))}  (resolved.csv)")
     print(f"Standardized records:    {len(standard_records)}")
     print(f"Leads:                   {len(leads)}")
     print(f"Parse warnings:          {len(warnings)}")

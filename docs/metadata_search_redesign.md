@@ -357,6 +357,7 @@ All settled. Where an answer overrode my recommendation it is marked.
 | F22 | Workbook-safe text and links | Characters openpyxl rejects are replaced with a space in every cell, since one would abort the whole workbook. Hyperlink targets are made safe - raw spaces and non-ASCII percent-encoded, non-ASCII hosts IDNA-encoded - while the cell shows the source's URL unchanged; existing `%` escapes are never decoded (the refining-ai-search RDP-63 lesson). Only `http`/`https` links are clickable, and none beyond Excel's 2,079-character limit. |
 | F23 | Source links checked (WP-533) | Ported from refining-ai-search RDP-63. Cited URLs are fetched at the end of the search phase and given OK / Broken / Unverified verdicts in `link_check.json`; arbitration only reads them, so it stays offline. A Broken source is treated like one with no URL - not promoted, routed to Leads - unless `--keep-broken-link-evidence`. Unverified is never touched. |
 | F24 | Blob storage and SharePoint (WP-534) | Run folders mirror to Azure Blob (adapted from refining-ai-search RDP-52): pull before searching so paid responses are reused, push after each search pass and after arbitration, never overwrite local files on pull. Used once configured, local until then. Review workbooks are copied into a OneDrive-synced SharePoint folder; a copy an SME has edited or has open is never overwritten. |
+| F25 | `resolved.csv` keeps only auto-validated values (WP-542) | Only rows that are promoted (`Confirmed baseline`, `Filled empty baseline`, `Overrides baseline`), `Auto-validated` and carry a value are written - on `pilot10_v7`, 8 of 145 rows are kept; 14 are in the review queue, 120 were `Not found`. Needs-review rows live in the review workbook until an SME promotes them. The full set is still built in memory, so the review queue, Contradictions and the standardized table are unchanged. The pass-2 refresh reads `resolved.csv` plus `review_queue.csv`, so a gas collection system awaiting review still unlocks the follow-up. |
 | F11 | Tier 5 replaces the Unrated sentinel | An unclassifiable source now sits on the ordered scale at Tier 5 rather than out-of-band at 99. `Other` removed from `source_type`: 15 types, no catch-all. |
 
 ### Accepted risks
@@ -610,7 +611,7 @@ Tests mirror the split: `test_search.py` and `test_arbitrate.py`.
 | File | Grain | Who reads it |
 |---|---|---|
 | `<run>_review.xlsx` → **Review_Queue** | Only rows needing a decision | **The SME. This is the worklist.** |
-| `resolved.csv` | One row per facility x attribute searched, including `Not found` | Anyone asking "what do we now believe, and why" |
+| `resolved.csv` | One row per value found and auto-validated (F25) | Anyone asking "what do we now believe, and why" |
 | `evidence.csv` | One row per source-backed claim | Anyone asking "why did this value win or lose" |
 | `sources.csv` | One row per unique URL | Source audit, tier drift monitoring |
 | `std_facility_tbl_ai_search_<run>.csv` | One record per facility, 44 spec columns | The merge into `transformed.*` |
@@ -618,9 +619,10 @@ Tests mirror the split: `test_search.py` and `test_arbitrate.py`.
 | `supplementary_leads.csv` | Findings that lost | Optional manual promotion |
 | `sites_to_retry.csv` | Sites whose search tool failed | Re-run these; not "no data" |
 
-The review queue is a **strict subset** of `resolved.csv` — verified on `pilot10_v5`: all 12 queue
-rows are among the 136 resolved rows. Queue membership is decided solely by
-`validation_status = "Needs review"`.
+The review queue and `resolved.csv` are **disjoint** (F25): a row is written to `resolved.csv` only if
+it is auto-validated, and to the queue only if `validation_status = "Needs review"`. `Not found` rows
+go to neither. (Before F25, `resolved.csv` held every facility x attribute searched and the queue
+was a subset of it — on `pilot10_v5`, 12 of 136 rows.)
 
 Rows the pipeline signs off itself now carry `reviewer = "AI Agent"`, the arbitration date, and the
 agent's own evidence summary in `researcher_notes`, so an auto-validated row is distinguishable from

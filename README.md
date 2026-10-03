@@ -296,7 +296,7 @@ only trustworthy because identity was confirmed.
 | `cover_types` | enum array | — | `cover_types` |
 | `has_biocover` | boolean | — | `has_biocover` |
 
-‡ **`operator` is review-layer only.** The upstream standardized spec has no operator column yet, so a found operator reaches `resolved.csv` but never the standardized table. Like every attribute, a Tier 1–2 operator auto-validates and appears only in `resolved.csv`; Tier 3 and below also reach the review queue. Promoting it is a follow-up once upstream adds the column. `consolidated_facility` has no operator either, so it is asked of every searched facility.
+‡ **`operator` is review-layer only.** The upstream standardized spec has no operator column yet, so a found operator reaches `resolved.csv` but never the standardized table. Like every attribute, a Tier 1–2 operator auto-validates into `resolved.csv`; Tier 3 and below go to the review queue instead. Promoting it is a follow-up once upstream adds the column. `consolidated_facility` has no operator either, so it is asked of every searched facility.
 
 `waste_depth` is the only **derived** categorical. The agent still reports a number and its
 unit; the pipeline converts to metres, then bins on the spec's 5 m boundary. The metre value is
@@ -389,7 +389,7 @@ the other 10,928 prompts carry the four database values and none of this guidanc
 | File | Purpose |
 |---|---|
 | `<run_id>_review.xlsx` | **The SME artifact.** Only rows needing a human decision, with dropdowns. |
-| `resolved.csv` | One row per facility × attribute: what we now believe and why. |
+| `resolved.csv` | One row per value the agent found and the rules auto-validated: what we now believe and why. `Not found` and needs-review rows are not written. |
 | `evidence.csv` | One row per source-backed claim. The audit trail. |
 | `sources.csv` | Deduped source registry keyed by normalized URL. |
 | `std_facility_tbl_ai_search_<run_id>.csv` | 44-column spec-conformant standardized table. |
@@ -524,8 +524,9 @@ uv run waste-ai-search arbitrate --run-id <run_id>
 
 ### Auditing a decision
 
-`resolved.csv` holds every facility x attribute searched, including `Not found` and auto-validated
-rows — the review queue is a strict subset of it. `evidence.csv` holds one row per source-backed
+`resolved.csv` holds only values the agent found and the rules auto-validated. Values awaiting a
+decision are in the review queue instead, until an SME promotes them; attributes not found are not
+written anywhere. `evidence.csv` holds one row per source-backed
 claim with the tier rule applied to each source, so you can see exactly why a value won or lost.
 `sources.csv` is the deduped source registry.
 
