@@ -20,7 +20,7 @@ from .schema import normalize_scalar
 # which is why foundry_client's exception-based retry never sees it. Measured on a 10-site pilot:
 # 6 sites failed this way on the first pass and all 6 recovered on retry, one needing two attempts.
 # So the search phase retries on the reported failure itself.
-SEARCH_TOOL_RETRY_ATTEMPTS = 3
+SEARCH_TOOL_RETRY_ATTEMPTS = 2
 SEARCH_TOOL_RETRY_DELAY_SECONDS = 20.0
 
 

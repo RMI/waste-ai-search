@@ -512,6 +512,15 @@ Edit only these four columns; everything else is read-only:
   failure usually means an upstream fix, not 50 individual reviews).
 - **Definitions** — the allowed values, mirrored from the live database enums.
 
+### Bing cost
+
+Bing grounding bills per query, so the run log records the queries each site made in
+`web_searches` (every retried attempt included, since each is billed), and the search prints the
+run's total. One live site with 12 attributes made **39 queries**. Retries are capped at 2 for both
+Foundry errors (`AZURE_FOUNDRY_MAX_RETRIES`) and reported search-tool failures
+(`--search-tool-retries`), so a site runs the agent at most 4 times, down from 9. A local `.env` that
+still sets `AZURE_FOUNDRY_MAX_RETRIES=3` overrides the new default.
+
 ### If a site could not be searched
 
 `sites_to_retry.csv` lists sites where the agent's own web-search tool failed. These are **not**

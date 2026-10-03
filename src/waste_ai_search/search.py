@@ -85,6 +85,14 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
     return selected
 
 
+def add_searches(total: int | None, client: Any) -> int | None:
+    """Add the Bing queries of the client's last call to a site's running total."""
+    count = getattr(client, "web_searches", None)
+    if count is None:
+        return total
+    return (total or 0) + count
+
+
 # --- phase 1: search --------------------------------------------------------------------------
 def check_run_links(run_dir: Path) -> dict:
     """Fetch every source URL in a run's cached responses once, and record the verdicts."""
@@ -160,6 +168,8 @@ def run_search(
         started = datetime.now().replace(microsecond=0).isoformat()
         status, error = "Started", ""
         tool_retries = 0
+        # None when the client cannot count (a fake in tests); blank in the log, never a false 0.
+        web_searches: int | None = None
 
         print(f"[{index}/{len(selected)}] {site_id} {site_name} ({len(attributes)} attrs)", flush=True)
 
@@ -178,9 +188,11 @@ def run_search(
                     with hard_timeout(config.hard_site_timeout_seconds):
                         payload = client.search_site(site, prompt)
                 except Exception as exc:  # noqa: BLE001 - one bad site must not end a multi-day run
+                    web_searches = add_searches(web_searches, client)
                     status, error = "Failed", f"{type(exc).__name__}: {exc}"
                     print(f"    {error}", flush=True)
                     break
+                web_searches = add_searches(web_searches, client)
 
                 if not search_tool_failed(payload):
                     save_json(path, payload)
@@ -222,6 +234,7 @@ def run_search(
                 "parsed_source_count": source_count,
                 "error_message": error,
                 "retry_count": tool_retries,
+                "web_searches": "" if web_searches is None else web_searches,
             }
         )
 
@@ -230,6 +243,9 @@ def run_search(
 
     failures = [row for row in run_log if str(row["status"]).startswith("Search tool failed")]
     print(f"\nSearched {len(selected)} sites. Run log: {log_path}")
+    counted = [row["web_searches"] for row in run_log if row["web_searches"] != ""]
+    if counted:
+        print(f"Bing queries: {sum(counted):,} across {len(counted)} searched site(s).")
 
     # WP-533: verify cited URLs now, so arbitration can apply the verdicts offline. Every URL in
     # the run's cached responses is passed, but the sidecar is a cache, so a resumed search or the
