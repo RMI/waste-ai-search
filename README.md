@@ -97,6 +97,35 @@ which rewrites the seed between passes into the run directory.
 A run therefore needs database access. Without the VPN, seed a file first with
 `scripts/seed_metadata_search.py` and pass it with `--input-csv`.
 
+## Link checking
+
+At the end of the search phase, every cited URL is fetched once and given a verdict, saved to
+`link_check.json` in the run folder. Ported from refining-ai-search (RDP-63):
+
+| Verdict | Meaning | Effect |
+|---|---|---|
+| `OK` | 200 | Normal |
+| `Broken` | 404, 410 or a redirect loop | Not promoted; the source goes to Leads |
+| `Unverified` | 403, 429, timeout, TLS error | Left alone — usually bot-blocking, not a dead page |
+
+A broken URL is retried with a literal comma for `%2C` and with the trailing slash toggled; a
+respelling that works replaces it. Existing escapes are never decoded otherwise.
+
+**Only public addresses are ever contacted.** Cited URLs are untrusted and are fetched from a machine that is often on the VPN, so every hop — redirects included — is resolved first and refused if any address is private, loopback, link-local (including the cloud metadata address) or otherwise non-public. The connection then goes to the address that was checked, so a second DNS answer cannot redirect it. A refused URL is `Unverified` and never fetched; a malformed one is `Unverified` too, rather than stopping the check.
+
+The fetching happens during **search**, which needs the network anyway; `arbitrate` only reads
+`link_check.json`, so it stays offline. A value with one dead source and one working source is still
+promoted from the working one.
+
+```bash
+uv run waste-ai-search check-links --run-id <run_id>   # backfill an older run, then arbitrate
+uv run waste-ai-search run --no-link-check ...          # skip checking
+uv run waste-ai-search arbitrate --keep-broken-link-evidence ...  # let dead sources stay promotable
+```
+
+Run_Config records `links_checked`, `links_broken`, `links_repaired` and `broken_link_route`, so
+every workbook states which policy produced it.
+
 ## Storage and sharing
 
 ### Run results in Azure Blob Storage
@@ -443,6 +472,8 @@ The five columns that decide your judgement:
 Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab.
 
 **Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `resolved.csv` and `evidence.csv`; they are blank where the source was never translated.
+
+**Source links.** `winning_link_status` beside the URL says whether it was checked and found working (`OK`) or could not be verified (`Unverified` — usually a site refusing automated checks, so it may still open for you). A source whose link is dead never wins: it is routed to Leads instead. `winning_source_url` is clickable, and shows the URL exactly as the source gave it. The link behind it is made safe (spaces and accented characters encoded), so it opens even when the text has them. A URL that is not `http`/`https`, or longer than Excel can follow, is shown as plain text rather than linked.
 
 ### 3. Decide
 

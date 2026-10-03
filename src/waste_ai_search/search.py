@@ -13,6 +13,7 @@ from typing import Any
 
 from .geocoder import enrich_sites_from_cache
 from .input_loader import resolve_sites, run_seed_path, write_csv_records
+from .link_check import BROKEN, LINK_CHECK_FILE, check_urls
 from .pilot_selector import select_mixed_pilot
 from .prompt_builder import build_site_prompt, coordinates_only, requested_attributes
 from .run_context import (
@@ -85,6 +86,17 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
 
 
 # --- phase 1: search --------------------------------------------------------------------------
+def check_run_links(run_dir: Path) -> dict:
+    """Fetch every source URL in a run's cached responses once, and record the verdicts."""
+    from .arbitrate import cached_source_urls
+
+    results = check_urls(cached_source_urls(run_dir), cache_path=run_dir / LINK_CHECK_FILE)
+    broken = sum(1 for r in results.values() if r.verdict == BROKEN)
+    repaired = sum(1 for r in results.values() if r.resolved_url != r.url)
+    print(f"Links: {len(results)} checked, {broken} broken, {repaired} repaired -> {LINK_CHECK_FILE}")
+    return results
+
+
 def run_search(
     config: PipelineConfig,
     pass_label: str = "",
@@ -218,6 +230,12 @@ def run_search(
 
     failures = [row for row in run_log if str(row["status"]).startswith("Search tool failed")]
     print(f"\nSearched {len(selected)} sites. Run log: {log_path}")
+
+    # WP-533: verify cited URLs now, so arbitration can apply the verdicts offline. Every URL in
+    # the run's cached responses is passed, but the sidecar is a cache, so a resumed search or the
+    # pass-2 follow-up only fetches URLs not already checked.
+    if config.check_links:
+        check_run_links(config.run_dir)
     if failures:
         ids = " ".join(row["site_id"] for row in failures)
         print(f"\n!! {len(failures)} site(s) still failing after retries. Try again later:")

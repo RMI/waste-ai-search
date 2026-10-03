@@ -77,11 +77,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Attempts per site when the agent reports its own web-search tool failed.",
     )
 
+    search.add_argument(
+        "--no-link-check",
+        action="store_true",
+        help="Skip fetching cited URLs after the search (no link_check.json is written).",
+    )
+
     arbitrate = subparsers.add_parser(
         "arbitrate",
         help="Rebuild all outputs from cached responses. No agent calls; needs blob storage (and the VPN) only when blob is configured - pass --local to stay fully offline.",
     )
     add_common(arbitrate)
+    arbitrate.add_argument(
+        "--keep-broken-link-evidence",
+        action="store_true",
+        help="Let a source whose link is dead (404/410/redirect loop) stay promotable instead of "
+        "routing it to leads.",
+    )
+
+    links = subparsers.add_parser(
+        "check-links",
+        help="Fetch a run's cited URLs and write link_check.json (network; no agent calls).",
+    )
+    add_common(links)
 
     full = subparsers.add_parser(
         "run",
@@ -103,6 +121,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-followup",
         action="store_true",
         help="Skip the gas-capture follow-up pass.",
+    )
+    full.add_argument("--no-link-check", action="store_true", help="Skip fetching cited URLs.")
+    full.add_argument(
+        "--keep-broken-link-evidence",
+        action="store_true",
+        help="Let a source with a dead link stay promotable instead of routing it to leads.",
     )
 
     refresh = subparsers.add_parser(
@@ -171,6 +195,8 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
             Path(args.geocode_cache).expanduser().resolve() if getattr(args, "geocode_cache", "") else None
         ),
         use_geocode_cache=getattr(args, "use_geocode_cache", False),
+        check_links=not getattr(args, "no_link_check", False),
+        keep_broken_links=getattr(args, "keep_broken_link_evidence", False),
     )
 
 
@@ -312,6 +338,13 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
         run_search(config)
         sync.up()
         print(f"\nNow arbitrate:\n  uv run waste-ai-search arbitrate --run-id {config.run_id}")
+        return 0
+
+    if args.command == "check-links":
+        from .search import check_run_links
+
+        check_run_links(config.run_dir)
+        print(f"\nNow arbitrate to apply the verdicts:\n  uv run waste-ai-search arbitrate --run-id {config.run_id}")
         return 0
 
     if args.command == "run":

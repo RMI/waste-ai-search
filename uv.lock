@@ -1039,6 +1039,7 @@ dependencies = [
     { name = "openpyxl" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
+    { name = "requests" },
 ]
 
 [package.dev-dependencies]
@@ -1054,6 +1055,7 @@ requires-dist = [
     { name = "openpyxl" },
     { name = "psycopg", extras = ["binary"] },
     { name = "python-dotenv" },
+    { name = "requests" },
 ]
 
 [package.metadata.requires-dev]
