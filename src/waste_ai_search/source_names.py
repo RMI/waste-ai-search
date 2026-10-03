@@ -163,3 +163,40 @@ def attach_name_provenance(
         record["original_site_name"] = extra.get("original_site_name", "")
         record["source_language"] = extra.get("source_language", "")
         record["name_data_source"] = extra.get("name_data_source", "")
+
+
+# SINIR records the municipality each facility sits in as an IBGE code; SINIR's own city table names
+# it. Without it the agent sees a generic name ("Lixão") and a city-centre point, and has to guess
+# the town - on the WP-543 test it guessed wrong and returned dumps 140 and 237 km away.
+SINIR_MUNICIPALITY_SQL = (
+    "SELECT DISTINCT l.internal_facility_id, c.city_name, c.state_name\n"
+    "FROM consolidation.value_resolution_ledger l\n"
+    "JOIN raw_data.raw_sinir_cities_served_by_landfills_translated r\n"
+    "  ON r.facility_code::text = l.data_source_facility_id\n"
+    "JOIN (SELECT DISTINCT geocode, city_name, state_name FROM raw_data.raw_sinir_general_city_data) c\n"
+    "  ON c.geocode = r.facility_city_location\n"
+    "WHERE l.column_name = 'latitude' AND l.data_source = 'sinir_2024'"
+)
+
+
+def load_sinir_municipalities(config: Any = None) -> dict[Any, dict[str, str]]:
+    """{internal_facility_id: {municipality, admin1}} for facilities whose location came from SINIR."""
+    from .db import fetch_all
+
+    found: dict[Any, dict[str, str]] = {}
+    for row in fetch_all(SINIR_MUNICIPALITY_SQL, config=config):
+        found.setdefault(
+            row["internal_facility_id"],
+            {"municipality": normalize_scalar(row["city_name"]), "admin1": normalize_scalar(row["state_name"])},
+        )
+    return found
+
+
+def attach_municipalities(records: list[dict[str, Any]], municipalities: dict[Any, dict[str, str]]) -> None:
+    """Fill municipality and admin1 from the source, where the source recorded them."""
+    from .seed_source import FACILITY_KEY, as_int
+
+    for record in records:
+        facility_id = as_int(record.get(FACILITY_KEY)) or as_int(record.get("facility_id"))
+        for field, value in municipalities.get(facility_id, {}).items():
+            record[field] = value

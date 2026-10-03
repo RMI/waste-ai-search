@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from .run_context import (
 from .schema import (
     COORDINATES_ONLY_ISO3,
     DEFAULT_EXCLUDED_ISO3,
+    DEFAULT_EXCLUSION_REASONS,
     FOUNDRY_RUN_LOG_HEADERS,
     normalize_scalar,
 )
@@ -58,17 +60,20 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
         explicit = explicit or bool(wanted_iso & DEFAULT_EXCLUDED_ISO3)
 
     if not explicit and not config.include_excluded_countries:
-        before = len(selected)
+        dropped = Counter(
+            iso3
+            for site in selected
+            if (iso3 := normalize_scalar(site.get("country_iso3")).upper()) in DEFAULT_EXCLUDED_ISO3
+        )
         selected = [
             site
             for site in selected
             if normalize_scalar(site.get("country_iso3")).upper() not in DEFAULT_EXCLUDED_ISO3
         ]
-        dropped = before - len(selected)
-        if dropped:
+        for iso3, count in sorted(dropped.items()):
             print(
-                f"Excluded {dropped:,} site(s) in {', '.join(sorted(DEFAULT_EXCLUDED_ISO3))} "
-                "(already Tier 1 covered; pass --include-excluded-countries to search them)."
+                f"Excluded {count:,} site(s) in {iso3} ({DEFAULT_EXCLUSION_REASONS[iso3]}; "
+                "pass --include-excluded-countries to search them)."
             )
     # A site with no requestable attributes has nothing to ask; querying it would spend a
     # request and a prompt to receive nothing. Country scope can empty a site entirely.

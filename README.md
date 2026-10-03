@@ -220,23 +220,26 @@ uv run waste-ai-search search --run-id r --site-ids 499                 # listin
 
 The run prints how many sites it dropped, so this is never silent.
 
-**2. Brazil facilities are searched for coordinates only, and only where the location is flagged
-inexact — which today means 0 of 303 sites.**
+**2. Brazil is excluded by default. When searched, it is coordinates only, and only where the
+location is flagged inexact — 3,913 of 4,225 sites, all from SINIR.**
 
 For a Brazilian facility, the search asks for `found_latitude` and `found_longitude` and nothing
 else — **and only when `is_location_exact` is FALSE.** Every other Brazilian attribute comes from a
 government source, so searching it risks overwriting better data than the search can find.
 
-**Right now this rule matches nothing.** `is_location_exact` is TRUE for all 303 Brazilian
-facilities (in fact for all 15,537 corpus-wide), so all 303 are skipped entirely and the run prints:
+SINIR's coordinates are the centre of a municipality, not the dumpsite, and most of its names are
+generic ("Lixão", "Aterro Controlado"). So the seed carries the municipality and state SINIR
+recorded (`facility_city_location`, an IBGE code, named from `raw_sinir_general_city_data`) into
+`municipality` and `admin1`, and the prompt passes them on. Without them the agent guessed the town
+from the city-centre point and, on the WP-543 test, returned dumps 140 and 237 km away.
 
-```
-Skipped 303 site(s) with no attributes left to search.
-```
+With the municipality the agent found the right facilities, but in reports that publish no readable
+coordinates: **0 of 20** sites got usable coordinates either way. So Brazil is excluded by default
+like the US, and searching it is opt-in with the same three overrides (`--iso3 BRA`, `--site-ids`,
+`--include-excluded-countries`). Matching against OSM/GPW landfills within the municipality is the
+likelier fix.
 
-The rule is a default now so that inexact-location facilities are scoped correctly the moment they
-enter the consolidation — you should not have to remember to add it later. Unknown is **not**
-treated as inexact: only an explicit FALSE triggers a coordinate search.
+Unknown is **not** treated as inexact: only an explicit FALSE triggers a coordinate search.
 
 **3. Everywhere else: gap-fill, plus the gas-capture gate.**
 
@@ -250,7 +253,8 @@ Both country rules live in [`schema.py`](src/waste_ai_search/schema.py) as
 
 **Why these rules exist, in one line each:** the US is already Tier 1 covered by GHGRP and LMOP, so
 searching it manufactures equal-tier conflicts rather than data; Brazil's non-coordinate attributes
-are government-sourced and should not be overwritten by a web search.
+are government-sourced and should not be overwritten by a web search, and its coordinates were not
+found by web search on the WP-543 test.
 
 A site left with no attributes to search is dropped from selection entirely — querying it would
 spend a request and a prompt to receive nothing.
