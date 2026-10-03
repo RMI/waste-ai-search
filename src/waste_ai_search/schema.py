@@ -97,16 +97,20 @@ def canonical_attribute(name: Any) -> str:
 # --- country policy ------------------------------------------------------------------------
 # US facilities are already well covered by usa_ghgrp_2026 and lmop_2024, both Tier 1, so an AI
 # search there mostly produces equal-tier conflicts for a human to adjudicate rather than new
-# data. Excluded by default; --include-excluded-countries or naming the country explicitly
-# overrides it.
-DEFAULT_EXCLUDED_ISO3 = {"USA"}
+# data. Brazil's searchable sites are SINIR facilities whose coordinates are a municipality centre;
+# on the WP-543 test web search returned no usable coordinates for any of 20, so searching all
+# 3,913 is spend with no return. Excluded by default; --include-excluded-countries, naming the
+# country with --iso3, or naming sites with --site-ids overrides it.
+DEFAULT_EXCLUSION_REASONS = {
+    "USA": "already Tier 1 covered",
+    "BRA": "web search found no coordinates for SINIR's municipality-centre sites in WP-543",
+}
+DEFAULT_EXCLUDED_ISO3 = set(DEFAULT_EXCLUSION_REASONS)
 
 # Countries where the ONLY thing worth searching is the coordinates, and only for facilities whose
 # recorded location is flagged inexact. Every other attribute for these facilities comes from a
 # government source, so searching it risks overwriting better data than the search can find.
-# No facility currently satisfies this - `is_location_exact` is TRUE corpus-wide - so the rule
-# matches nothing until inexact-location facilities enter the consolidation. It is a default now
-# so that those facilities are scoped correctly the moment they arrive.
+# Today that is Brazil's 3,913 SINIR facilities, whose coordinates are a municipality centre.
 COORDINATES_ONLY_ISO3 = {"BRA"}
 
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
