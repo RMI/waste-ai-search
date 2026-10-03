@@ -181,7 +181,7 @@ def run_search(
             except (OSError, json.JSONDecodeError) as exc:
                 status, error = "Failed", f"Cached response unreadable: {exc}"
         else:
-            prompt = build_site_prompt(site, attributes)
+            prompt = build_site_prompt(site, attributes, max_web_searches=config.max_web_searches)
             max_attempts = max(1, config.search_tool_retries)
             for attempt in range(1, max_attempts + 1):
                 try:

@@ -56,3 +56,60 @@ def test_retries_default_to_two():
 
     assert FoundryClientConfig().max_retries == 2
     assert PipelineConfig(input_csv=None, run_dir=None, run_id="t").search_tool_retries == 2
+
+
+def test_the_prompt_carries_the_search_budget_unless_it_is_off():
+    from waste_ai_search.prompt_builder import build_site_prompt
+
+    site = {"site_id": "1", "site_name": "Olushosun", "country_iso3": "NGA"}
+    assert "Use at most 12 web searches in total" in build_site_prompt(site, max_web_searches=12)
+    assert "Search budget" not in build_site_prompt(site, max_web_searches=0)
+
+
+def test_cli_defaults_match_the_capped_retries_and_the_budget():
+    """The CLI once hard-coded 3 retries, silently overriding the config default."""
+    from waste_ai_search.cli import build_parser, make_config
+
+    for command in ("search", "run"):
+        config = make_config(build_parser().parse_args([command, "--run-id", "t"]))
+        assert (config.search_tool_retries, config.max_web_searches) == (2, 6)
+
+
+def test_the_search_cap_is_sent_as_max_tool_calls(monkeypatch):
+    """The prompt alone was ignored; the service-enforced cap is what limits searches."""
+    from waste_ai_search import run_context
+    from waste_ai_search.foundry_client import AzureFoundryAgentClient
+
+    sent = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            sent.update(kwargs)
+            return SimpleNamespace(output=[], output_text='{"attributes": []}')
+
+    class FakeOpenAI:
+        responses = FakeResponses()
+        conversations = SimpleNamespace(create=lambda: SimpleNamespace(id="c"))
+
+        def with_options(self, **kwargs):  # noqa: ARG002
+            return self
+
+    created = []
+    monkeypatch.setattr(run_context, "AzureFoundryAgentClient", lambda cfg: created.append(cfg) or cfg)
+    config = run_context.PipelineConfig(input_csv=None, run_dir=None, run_id="t", max_web_searches=6)
+    client_config = run_context.get_client(config)
+    assert client_config.max_tool_calls == 6
+
+    client = AzureFoundryAgentClient.__new__(AzureFoundryAgentClient)
+    client.config = client_config
+    client.project_client = SimpleNamespace(
+        agents=SimpleNamespace(), get_openai_client=lambda agent_name: FakeOpenAI()  # noqa: ARG005
+    )
+    client._resolve_agent_name = lambda: "agent"
+    client.search_site({}, "prompt")
+    assert sent["max_tool_calls"] == 6
+
+    client.config.max_tool_calls = 0
+    sent.clear()
+    client.search_site({}, "prompt")
+    assert "max_tool_calls" not in sent

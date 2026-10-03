@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .foundry_client import AzureFoundryAgentClient, FoundryClient
+from .foundry_client import AzureFoundryAgentClient, FoundryClient, FoundryClientConfig
 from .schema import normalize_scalar
 
 
@@ -21,6 +21,11 @@ from .schema import normalize_scalar
 # 6 sites failed this way on the first pass and all 6 recovered on retry, one needing two attempts.
 # So the search phase retries on the reported failure itself.
 SEARCH_TOOL_RETRY_ATTEMPTS = 2
+# Bing grounding bills per query (WP-545). Asking in the prompt alone was ignored (233 queries vs
+# 235 on the same 10 sites), so this is also sent as the Responses API's max_tool_calls, which the
+# service enforces. It caps searches, not queries: each search sent ~4 queries in testing, and a
+# cap of 6 cut one site from 30-39 queries to 20. 0 means no cap.
+DEFAULT_MAX_WEB_SEARCHES = 6
 SEARCH_TOOL_RETRY_DELAY_SECONDS = 20.0
 
 
@@ -40,6 +45,7 @@ class PipelineConfig:
     site_delay_seconds: float = 3.0
     hard_site_timeout_seconds: int = 240
     search_tool_retries: int = SEARCH_TOOL_RETRY_ATTEMPTS
+    max_web_searches: int = DEFAULT_MAX_WEB_SEARCHES
     geocode_cache: Path | None = None
     use_geocode_cache: bool = False
     pilot_size: int = 0
@@ -93,8 +99,10 @@ def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def get_client(config: PipelineConfig) -> FoundryClient:  # noqa: ARG001
-    return AzureFoundryAgentClient()
+def get_client(config: PipelineConfig) -> FoundryClient:
+    client_config = FoundryClientConfig.from_env()
+    client_config.max_tool_calls = config.max_web_searches
+    return AzureFoundryAgentClient(client_config)
 
 
 def agent_identity(client: Any) -> str:

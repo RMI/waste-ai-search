@@ -20,6 +20,8 @@ class FoundryClientConfig:
     agent_name: str = ""
     timeout_seconds: int = 120
     max_retries: int = 2
+    # Built-in tool calls (web searches) the service allows per response; 0 means no cap.
+    max_tool_calls: int = 0
 
     @classmethod
     def from_env(cls) -> "FoundryClientConfig":
@@ -136,10 +138,12 @@ class AzureFoundryAgentClient:
             max_retries=0,
         )
         conversation = openai_client.conversations.create()
+        cap = {"max_tool_calls": self.config.max_tool_calls} if self.config.max_tool_calls > 0 else {}
         response = openai_client.responses.create(
             conversation=conversation.id,
             input=prompt,
             timeout=self.config.timeout_seconds,
+            **cap,
         )
         self.web_searches += count_web_searches(response)
         text = getattr(response, "output_text", "")

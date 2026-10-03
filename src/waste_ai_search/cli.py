@@ -6,7 +6,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from .arbitrate import run_arbitration
-from .run_context import PipelineConfig, default_run_dir, default_run_id
+from .run_context import (
+    DEFAULT_MAX_WEB_SEARCHES,
+    SEARCH_TOOL_RETRY_ATTEMPTS,
+    PipelineConfig,
+    default_run_dir,
+    default_run_id,
+)
 from .input_loader import refreshed_seed_path
 from .search import run_search
 
@@ -73,8 +79,14 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument(
         "--search-tool-retries",
         type=int,
-        default=3,
+        default=SEARCH_TOOL_RETRY_ATTEMPTS,
         help="Attempts per site when the agent reports its own web-search tool failed.",
+    )
+    search.add_argument(
+        "--max-web-searches",
+        type=int,
+        default=DEFAULT_MAX_WEB_SEARCHES,
+        help="Web searches allowed per site, enforced by the service; each sends several billed Bing queries (0 = no cap).",
     )
 
     search.add_argument(
@@ -114,7 +126,8 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--force", action="store_true")
     full.add_argument("--site-delay-seconds", type=float, default=3.0)
     full.add_argument("--hard-site-timeout-seconds", type=int, default=240)
-    full.add_argument("--search-tool-retries", type=int, default=3)
+    full.add_argument("--search-tool-retries", type=int, default=SEARCH_TOOL_RETRY_ATTEMPTS)
+    full.add_argument("--max-web-searches", type=int, default=DEFAULT_MAX_WEB_SEARCHES)
     full.add_argument("--use-geocode-cache", action="store_true")
     full.add_argument("--geocode-cache", default=str(Path.cwd() / "data" / "geocode_cache.jsonl"))
     full.add_argument(
@@ -212,7 +225,8 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         force=getattr(args, "force", False),
         site_delay_seconds=getattr(args, "site_delay_seconds", 3.0),
         hard_site_timeout_seconds=getattr(args, "hard_site_timeout_seconds", 240),
-        search_tool_retries=getattr(args, "search_tool_retries", 3),
+        search_tool_retries=getattr(args, "search_tool_retries", SEARCH_TOOL_RETRY_ATTEMPTS),
+        max_web_searches=getattr(args, "max_web_searches", DEFAULT_MAX_WEB_SEARCHES),
         geocode_cache=(
             Path(args.geocode_cache).expanduser().resolve() if getattr(args, "geocode_cache", "") else None
         ),
