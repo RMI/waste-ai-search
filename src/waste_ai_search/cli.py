@@ -153,11 +153,17 @@ def read_arbitrated_rows(run_dir: Path) -> list[dict[str, str]]:
     import csv
 
     rows: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for name in ("resolved.csv", "review_queue.csv"):
         path = run_dir / name
         if path.exists():
             with path.open(newline="", encoding="utf-8-sig") as handle:
-                rows.extend(dict(row) for row in csv.DictReader(handle))
+                for csv_row in csv.DictReader(handle):
+                    row = dict(csv_row)
+                    key = (row.get("site_id", ""), row.get("attribute_name", ""))
+                    if key not in seen:
+                        seen.add(key)
+                        rows.append(row)
     return rows
 
 
