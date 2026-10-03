@@ -144,6 +144,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def read_arbitrated_rows(run_dir: Path) -> list[dict[str, str]]:
+    """Every arbitrated value worth carrying into the next pass: resolved.csv plus the review queue.
+
+    resolved.csv holds only auto-validated values, but a refresh also merges values still awaiting
+    review, so a gas collection system found in pass 1 still unlocks the pass-2 follow-up.
+    """
+    import csv
+
+    rows: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for name in ("resolved.csv", "review_queue.csv"):
+        path = run_dir / name
+        if path.exists():
+            with path.open(newline="", encoding="utf-8-sig") as handle:
+                for csv_row in csv.DictReader(handle):
+                    row = dict(csv_row)
+                    key = (row.get("site_id", ""), row.get("attribute_name", ""))
+                    if key not in seen:
+                        seen.add(key)
+                        rows.append(row)
+    return rows
+
+
 def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: bool) -> int:
     import csv
 
@@ -157,8 +180,7 @@ def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: b
         return 1
 
     sites, headers = resolve_sites(config)
-    with resolved_path.open(newline="", encoding="utf-8-sig") as handle:
-        resolved_rows = [dict(row) for row in csv.DictReader(handle)]
+    resolved_rows = read_arbitrated_rows(config.run_dir)
 
     before = sum(len(requested_attributes(site)) for site in sites)
     refreshed, stats = refresh_sites(sites, resolved_rows, config.run_id, merge_identity=merge_identity)
@@ -278,8 +300,7 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
         return 0
 
     resolved_path = config.run_dir / "resolved.csv"
-    with resolved_path.open(newline="", encoding="utf-8-sig") as handle:
-        resolved_rows = [dict(row) for row in csv.DictReader(handle)]
+    resolved_rows = read_arbitrated_rows(config.run_dir)
 
     sites, headers = resolve_sites(config)
     before = {
