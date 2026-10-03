@@ -402,7 +402,7 @@ EVIDENCE_HEADERS = [
     "evidence_id", "run_id", "dataset_version", "site_id", *SITE_NAME_COLUMNS, "internal_facility_id",
     "attribute_name", "claimed_value", "claimed_unit", "normalized_value", "normalized_unit",
     "unit_conversion_note", "mapped_value", "mapping_note", "value_basis", "value_date",
-    "agent_confidence", "source_id", "source_tier", "agent_proposed_tier", "tier_rule_applied",
+    "agent_confidence", "source_id", "link_status", "source_tier", "agent_proposed_tier", "tier_rule_applied",
     "evidence_summary", "quoted_evidence_short", "search_terms_used", "promotion_eligible",
     "exclusion_reason", "record_created_date",
 ]
@@ -411,7 +411,8 @@ RESOLVED_HEADERS = [
     "site_id", "internal_facility_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name",
     "baseline_value", "baseline_source", "baseline_tier",
     "resolved_value", "resolved_unit", "resolution", "resolution_rule",
-    "winning_evidence_id", "winning_source_tier", "winning_source_url", "best_tier_available",
+    "winning_evidence_id", "winning_source_tier", "winning_source_url", "winning_link_status",
+    "best_tier_available",
     "value_date", "confidence_score", "validation_status", "reviewer", "reviewed_date",
     "researcher_notes",
 ]
@@ -432,7 +433,8 @@ REVIEW_QUEUE_HEADERS = [
     # records a translation problem there, separately from researcher_notes.
     "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "attribute_name", "resolution",
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
-    "winning_source_tier", "winning_source_url", "value_date", "agreeing_source_count",
+    "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
+    "agreeing_source_count",
     "evidence_summary", "validation_status", "reviewer", "reviewed_date", "researcher_notes",
 ]
 

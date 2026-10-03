@@ -44,6 +44,10 @@ class PipelineConfig:
     use_geocode_cache: bool = False
     pilot_size: int = 0
     include_excluded_countries: bool = False
+    # WP-533. Fetch cited URLs at the end of the search phase (network); arbitration only reads
+    # the verdicts. keep_broken_links lets a dead source stay promotable instead of going to leads.
+    check_links: bool = True
+    keep_broken_links: bool = False
 
 
 def default_run_id() -> str:
