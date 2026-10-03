@@ -245,6 +245,8 @@ def check_urls(
 
         throttle = _HostThrottle(PER_HOST_DELAY_SECONDS)
         session = requests.Session()
+        # An environment proxy would bypass the pinned adapter's address check, so it is ignored.
+        session.trust_env = False
         session.headers.update({"User-Agent": USER_AGENT})
         adapter = _pinned_adapter_class()(pool_connections=max_workers, pool_maxsize=max_workers)
         session.mount("https://", adapter)

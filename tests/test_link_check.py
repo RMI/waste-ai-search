@@ -412,3 +412,21 @@ def test_a_dead_source_reaches_leads_when_a_working_source_filled_the_attribute(
     assert resolved[0]["resolved_value"] == "Active"  # filled from the working source
     leads = list(csv.DictReader((run_dir / "supplementary_leads.csv").open()))
     assert [l["url"] for l in leads if "Source link broken" in l["exclusion_reason"]] == [dead]
+
+
+def test_environment_proxies_are_ignored(monkeypatch):
+    """Copilot review: a proxy would bypass the pinned adapter and its address check."""
+    import requests
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    sessions = []
+    real = requests.Session
+
+    def recording_session():
+        session = real()
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(requests, "Session", recording_session)
+    check_urls(["https://x.org/a"], fetch=responder({}))
+    assert sessions and sessions[0].trust_env is False
