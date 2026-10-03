@@ -352,3 +352,35 @@ def test_the_cli_no_longer_promises_an_unconditionally_offline_arbitrate():
     assert "Offline, free, and repeatable" not in text
     assert "arbitrate is offline" not in text
     assert "pass --local to stay fully offline" in text
+
+
+def test_a_chosen_versioned_name_is_reserved_before_the_copy(tmp_path, monkeypatch):
+    """Copilot review: two concurrent publishes must not both pick the same absent name."""
+    import waste_ai_search.publish as pub
+
+    class FrozenNow:
+        @staticmethod
+        def now():
+            from datetime import datetime as real
+            return real(2026, 10, 2, 9, 0, 0)
+
+    monkeypatch.setattr(pub, "datetime", FrozenNow)
+    base = tmp_path / "r_review.xlsx"
+    first = pub._unused_sibling(base, base)
+    second = pub._unused_sibling(base, base)  # before anything is copied into the first
+    assert first.exists() and first != second
+
+
+def test_an_identical_untracked_copy_is_not_claimed_as_ours(tmp_path):
+    """Copilot review: matching bytes must not make a foreign file overwritable later."""
+    run, sharepoint = run_folder(tmp_path), tmp_path / "sp"
+    (sharepoint / "r").mkdir(parents=True)
+    foreign = sharepoint / "r" / "r_review.xlsx"
+    foreign.write_bytes(b"workbook")  # same bytes as the run's workbook, but not published by it
+
+    publish_review(run, "r", target_dir=sharepoint)
+    assert not (run / PUBLISH_LEDGER).exists()
+
+    (run / "r_review.xlsx").write_bytes(b"re-arbitrated")
+    dest = publish_review(run, "r", target_dir=sharepoint)
+    assert foreign.read_bytes() == b"workbook" and dest != foreign

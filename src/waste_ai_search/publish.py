@@ -87,10 +87,16 @@ def _unused_sibling(destination: Path, workbook: Path) -> Path:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     candidate = destination.with_name(f"{workbook.stem}_{stamp}{workbook.suffix}")
     counter = 2
-    while candidate.exists() or (candidate.parent / f"~${candidate.name}").exists():
+    while True:
+        if not (candidate.parent / f"~${candidate.name}").exists():
+            try:
+                # Reserve the name atomically, so a concurrent publish cannot pick it too.
+                os.close(os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                return candidate
+            except FileExistsError:
+                pass
         candidate = destination.with_name(f"{workbook.stem}_{stamp}_{counter}{workbook.suffix}")
         counter += 1
-    return candidate
 
 
 def publish_review(run_dir: Path, run_id: str, target_dir: Path | None = None) -> Path | None:
@@ -116,7 +122,6 @@ def publish_review(run_dir: Path, run_id: str, target_dir: Path | None = None) -
         current = _sha256(destination)
         if current == new_digest:
             print(f"SharePoint copy is already current: {destination}")
-            _record(run_dir, destination, new_digest)
             return destination
         ours_and_untouched = current == _ledger(run_dir).get(str(destination))
         if not ours_and_untouched or _open_in_excel(destination):
