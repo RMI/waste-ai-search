@@ -50,6 +50,21 @@ def test_a_retried_site_logs_the_queries_of_every_attempt(tmp_path, monkeypatch,
     assert "Bing queries: 8 across 1 searched site(s)." in capsys.readouterr().out
 
 
+def test_a_resumed_run_keeps_and_a_follow_up_pass_adds_to_the_count(tmp_path):
+    from waste_ai_search.search import merge_run_log
+    from waste_ai_search.schema import FOUNDRY_RUN_LOG_HEADERS
+    from waste_ai_search.input_loader import write_csv_records
+
+    log = tmp_path / "foundry_run_log.csv"
+    write_csv_records(log, [{"site_id": "1", "web_searches": 8}, {"site_id": "2", "web_searches": 5}],
+                      FOUNDRY_RUN_LOG_HEADERS)
+    merged = merge_run_log(log, [
+        {"site_id": "1", "status": "Skipped existing response", "web_searches": ""},
+        {"site_id": "2", "status": "Succeeded", "web_searches": 3},
+    ])
+    assert [row["web_searches"] for row in merged] == [8, 8]
+
+
 def test_retries_default_to_two():
     from waste_ai_search.foundry_client import FoundryClientConfig
     from waste_ai_search.run_context import PipelineConfig

@@ -24,7 +24,8 @@ SEARCH_TOOL_RETRY_ATTEMPTS = 2
 # Bing grounding bills per query (WP-545). Asking in the prompt alone was ignored (233 queries vs
 # 235 on the same 10 sites), so this is also sent as the Responses API's max_tool_calls, which the
 # service enforces. It caps searches, not queries: each search sent ~4 queries in testing, and a
-# cap of 6 cut one site from 30-39 queries to 20. 0 means no cap.
+# cap of 6 cut one site from 30-39 queries to 20. The cap is per response, so each retry gets a
+# fresh one. 0 means no cap.
 DEFAULT_MAX_WEB_SEARCHES = 6
 SEARCH_TOOL_RETRY_DELAY_SECONDS = 20.0
 

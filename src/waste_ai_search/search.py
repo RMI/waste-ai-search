@@ -269,6 +269,9 @@ def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, 
 
     A retried search only covers the sites it touched, so replacing the file would erase every
     other site from the log - which matters a great deal for a multi-day resumable run.
+
+    `web_searches` is the exception: every pass is billed, so a site's count adds to its earlier
+    one. A skipped site logs a blank count, which keeps the earlier one rather than erasing it.
     """
     merged: dict[str, dict[str, Any]] = {}
     if path.exists():
@@ -276,7 +279,11 @@ def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, 
             for row in csv.DictReader(handle):
                 merged[normalize_scalar(row.get("site_id"))] = dict(row)
     for row in new_rows:
-        merged[normalize_scalar(row.get("site_id"))] = row
+        site_id = normalize_scalar(row.get("site_id"))
+        earlier = str((merged.get(site_id) or {}).get("web_searches") or "")
+        if earlier.isdigit():
+            row = {**row, "web_searches": int(earlier) + int(row["web_searches"] or 0)}
+        merged[site_id] = row
     return sorted(
         merged.values(),
         key=lambda row: int(row["site_id"]) if str(row.get("site_id", "")).isdigit() else 0,
