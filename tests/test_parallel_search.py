@@ -104,7 +104,7 @@ def test_a_response_is_written_whole_or_not_at_all(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "replace", lambda src, dst: (_ for _ in ()).throw(KeyboardInterrupt()))
     with pytest.raises(KeyboardInterrupt):
         save_json(path, {"attributes": []})
-    assert not path.exists()
+    assert list(tmp_path.iterdir()) == []  # neither the response nor its temporary file
 
     monkeypatch.undo()
     save_json(path, {"attributes": []})

@@ -102,8 +102,12 @@ def save_json(path: Path, payload: dict[str, Any]) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporary, path)
+    try:
+        temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def load_json(path: Path) -> dict[str, Any]:

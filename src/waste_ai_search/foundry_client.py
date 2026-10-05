@@ -198,7 +198,7 @@ def call_with_limit(call: Any, seconds: float | None) -> Any:
     worker.start()
     worker.join(seconds)
     if worker.is_alive():
-        raise TimeoutError(f"Site request still running after {seconds:.0f}s; abandoned.")
+        raise TimeoutError(f"Site request still running after {seconds:.1f}s; abandoned.")
     if "error" in outcome:
         raise outcome["error"]
     return outcome["value"]
