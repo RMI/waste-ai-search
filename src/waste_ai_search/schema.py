@@ -451,6 +451,7 @@ FOUNDRY_RUN_LOG_HEADERS = [
     "run_id", "site_id", "site_name", "country_iso3", "requested_attributes", "agent_id",
     "request_started_at", "request_finished_at", "status", "raw_response_path",
     "parsed_attribute_count", "parsed_source_count", "error_message", "retry_count",
+    "web_searches",
 ]
 
 PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]

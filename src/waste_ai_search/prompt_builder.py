@@ -261,7 +261,25 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
     return requested
 
 
-def build_site_prompt(site: dict[str, Any], attributes: list[str] | None = None) -> str:
+def search_budget(max_web_searches: int) -> str:
+    """Prompt text capping the agent's web searches, which Bing bills one by one (WP-545)."""
+    if max_web_searches <= 0:
+        return ""
+    return f"""
+Search budget:
+- Use at most {max_web_searches} web searches in total for this site. Plan them before you start.
+- One good source often answers several attributes at once (a permit, licence, inventory or
+  operator record usually states status, type, dates and capacity together), so search for such
+  records first, in the local language first.
+- Once an attribute has an authoritative source (regulator, government or operator), stop
+  searching for it.
+- When the budget is spent, stop and return what you have. Leave unfound attributes out.
+"""
+
+
+def build_site_prompt(
+    site: dict[str, Any], attributes: list[str] | None = None, max_web_searches: int = 0
+) -> str:
     attributes = attributes if attributes is not None else requested_attributes(site)
 
     site_context = {
@@ -441,7 +459,7 @@ Task:
 Find source-backed data for this site, recorded as a waste disposal facility. Search
 in English and in the local language, using the site name, coordinates,
 municipality, and admin names.
-{names_guidance}
+{search_budget(max_web_searches)}{names_guidance}
 Only the attributes listed below are wanted. Everything else about this facility is
 already known and must not be researched or returned.
 

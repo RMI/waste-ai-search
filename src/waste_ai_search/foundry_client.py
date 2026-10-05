@@ -19,7 +19,9 @@ class FoundryClientConfig:
     agent_id: str = ""
     agent_name: str = ""
     timeout_seconds: int = 120
-    max_retries: int = 3
+    max_retries: int = 2
+    # Built-in tool calls (web searches) the service allows per response; 0 means no cap.
+    max_tool_calls: int = 0
 
     @classmethod
     def from_env(cls) -> "FoundryClientConfig":
@@ -37,7 +39,7 @@ class FoundryClientConfig:
             agent_id=os.environ.get("AZURE_AI_AGENT_ID", ""),
             agent_name=os.environ.get("AZURE_AI_AGENT_NAME", "") or os.environ.get("AZURE_AI_AGENT_name", ""),
             timeout_seconds=int(os.environ.get("AZURE_FOUNDRY_TIMEOUT_SECONDS", "120")),
-            max_retries=int(os.environ.get("AZURE_FOUNDRY_MAX_RETRIES", "3")),
+            max_retries=int(os.environ.get("AZURE_FOUNDRY_MAX_RETRIES", "2")),
         )
 
 
@@ -66,6 +68,8 @@ class AzureFoundryAgentClient:
         )
 
     def search_site(self, site: dict[str, Any], prompt: str) -> dict[str, Any]:
+        # Bing bills per query, and a retry repeats every query, so all attempts are counted.
+        self.web_searches = 0
         last_error: Exception | None = None
         for attempt in range(1, self.config.max_retries + 1):
             try:
@@ -134,11 +138,14 @@ class AzureFoundryAgentClient:
             max_retries=0,
         )
         conversation = openai_client.conversations.create()
+        cap = {"max_tool_calls": self.config.max_tool_calls} if self.config.max_tool_calls > 0 else {}
         response = openai_client.responses.create(
             conversation=conversation.id,
             input=prompt,
             timeout=self.config.timeout_seconds,
+            **cap,
         )
+        self.web_searches += count_web_searches(response)
         text = getattr(response, "output_text", "")
         if text:
             return text
@@ -151,6 +158,27 @@ class AzureFoundryAgentClient:
         if chunks:
             return "\n".join(chunks).strip()
         raise RuntimeError("Foundry agent returned no response output text.")
+
+
+def count_web_searches(response: Any) -> int:
+    """Bing queries a response made - what Bing grounding bills for (WP-545).
+
+    Each search is a `web_search_call` output item whose action lists the queries it sent. Other
+    actions (opening or reading a page) send no query and are not counted.
+    """
+    total = 0
+    for item in getattr(response, "output", None) or []:
+        if getattr(item, "type", "") != "web_search_call":
+            continue
+        action = getattr(item, "action", None)
+        if isinstance(action, dict):
+            kind, queries = action.get("type"), action.get("queries")
+        else:
+            kind, queries = getattr(action, "type", None), getattr(action, "queries", None)
+        if kind not in (None, "search"):
+            continue
+        total += len(queries or []) or 1
+    return total
 
 
 def message_to_text(message: Any) -> str:

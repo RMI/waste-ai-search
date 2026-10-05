@@ -90,6 +90,14 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
     return selected
 
 
+def add_searches(total: int | None, client: Any) -> int | None:
+    """Add the Bing queries of the client's last call to a site's running total."""
+    count = getattr(client, "web_searches", None)
+    if count is None:
+        return total
+    return (total or 0) + count
+
+
 # --- phase 1: search --------------------------------------------------------------------------
 def check_run_links(run_dir: Path) -> dict:
     """Fetch every source URL in a run's cached responses once, and record the verdicts."""
@@ -165,6 +173,8 @@ def run_search(
         started = datetime.now().replace(microsecond=0).isoformat()
         status, error = "Started", ""
         tool_retries = 0
+        # None when the client cannot count (a fake in tests); blank in the log, never a false 0.
+        web_searches: int | None = None
 
         print(f"[{index}/{len(selected)}] {site_id} {site_name} ({len(attributes)} attrs)", flush=True)
 
@@ -176,16 +186,18 @@ def run_search(
             except (OSError, json.JSONDecodeError) as exc:
                 status, error = "Failed", f"Cached response unreadable: {exc}"
         else:
-            prompt = build_site_prompt(site, attributes)
+            prompt = build_site_prompt(site, attributes, max_web_searches=config.max_web_searches)
             max_attempts = max(1, config.search_tool_retries)
             for attempt in range(1, max_attempts + 1):
                 try:
                     with hard_timeout(config.hard_site_timeout_seconds):
                         payload = client.search_site(site, prompt)
                 except Exception as exc:  # noqa: BLE001 - one bad site must not end a multi-day run
+                    web_searches = add_searches(web_searches, client)
                     status, error = "Failed", f"{type(exc).__name__}: {exc}"
                     print(f"    {error}", flush=True)
                     break
+                web_searches = add_searches(web_searches, client)
 
                 if not search_tool_failed(payload):
                     save_json(path, payload)
@@ -227,6 +239,7 @@ def run_search(
                 "parsed_source_count": source_count,
                 "error_message": error,
                 "retry_count": tool_retries,
+                "web_searches": "" if web_searches is None else web_searches,
             }
         )
 
@@ -235,6 +248,9 @@ def run_search(
 
     failures = [row for row in run_log if str(row["status"]).startswith("Search tool failed")]
     print(f"\nSearched {len(selected)} sites. Run log: {log_path}")
+    counted = [row["web_searches"] for row in run_log if row["web_searches"] != ""]
+    if counted:
+        print(f"Bing queries: {sum(counted):,} across {len(counted)} searched site(s).")
 
     # WP-533: verify cited URLs now, so arbitration can apply the verdicts offline. Every URL in
     # the run's cached responses is passed, but the sidecar is a cache, so a resumed search or the
@@ -253,6 +269,9 @@ def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, 
 
     A retried search only covers the sites it touched, so replacing the file would erase every
     other site from the log - which matters a great deal for a multi-day resumable run.
+
+    `web_searches` is the exception: every pass is billed, so a site's count adds to its earlier
+    one. A skipped site logs a blank count, which keeps the earlier one rather than erasing it.
     """
     merged: dict[str, dict[str, Any]] = {}
     if path.exists():
@@ -260,7 +279,11 @@ def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, 
             for row in csv.DictReader(handle):
                 merged[normalize_scalar(row.get("site_id"))] = dict(row)
     for row in new_rows:
-        merged[normalize_scalar(row.get("site_id"))] = row
+        site_id = normalize_scalar(row.get("site_id"))
+        earlier = str((merged.get(site_id) or {}).get("web_searches") or "")
+        if earlier.isdigit():
+            row = {**row, "web_searches": int(earlier) + int(row["web_searches"] or 0)}
+        merged[site_id] = row
     return sorted(
         merged.values(),
         key=lambda row: int(row["site_id"]) if str(row.get("site_id", "")).isdigit() else 0,
