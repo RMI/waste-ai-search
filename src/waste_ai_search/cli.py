@@ -8,6 +8,7 @@ from pathlib import Path
 from .arbitrate import run_arbitration
 from .run_context import (
     DEFAULT_MAX_WEB_SEARCHES,
+    DEFAULT_WORKERS,
     SEARCH_TOOL_RETRY_ATTEMPTS,
     PipelineConfig,
     default_run_dir,
@@ -66,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--force", action="store_true", help="Re-query sites that already have a cached response.")
     search.add_argument("--site-delay-seconds", type=float, default=3.0)
     search.add_argument("--hard-site-timeout-seconds", type=int, default=240)
+    search.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help="Sites searched at once (1 = one at a time). Higher is faster until Foundry rate-limits.",
+    )
     search.add_argument(
         "--use-geocode-cache",
         action="store_true",
@@ -126,6 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--force", action="store_true")
     full.add_argument("--site-delay-seconds", type=float, default=3.0)
     full.add_argument("--hard-site-timeout-seconds", type=int, default=240)
+    full.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     full.add_argument("--search-tool-retries", type=int, default=SEARCH_TOOL_RETRY_ATTEMPTS)
     full.add_argument("--max-web-searches", type=int, default=DEFAULT_MAX_WEB_SEARCHES)
     full.add_argument("--use-geocode-cache", action="store_true")
@@ -225,6 +233,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         force=getattr(args, "force", False),
         site_delay_seconds=getattr(args, "site_delay_seconds", 3.0),
         hard_site_timeout_seconds=getattr(args, "hard_site_timeout_seconds", 240),
+        workers=getattr(args, "workers", DEFAULT_WORKERS),
         search_tool_retries=getattr(args, "search_tool_retries", SEARCH_TOOL_RETRY_ATTEMPTS),
         max_web_searches=getattr(args, "max_web_searches", DEFAULT_MAX_WEB_SEARCHES),
         geocode_cache=(

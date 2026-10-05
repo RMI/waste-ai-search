@@ -6,8 +6,11 @@ with a cached response is skipped unless --force.
 from __future__ import annotations
 
 import csv
+import json
+import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,7 +24,6 @@ from .run_context import (
     SEARCH_TOOL_RETRY_DELAY_SECONDS,
     PipelineConfig,
     get_client,
-    hard_timeout,
     load_json,
     raw_dir,
     raw_response_path,
@@ -149,9 +151,7 @@ def run_search(
         print(f"Geocode cache: {hits}/{len(selected)} sites enriched with admin context")
 
     raw_dir(config.run_dir).mkdir(parents=True, exist_ok=True)
-    client = get_client(config)
-    agent = agent_identity(client)
-    run_log: list[dict[str, Any]] = []
+    agent = agent_identity(get_client(config))
 
     coordinate_only_sites = sum(1 for site in selected if coordinates_only(site))
     if coordinate_only_sites:
@@ -160,94 +160,45 @@ def run_search(
             f"{', '.join(sorted(COORDINATES_ONLY_ISO3))}."
         )
 
-    for index, site in enumerate(selected, start=1):
-        site_id = normalize_scalar(site.get("site_id"))
-        site_name = normalize_scalar(site.get("site_name"))
+    work: list[tuple[dict[str, Any], list[str]]] = []
+    for site in selected:
         attributes = requested_attributes(site)
         if only_attributes is not None:
             wanted = set(only_attributes)
             attributes = [a for a in attributes if a in wanted]
             if not attributes:
                 continue
-        path = raw_response_path(config.run_dir, site_id, pass_label)
-        started = datetime.now().replace(microsecond=0).isoformat()
-        status, error = "Started", ""
-        tool_retries = 0
-        # None when the client cannot count (a fake in tests); blank in the log, never a false 0.
-        web_searches: int | None = None
+        work.append((site, attributes))
 
-        print(f"[{index}/{len(selected)}] {site_id} {site_name} ({len(attributes)} attrs)", flush=True)
+    # One client per thread: a client holds the Bing count of the site it is searching.
+    local = threading.local()
 
-        payload: dict[str, Any] | None = None
-        if path.exists() and not config.force:
-            status = "Skipped existing response"
-            try:
-                payload = load_json(path)
-            except (OSError, json.JSONDecodeError) as exc:
-                status, error = "Failed", f"Cached response unreadable: {exc}"
-        else:
-            prompt = build_site_prompt(site, attributes, max_web_searches=config.max_web_searches)
-            max_attempts = max(1, config.search_tool_retries)
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    with hard_timeout(config.hard_site_timeout_seconds):
-                        payload = client.search_site(site, prompt)
-                except Exception as exc:  # noqa: BLE001 - one bad site must not end a multi-day run
-                    web_searches = add_searches(web_searches, client)
-                    status, error = "Failed", f"{type(exc).__name__}: {exc}"
-                    print(f"    {error}", flush=True)
-                    break
-                web_searches = add_searches(web_searches, client)
+    def search_one(site: dict[str, Any], attributes: list[str]) -> dict[str, Any]:
+        if not hasattr(local, "client"):
+            local.client = get_client(config)
+        return search_one_site(config, local.client, site, attributes, pass_label, agent)
 
-                if not search_tool_failed(payload):
-                    save_json(path, payload)
-                    status = "Succeeded" if attempt == 1 else f"Succeeded after {attempt - 1} tool retry(s)"
-                    error = ""
-                    break
-
-                tool_retries = attempt
-                error = "Agent reported its web-search tool failed."
-                if attempt < max_attempts:
-                    print(f"    search tool failed; retrying ({attempt}/{max_attempts - 1})", flush=True)
-                    time.sleep(SEARCH_TOOL_RETRY_DELAY_SECONDS)
-                else:
-                    save_json(path, payload)
-                    status = f"Search tool failed after {max_attempts} attempt(s)"
-                    print(f"    {status}", flush=True)
-            if index < len(selected) and config.site_delay_seconds > 0:
-                time.sleep(config.site_delay_seconds)
-
-        attribute_count = len(payload.get("attributes", []) or []) if payload else 0
-        source_count = (
-            sum(len(item.get("sources", []) or []) for item in (payload.get("attributes", []) or []))
-            if payload
-            else 0
-        )
-        run_log.append(
-            {
-                "run_id": config.run_id,
-                "site_id": site_id,
-                "site_name": site_name,
-                "country_iso3": normalize_scalar(site.get("country_iso3")),
-                "requested_attributes": "; ".join(attributes),
-                "agent_id": agent,
-                "request_started_at": started,
-                "request_finished_at": datetime.now().replace(microsecond=0).isoformat(),
-                "status": status,
-                "raw_response_path": str(path),
-                "parsed_attribute_count": attribute_count,
-                "parsed_source_count": source_count,
-                "error_message": error,
-                "retry_count": tool_retries,
-                "web_searches": "" if web_searches is None else web_searches,
-            }
-        )
-
+    workers = max(1, config.workers)
+    print(f"Searching {len(work)} site(s), {workers} at a time.", flush=True)
     log_path = config.run_dir / "foundry_run_log.csv"
-    write_csv_records(log_path, merge_run_log(log_path, run_log), FOUNDRY_RUN_LOG_HEADERS)
+    executor = ThreadPoolExecutor(max_workers=workers)
+    futures = []
+    try:
+        futures = [executor.submit(search_one, site, attributes) for site, attributes in work]
+        for done, future in enumerate(as_completed(futures), start=1):
+            row = future.result()
+            print(f"[{done}/{len(work)}] {row['site_id']} {row['site_name']}: {row['status']}", flush=True)
+    except KeyboardInterrupt:
+        print("\nStopping: sites not yet started are cancelled; waiting for those in flight.", flush=True)
+        raise
+    finally:
+        # Sites in flight finish and are logged, so an interrupted run keeps their Bing counts.
+        executor.shutdown(wait=True, cancel_futures=True)
+        run_log = [f.result() for f in futures if f.done() and not f.cancelled() and f.exception() is None]
+        write_csv_records(log_path, merge_run_log(log_path, run_log), FOUNDRY_RUN_LOG_HEADERS)
 
     failures = [row for row in run_log if str(row["status"]).startswith("Search tool failed")]
-    print(f"\nSearched {len(selected)} sites. Run log: {log_path}")
+    print(f"\nSearched {len(work)} sites. Run log: {log_path}")
     counted = [row["web_searches"] for row in run_log if row["web_searches"] != ""]
     if counted:
         print(f"Bing queries: {sum(counted):,} across {len(counted)} searched site(s).")
@@ -262,6 +213,89 @@ def run_search(
         print(f"\n!! {len(failures)} site(s) still failing after retries. Try again later:")
         print(f"   uv run waste-ai-search search --run-id {config.run_id} --force --site-ids {ids}")
     return config.run_dir
+
+
+def search_one_site(
+    config: PipelineConfig,
+    client: Any,
+    site: dict[str, Any],
+    attributes: list[str],
+    pass_label: str,
+    agent: str,
+) -> dict[str, Any]:
+    """Search one site, or reuse its cached response, and return its run-log row.
+
+    Runs on a worker thread, so it prints with the site id: lines from parallel sites interleave.
+    """
+    site_id = normalize_scalar(site.get("site_id"))
+    site_name = normalize_scalar(site.get("site_name"))
+    path = raw_response_path(config.run_dir, site_id, pass_label)
+    started = datetime.now().replace(microsecond=0).isoformat()
+    status, error = "Started", ""
+    tool_retries = 0
+    # None when the client cannot count (a fake in tests); blank in the log, never a false 0.
+    web_searches: int | None = None
+
+    payload: dict[str, Any] | None = None
+    if path.exists() and not config.force:
+        status = "Skipped existing response"
+        try:
+            payload = load_json(path)
+        except (OSError, json.JSONDecodeError) as exc:
+            status, error = "Failed", f"Cached response unreadable: {exc}"
+    else:
+        prompt = build_site_prompt(site, attributes, max_web_searches=config.max_web_searches)
+        max_attempts = max(1, config.search_tool_retries)
+        for attempt in range(1, max_attempts + 1):
+            try:
+                payload = client.search_site(site, prompt)
+            except Exception as exc:  # noqa: BLE001 - one bad site must not end a multi-day run
+                web_searches = add_searches(web_searches, client)
+                status, error = "Failed", f"{type(exc).__name__}: {exc}"
+                print(f"    {site_id}: {error}", flush=True)
+                break
+            web_searches = add_searches(web_searches, client)
+
+            if not search_tool_failed(payload):
+                save_json(path, payload)
+                status = "Succeeded" if attempt == 1 else f"Succeeded after {attempt - 1} tool retry(s)"
+                error = ""
+                break
+
+            tool_retries = attempt
+            error = "Agent reported its web-search tool failed."
+            if attempt < max_attempts:
+                print(f"    {site_id}: search tool failed; retrying ({attempt}/{max_attempts - 1})", flush=True)
+                time.sleep(SEARCH_TOOL_RETRY_DELAY_SECONDS)
+            else:
+                save_json(path, payload)
+                status = f"Search tool failed after {max_attempts} attempt(s)"
+        if config.site_delay_seconds > 0:
+            time.sleep(config.site_delay_seconds)
+
+    attribute_count = len(payload.get("attributes", []) or []) if payload else 0
+    source_count = (
+        sum(len(item.get("sources", []) or []) for item in (payload.get("attributes", []) or []))
+        if payload
+        else 0
+    )
+    return {
+        "run_id": config.run_id,
+        "site_id": site_id,
+        "site_name": site_name,
+        "country_iso3": normalize_scalar(site.get("country_iso3")),
+        "requested_attributes": "; ".join(attributes),
+        "agent_id": agent,
+        "request_started_at": started,
+        "request_finished_at": datetime.now().replace(microsecond=0).isoformat(),
+        "status": status,
+        "raw_response_path": str(path),
+        "parsed_attribute_count": attribute_count,
+        "parsed_source_count": source_count,
+        "error_message": error,
+        "retry_count": tool_retries,
+        "web_searches": "" if web_searches is None else web_searches,
+    }
 
 
 def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

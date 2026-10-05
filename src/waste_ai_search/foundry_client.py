@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -22,6 +23,9 @@ class FoundryClientConfig:
     max_retries: int = 2
     # Built-in tool calls (web searches) the service allows per response; 0 means no cap.
     max_tool_calls: int = 0
+    # Wall-clock limit for one search_site call, retries included; 0 means none. timeout_seconds
+    # is not one: a WP-545 pilot site waited 15 minutes for a single response past it.
+    site_timeout_seconds: int = 0
 
     @classmethod
     def from_env(cls) -> "FoundryClientConfig":
@@ -70,28 +74,37 @@ class AzureFoundryAgentClient:
     def search_site(self, site: dict[str, Any], prompt: str) -> dict[str, Any]:
         # Bing bills per query, and a retry repeats every query, so all attempts are counted.
         self.web_searches = 0
+        limit = self.config.site_timeout_seconds
+        deadline = time.monotonic() + limit if limit > 0 else None
         last_error: Exception | None = None
         for attempt in range(1, self.config.max_retries + 1):
             try:
-                text = self._invoke_agent(prompt)
+                remaining = None if deadline is None else deadline - time.monotonic()
+                text = self._invoke_agent(prompt, remaining)
                 return parse_json_response(text)
             except Exception as exc:  # noqa: BLE001 - preserve retries around SDK/network calls
                 last_error = exc
+                delay = min(2 * attempt, 10)
                 if attempt >= self.config.max_retries:
                     break
-                time.sleep(min(2 * attempt, 10))
+                # A retry that cannot finish in time would only add billed queries.
+                if deadline is not None and time.monotonic() + delay >= deadline:
+                    break
+                time.sleep(delay)
         assert last_error is not None
         raise last_error
 
-    def _invoke_agent(self, prompt: str) -> str:
+    def _invoke_agent(self, prompt: str, limit: float | None = None) -> str:
         agents = self.project_client.agents
         if not hasattr(agents, "threads"):
-            return self._invoke_foundry_v2_agent(prompt)
+            return self._invoke_foundry_v2_agent(prompt, limit)
 
         agent_id = self.config.agent_id or self._resolve_agent_id_from_name()
         thread = agents.threads.create()
         agents.messages.create(thread_id=thread.id, role="user", content=prompt)
-        run = agents.runs.create_and_process(thread_id=thread.id, agent_id=agent_id)
+        run = call_with_limit(
+            lambda: agents.runs.create_and_process(thread_id=thread.id, agent_id=agent_id), limit
+        )
         status = getattr(run, "status", "")
         if str(status).lower() in {"failed", "cancelled", "expired"}:
             raise RuntimeError(f"Foundry agent run failed with status={status}: {run}")
@@ -131,7 +144,7 @@ class AzureFoundryAgentClient:
             raise RuntimeError(f"No Foundry agent found with name {self.config.agent_name!r}.")
         raise RuntimeError(f"Multiple Foundry agents found with name {self.config.agent_name!r}; set AZURE_AI_AGENT_ID.")
 
-    def _invoke_foundry_v2_agent(self, prompt: str) -> str:
+    def _invoke_foundry_v2_agent(self, prompt: str, limit: float | None = None) -> str:
         agent_name = self._resolve_agent_name()
         openai_client = self.project_client.get_openai_client(agent_name=agent_name).with_options(
             timeout=self.config.timeout_seconds,
@@ -139,11 +152,14 @@ class AzureFoundryAgentClient:
         )
         conversation = openai_client.conversations.create()
         cap = {"max_tool_calls": self.config.max_tool_calls} if self.config.max_tool_calls > 0 else {}
-        response = openai_client.responses.create(
-            conversation=conversation.id,
-            input=prompt,
-            timeout=self.config.timeout_seconds,
-            **cap,
+        response = call_with_limit(
+            lambda: openai_client.responses.create(
+                conversation=conversation.id,
+                input=prompt,
+                timeout=self.config.timeout_seconds,
+                **cap,
+            ),
+            limit,
         )
         self.web_searches += count_web_searches(response)
         text = getattr(response, "output_text", "")
@@ -158,6 +174,34 @@ class AzureFoundryAgentClient:
         if chunks:
             return "\n".join(chunks).strip()
         raise RuntimeError("Foundry agent returned no response output text.")
+
+
+def call_with_limit(call: Any, seconds: float | None) -> Any:
+    """Run `call`, giving up with TimeoutError after `seconds` of wall-clock time (None: no limit).
+
+    It replaces a SIGALRM timeout, which only works on the main thread and so not in a parallel
+    search. The call cannot be killed, so it runs on in a daemon thread and its result is dropped.
+    """
+    if seconds is None:
+        return call()
+    if seconds <= 0:
+        raise TimeoutError("Site request exceeded its time limit.")
+    outcome: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome["value"] = call()
+        except BaseException as exc:  # noqa: BLE001 - re-raised in the caller's thread
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise TimeoutError(f"Site request still running after {seconds:.1f}s; abandoned.")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
 
 
 def count_web_searches(response: Any) -> int:
