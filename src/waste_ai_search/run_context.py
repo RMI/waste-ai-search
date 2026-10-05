@@ -5,8 +5,8 @@ Both phases depend on this; it depends on neither of them.
 from __future__ import annotations
 
 import json
+import os
 import re
-import signal
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +28,8 @@ SEARCH_TOOL_RETRY_ATTEMPTS = 2
 # fresh one. 0 means no cap.
 DEFAULT_MAX_WEB_SEARCHES = 6
 SEARCH_TOOL_RETRY_DELAY_SECONDS = 20.0
+# Sites searched at once. Each search mostly waits on Foundry, so threads overlap that waiting.
+DEFAULT_WORKERS = 4
 
 
 @dataclass
@@ -45,6 +47,7 @@ class PipelineConfig:
     force: bool = False
     site_delay_seconds: float = 3.0
     hard_site_timeout_seconds: int = 240
+    workers: int = DEFAULT_WORKERS
     search_tool_retries: int = SEARCH_TOOL_RETRY_ATTEMPTS
     max_web_searches: int = DEFAULT_MAX_WEB_SEARCHES
     geocode_cache: Path | None = None
@@ -92,8 +95,15 @@ def site_id_from_path(path: Path) -> str:
 
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write under a temporary name, then rename: a hard stop never leaves half a file.
+
+    A half-written response would read as unreadable on resume instead of being searched again.
+    The temporary name is hidden, so neither blob push nor the `site_*.json` glob picks it up.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -103,6 +113,7 @@ def load_json(path: Path) -> dict[str, Any]:
 def get_client(config: PipelineConfig) -> FoundryClient:
     client_config = FoundryClientConfig.from_env()
     client_config.max_tool_calls = config.max_web_searches
+    client_config.site_timeout_seconds = config.hard_site_timeout_seconds
     return AzureFoundryAgentClient(client_config)
 
 
@@ -114,26 +125,6 @@ def agent_identity(client: Any) -> str:
     return normalize_scalar(getattr(config, "agent_id", "")) or normalize_scalar(
         getattr(config, "agent_name", "")
     )
-
-
-class hard_timeout:  # noqa: N801
-    def __init__(self, seconds: int):
-        self.seconds = seconds
-
-    def __enter__(self):
-        if self.seconds and self.seconds > 0 and hasattr(signal, "SIGALRM"):
-            self._previous = signal.signal(signal.SIGALRM, self._raise)
-            signal.alarm(self.seconds)
-        return self
-
-    def __exit__(self, *exc):
-        if self.seconds and self.seconds > 0 and hasattr(signal, "SIGALRM"):
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, self._previous)
-        return False
-
-    def _raise(self, signum, frame):  # noqa: ARG002
-        raise TimeoutError(f"Site request exceeded {self.seconds}s.")
 
 
 # The agent reports its own web-search tool failing inside search_notes, while the API call itself

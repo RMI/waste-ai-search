@@ -201,6 +201,16 @@ Re-running `search` skips sites that already have a cached response unless `--fo
 an interrupted long run resumes where it stopped. Because `arbitrate` reads the cache rather than
 the network, a change to the credibility rubric can be re-applied to a completed run at no cost.
 
+**Sites are searched 4 at a time** (`--workers`, on `search` and `run`; 1 = one at a time). A search
+mostly waits on Foundry, so the waits overlap: 10 sites took 1 min 36 s with 4 workers, against about
+4 minutes one at a time, with no rate limiting. Progress prints as each site finishes, so the order is
+not seed order.
+Ctrl-C cancels the sites not yet started and waits for those in flight, which are still logged.
+
+Each attempt at a site is cut off after `--hard-site-timeout-seconds` (240), retries included: a
+call still running then is abandoned and not retried. The HTTP timeout
+(`AZURE_FOUNDRY_TIMEOUT_SECONDS`) cannot do this - one site waited 15 minutes past it.
+
 ### What is actually searched — read this before a full run
 
 Three rules narrow the search. Together they mean a full run queries **12,392 of 15,537
@@ -785,7 +795,7 @@ To-dos:
    better data~~ — done: see [Original (untranslated) facility names](#original-untranslated-facility-names);
 2) ~~Update the standardized facility schema~~ — done: realigned to upstream `8c0bb3fe` and
    pinned via `scripts/sync_schema.py`, which reports drift against the ETL repo;
-3) Parallel processing; 
+3) ~~Parallel processing~~ — done: sites are searched 4 at a time (`--workers`);
 4) Saving search result json files to blob storage;
 5) Process to promote SME validated data into a raw AI_discovery data source;
 6) Process to shape AI_discovery data source into standardized facility schema, similar to other raw data sources.
