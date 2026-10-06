@@ -405,16 +405,22 @@ Names:
 """
 
     asks_name = "found_facility_name" in attributes
+    asks_coordinates = "found_latitude" in attributes
+    # Not asked is not the same as trusted: the gas-capture follow-up asks for GCCS alone, so only
+    # a Tier 1-2 provenance lets the prompt call the seed's identity confirmed.
+    name_confirmed = not asks_name and trusted_baseline_name(site)
+    coordinates_confirmed = not asks_coordinates and trusted_baseline_coordinates(site)
     if not asks_name:
-        # The name came from a Tier 1-2 source and is not being searched. Asking the agent to
-        # return one anyway would contradict "only the attributes listed below are wanted".
+        # Asking the agent to return a name anyway would contradict "only the attributes listed
+        # below are wanted".
         names_guidance = names_guidance.replace(
             "- Return found_facility_name exactly as your source spells it, in whatever script or\n"
             "  language that source uses. Do not translate it back.\n",
             "- site_name is already confirmed by an authoritative source. Use it to search; do not\n"
-            "  return a facility name.\n",
+            "  return a facility name.\n"
+            if name_confirmed
+            else "- Use site_name to search; do not return a facility name.\n",
         )
-    asks_coordinates = "found_latitude" in attributes
     if asks_name and asks_coordinates:
         identity_rule = (
             "- found_facility_name, found_latitude and found_longitude establish that you found the\n"
@@ -423,19 +429,26 @@ Names:
     elif asks_coordinates:
         identity_rule = (
             "- found_latitude and found_longitude establish that you found the RIGHT facility.\n"
-            "  Always return them when a source supports them. The name is already confirmed."
+            "  Always return them when a source supports them. "
+            + ("The name is already confirmed." if name_confirmed else "Do not return a name.")
         )
     elif asks_name:
         identity_rule = (
             "- found_facility_name establishes that you found the RIGHT facility. Always return it\n"
-            "  when a source supports it. The coordinates are already confirmed: use them to check\n"
-            "  that each source describes this facility, and do not return coordinates."
+            "  when a source supports it. "
+            + ("The coordinates are already confirmed: use them" if coordinates_confirmed else "Use the coordinates")
+            + " to check\n  that each source describes this facility, and do not return coordinates."
         )
-    else:
+    elif name_confirmed and coordinates_confirmed:
         identity_rule = (
             "- The name and coordinates are already confirmed by an authoritative source. Use them\n"
             "  to check that each source describes THIS facility, and do not return a name or\n"
             "  coordinates."
+        )
+    else:
+        identity_rule = (
+            "- The name and coordinates are not asked for here. Use them to check that each source\n"
+            "  describes THIS facility, and do not return a name or coordinates."
         )
 
     closure_focus = ""

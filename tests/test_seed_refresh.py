@@ -131,3 +131,24 @@ def test_repeated_refreshes_accumulate_run_ids_without_duplicating_fields():
     tiers = ai_filled_tiers(second[0]["ai_filled_fields"])
     assert tiers == {"facility_status": 3, "facility_type": 1}
     assert second[0]["ai_filled_run_ids"] == "run1; run2"
+
+
+def test_values_with_no_database_column_survive_the_refreshed_seed(tmp_path):
+    """A database seed has no column for these, so writing dropped them and pass 2 asked again."""
+    from waste_ai_search.input_loader import load_sites
+    from waste_ai_search.seed_refresh import write_refreshed_seed
+
+    found = {
+        "bulk_waste_type": "inert waste",
+        "operator": "Waste Authority",
+        "has_landfill_gas_collection": "TRUE",
+        "has_flare": "TRUE",
+        "flare_efficiency": "0.98",
+    }
+    refreshed, _stats = refresh_sites([site()], [resolved(a, v) for a, v in found.items()], "run1")
+    database_headers = list(site())  # no column for operator, bulk_waste_type or the flare pair
+    path = write_refreshed_seed(tmp_path / "refreshed_seed.csv", refreshed, database_headers)
+
+    reloaded, _headers = load_sites(path)
+    assert {a: reloaded[0][a] for a in found} == found
+    assert not set(found) & set(requested_attributes(reloaded[0]))

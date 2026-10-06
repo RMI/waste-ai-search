@@ -68,3 +68,19 @@ def test_the_prompt_asks_only_for_the_name_when_only_coordinates_are_trusted():
     prompt = build_site_prompt(s, attributes=requested_attributes(s))
     assert "found_facility_name establishes that you found the RIGHT facility" in prompt
     assert "do not return coordinates" in prompt
+
+
+def test_the_gas_capture_follow_up_does_not_call_untrusted_identity_confirmed():
+    """Pass 2 asks for GCCS alone, so identity is absent from the request without being trusted."""
+    s = site(attribute_sources="found_latitude@osm_2022; found_longitude@osm_2022", has_landfill_gas_collection="TRUE")
+    follow_up = [a for a in requested_attributes(s) if a.startswith("gccs") or "flare" in a]
+    prompt = build_site_prompt(s, attributes=follow_up)
+    assert "already confirmed" not in prompt
+    assert "The name and coordinates are not asked for here" in prompt
+    assert "Use site_name to search; do not return a facility name." in prompt
+
+
+def test_a_trusted_identity_is_still_confirmed_in_the_follow_up():
+    s = site(attribute_sources=f"found_facility_name@eprtr_2022; {TRUSTED}", has_landfill_gas_collection="TRUE")
+    follow_up = [a for a in requested_attributes(s) if a.startswith("gccs")]
+    assert "The name and coordinates are already confirmed" in build_site_prompt(s, attributes=follow_up)
