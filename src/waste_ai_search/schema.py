@@ -172,8 +172,18 @@ def in_batch(iso3: str, batch: int) -> bool:
 # row blocks the whole run's load. transformed.transformed_ai_search does not exist yet either,
 # so no load runs today; the enum value should land upstream with that table.
 NOT_A_WASTE_FACILITY = "Not a Waste Facility"
-PENDING_UPSTREAM_FACILITY_TYPES = [NOT_A_WASTE_FACILITY]
+# A site where recyclables are dropped off, sorted or processed and nothing is disposed of. Like
+# "Not a Waste Facility" it is PENDING UPSTREAM: requested for the database enum and spec, and
+# offered here so recycling centres stop being forced into a landfill or dumpsite type.
+RECYCLING_CENTER = "Recycling Center"
+# A site where collected waste is consolidated for transport and nothing is disposed of. In the spec
+# and in chk_facility_type on every transformed.* table, but NOT yet in the `facility_type` enum type
+# or consolidation.consolidated_facility's chk_facility_type, so it is pending too.
+TRANSFER_STATION = "Transfer Station"
+PENDING_UPSTREAM_FACILITY_TYPES = [TRANSFER_STATION, RECYCLING_CENTER, NOT_A_WASTE_FACILITY]
 FACILITY_TYPE_ALLOWED = [*FACILITY_TYPE_VALUES, *PENDING_UPSTREAM_FACILITY_TYPES]
+# What every prompt offers. "Not a Waste Facility" is offered only to unconfirmed sites (WP-525).
+FACILITY_TYPE_OFFERED = [value for value in FACILITY_TYPE_ALLOWED if value != NOT_A_WASTE_FACILITY]
 
 # Asked only where nothing independently confirms a disposal site exists: facilities whose every
 # contributing source is one of these Tier 4 datasets. OSM is a crowd-mapped polygon and Global
@@ -310,12 +320,12 @@ FACILITY_TYPE_MAP = {
     "legacy landfill": "Dumpsite",
     "incineration facility": "Incineration Facility",
     "incinerator": "Incineration Facility",
-    # The spec added 'Transfer Station' in upstream 5cfeadfa, but the database has NOT: both the
-    # `facility_type` enum type and `chk_facility_type` still list four values, so a row carrying
-    # it would be rejected on load. Kept as None until the database catches up, at which point
-    # generate_enums.py will pick the value up and this line becomes
-    # "transfer station": "Transfer Station".
-    "transfer station": None,
+    "transfer station": TRANSFER_STATION,
+    "waste transfer station": TRANSFER_STATION,
+    "recycling center": RECYCLING_CENTER,
+    "recycling centre": RECYCLING_CENTER,
+    "recycling depot": RECYCLING_CENTER,
+    "materials recovery facility": RECYCLING_CENTER,
     "not a waste facility": NOT_A_WASTE_FACILITY,
     "not a waste site": NOT_A_WASTE_FACILITY,
     "not waste": NOT_A_WASTE_FACILITY,

@@ -317,13 +317,13 @@ def test_a_regulator_backed_site_is_not_offered_it():
 
 
 def test_a_corroborated_site_prompt_is_not_offered_the_value():
-    """Facilities with backing get the four database values and none of the addendum."""
+    """Facilities with backing get the ordinary values and none of the addendum."""
     site = unconfirmed_site(contributing_data_sources="lmop_2024")
     prompt = build_site_prompt(site, attributes=requested_attributes(site))
 
     assert NOT_A_WASTE_FACILITY not in prompt
     assert "IS STILL A WASTE DISPOSAL" not in prompt
-    assert "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility." in prompt
+    assert "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility, Transfer Station, Recycling Center." in prompt
 
 
 def test_an_unconfirmed_site_prompt_offers_it_in_guidance_and_definitions():

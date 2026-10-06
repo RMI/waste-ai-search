@@ -87,12 +87,20 @@ def test_the_not_a_waste_facility_guidance_sits_alongside_the_definitions():
     assert text.index("Definitions:") < text.index("IS STILL A WASTE DISPOSAL")
 
 
-def test_corroborated_sites_still_see_exactly_the_four_database_values():
+def test_corroborated_sites_see_the_database_values_and_recycling_center():
     text = guidance(corroborated_site())
     assert text.startswith(
-        "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility."
+        "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility, "
+        "Transfer Station, Recycling Center."
     )
     assert NOT_A_WASTE_FACILITY not in text
+
+
+def test_a_transfer_station_on_a_closed_landfill_is_still_the_landfill():
+    """Buried waste still emits, so the disposal history decides the type, not today's use."""
+    text = guidance(corroborated_site())
+    assert "Transfer Station - a site where collected waste is unloaded" in text
+    assert "built on a closed landfill - classify the disposal site" in text
 
 
 # --- after the live check on Manresa (18133) --------------------------------------------------
