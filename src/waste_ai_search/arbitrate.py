@@ -350,16 +350,13 @@ def attach_site_names(rows: list[dict[str, Any]], sites_by_id: dict[str, dict[st
         row["source_language"] = normalize_scalar(site.get("source_language"))
 
 
-def contradiction_rows(
-    resolved: list[dict[str, Any]], evidence: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """The "Not a Waste Facility" verdicts, each beside what the same run found about closure.
+def closure_reported(resolved: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """What the run found about each site's closure, keyed by site.
 
-    The likeliest false positive is a closed landfill misread as "not a landfill" - "it's a park
-    now". A site called Not a Waste Facility AND reported closed is exactly that shape, so it is
-    flagged for the reviewer rather than left to be noticed.
+    The likeliest false "Not a Waste Facility" is a closed landfill misread as "not a landfill" -
+    "it's a park now". A site given that verdict AND reported closed is exactly that shape, so its
+    facility_type review row says so.
     """
-    by_evidence_id = {row["evidence_id"]: row for row in evidence}
     closure: dict[str, list[str]] = {}
     for row in resolved:
         attribute = row["attribute_name"]
@@ -368,37 +365,19 @@ def contradiction_rows(
             closure.setdefault(row["site_id"], []).append("facility_status = Inactive")
         elif attribute == "closing_year" and value:
             closure.setdefault(row["site_id"], []).append(f"closing_year = {value}")
+    return closure
 
-    out: list[dict[str, Any]] = []
-    for row in resolved:
-        if row["attribute_name"] != "facility_type":
-            continue
-        if normalize_scalar(row.get("resolved_value")) != NOT_A_WASTE_FACILITY:
-            continue
-        winner = by_evidence_id.get(row.get("winning_evidence_id"), {})
-        reported = closure.get(row["site_id"], [])
-        out.append(
-            {
-                "site_id": row["site_id"],
-                "site_name": row["site_name"],
-                "original_site_name": row.get("original_site_name", ""),
-                "source_language": row.get("source_language", ""),
-                "country_iso3": row["country_iso3"],
-                "facility_type": NOT_A_WASTE_FACILITY,
-                "winning_source_tier": row["winning_source_tier"],
-                "winning_source_url": row["winning_source_url"],
-                "evidence_summary": winner.get("evidence_summary", ""),
-                "quoted_evidence_short": winner.get("quoted_evidence_short", ""),
-                "closure_also_reported": (
-                    f"CHECK: {'; '.join(reported)} - is this a closed landfill misread as a "
-                    "contradiction?"
-                    if reported
-                    else ""
-                ),
-                "validation_status": row["validation_status"],
-            }
+
+def review_summary(row: dict[str, Any], closure: dict[str, list[str]]) -> str:
+    """The evidence_summary a review row shows: the rule applied, plus the closure check."""
+    summary = row.get("resolution_rule", "")
+    reported = closure.get(row["site_id"], [])
+    if row["attribute_name"] == "facility_type" and row.get("resolved_value") == NOT_A_WASTE_FACILITY and reported:
+        summary += (
+            f" CHECK: this run also found {'; '.join(reported)} - is this a closed landfill "
+            "misread as never a waste site?"
         )
-    return out
+    return summary
 
 
 def cover_consistency_warnings(resolved: list[dict[str, Any]]) -> list[str]:
@@ -769,23 +748,29 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     for lead in payload_leads(cached, sites_by_id, config.run_id):
         leads.append(lead)
 
-    # One pass fills the seed's name fields into every row list, keyed by site. The review queue
-    # and the Contradictions view are both derived from resolved_rows below, so they inherit the
-    # names rather than each builder having to remember them.
+    # One pass fills the seed's name fields into every row list, keyed by site. The review queue is
+    # derived from resolved_rows below, so it inherits the names.
     for rows in (evidence_rows, resolved_rows, leads):
         attach_site_names(rows, sites_by_id)
 
+    # A "Not a Waste Facility" verdict is reviewed on its own facility_type row, like any other
+    # facility_type; the row also says when the same run found the site closed.
+    closure = closure_reported(resolved_rows)
     review_queue: list[dict[str, Any]] = []
     for row in resolved_rows:
         if not needs_review(row):
             continue
         queue_row = {header: row.get(header, "") for header in REVIEW_QUEUE_HEADERS}
-        queue_row["evidence_summary"] = row.get("resolution_rule", "")
+        queue_row["evidence_summary"] = review_summary(row, closure)
         review_queue.append(queue_row)
 
-    contradictions = contradiction_rows(resolved_rows, evidence_rows)
-    # How many arbitrated facilities were offered the verdict at all, so an empty Contradictions
-    # tab can be read as "checked N, contradicted none" rather than "never checked".
+    not_a_waste_facility = sum(
+        1
+        for row in resolved_rows
+        if row["attribute_name"] == "facility_type" and row.get("resolved_value") == NOT_A_WASTE_FACILITY
+    )
+    # How many arbitrated facilities were offered the verdict at all, so a count of zero can be read
+    # as "checked N, contradicted none" rather than "never checked".
     contradiction_checks = sum(
         1 for sid in by_site if sid in sites_by_id and needs_contradiction_check(sites_by_id[sid])
     )
@@ -850,11 +835,10 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                 "value": "kept promotable" if config.keep_broken_links else "routed to leads",
             },
             {"setting": "contradiction_checks", "value": contradiction_checks},
-            {"setting": "not_a_waste_facility", "value": len(contradictions)},
+            {"setting": "not_a_waste_facility", "value": not_a_waste_facility},
             {"setting": "standardized_records", "value": len(standard_records)},
         ],
         review_queue=review_queue,
-        contradictions=contradictions,
         leads=leads,
         parse_warnings=parse_warnings,
     )
@@ -870,7 +854,7 @@ def auto_validated_rows(resolved_rows: list[dict[str, Any]]) -> list[dict[str, A
 
     "Not found" rows carry no value, and rows awaiting review belong in the review workbook until an
     SME promotes them, so neither is written. Those rows are still built in memory - the review
-    queue, the Contradictions view and the standardized table are derived from them.
+    queue and the standardized table are derived from them.
     """
     return [
         row

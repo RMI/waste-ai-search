@@ -540,16 +540,6 @@ FOUNDRY_RUN_LOG_HEADERS = [
 
 PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 
-# A read-only lens on the Review_Queue rows where facility_type came back "Not a Waste Facility". The decision is
-# still recorded on the Review_Queue row; this view exists so the verdicts can be read together,
-# beside what the same run found about closure.
-CONTRADICTION_HEADERS = [
-    "site_id", *SITE_NAME_COLUMNS, "country_iso3", "facility_type", "winning_source_tier",
-    "winning_source_url", "evidence_summary", "quoted_evidence_short", "closure_also_reported",
-    "validation_status",
-]
-
-
 # --- standardized facility table (Q19) --------------------------------------------------------
 AI_SEARCH_DATA_SOURCE = "ai_search_2026"
 

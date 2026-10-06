@@ -456,9 +456,9 @@ with closure in `facility_status = Inactive` and `closing_year`. The question is
 waste disposal site?*, not *is it operating today?*
 
 The value is **promoted like any facility_type**, so it reaches the standardized table and the next
-pass's seed. Every such verdict is also routed to review whatever its tier, and the workbook's
-**Contradictions** tab lists them, flagging any where the same run also found the site closed —
-the likeliest misreading.
+pass's seed. Every such verdict is also routed to review whatever its tier, on the site's own
+`facility_type` row in Review_Queue — there is no separate tab. Where the same run also found the
+site closed, the likeliest misreading, the row's `evidence_summary` says so.
 
 > **Pending upstream.** The database's `facility_type` enum and `chk_facility_type` do not carry
 > `Not a Waste Facility` yet, so a load containing it will be rejected — and `COPY` is

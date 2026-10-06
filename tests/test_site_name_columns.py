@@ -18,7 +18,6 @@ from waste_ai_search.arbitrate import attach_site_names, run_arbitration
 from waste_ai_search.input_loader import write_csv_records
 from waste_ai_search.run_context import PipelineConfig
 from waste_ai_search.schema import (
-    CONTRADICTION_HEADERS,
     EVIDENCE_HEADERS,
     RESOLVED_HEADERS,
     REVIEW_QUEUE_HEADERS,
@@ -32,7 +31,6 @@ ALL_OUTPUTS = {
     "resolved.csv": RESOLVED_HEADERS,
     "Review_Queue": REVIEW_QUEUE_HEADERS,
     "Leads": SUPPLEMENTARY_LEADS_HEADERS,
-    "Contradictions": CONTRADICTION_HEADERS,
 }
 
 

@@ -22,7 +22,7 @@ def build(tmp_path, queue_rows=None):
 def test_expected_tabs_exist(tmp_path):
     wb = build(tmp_path)
     assert wb.sheetnames == [
-        "ReadMe", "Run_Config", "Review_Queue", "Contradictions", "Leads", "Parse_Warnings", "Definitions",
+        "ReadMe", "Run_Config", "Review_Queue", "Leads", "Parse_Warnings", "Definitions",
     ]
 
 
