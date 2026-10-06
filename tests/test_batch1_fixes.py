@@ -273,3 +273,20 @@ def test_nan_from_the_database_is_empty_in_the_seed():
 
     assert is_empty(Decimal("NaN")) and is_empty(float("nan")) and is_empty([Decimal("NaN")])
     assert not is_empty(Decimal("0")) and not is_empty(False) and not is_empty([Decimal("1"), Decimal("NaN")])
+
+
+def test_a_kill_while_rewriting_a_csv_leaves_the_old_file_whole(tmp_path, monkeypatch):
+    """The run log is rewritten per site; a kill mid-write must not empty it."""
+    import csv as _csv
+    import os
+
+    from waste_ai_search.input_loader import write_csv_records
+
+    log = tmp_path / "foundry_run_log.csv"
+    write_csv_records(log, [{"site_id": "1", "web_searches": "8"}], ["site_id", "web_searches"])
+    monkeypatch.setattr(os, "replace", lambda src, dst: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(KeyboardInterrupt):
+        write_csv_records(log, [{"site_id": "1", "web_searches": "8"}, {"site_id": "2"}], ["site_id", "web_searches"])
+
+    assert list(_csv.DictReader(log.open(encoding="utf-8"))) == [{"site_id": "1", "web_searches": "8"}]
+    assert [p.name for p in tmp_path.iterdir()] == ["foundry_run_log.csv"]  # no temporary left behind

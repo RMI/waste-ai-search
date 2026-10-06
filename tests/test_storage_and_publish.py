@@ -442,3 +442,68 @@ def test_the_seed_is_pulled_last(tmp_path):
     container.download_blob = lambda name: order.append(name.rsplit("/", 1)[-1]) or download(name)
     storage.pull("outputs/runs/r", tmp_path / "run", client=container)
     assert order == ["t.csv.gz", "manifest.json", "seed.csv"]
+
+
+# --- the timestamp window (Copilot review on PR #15) ------------------------------------------------
+def _blob_at(container, name, content, seconds_from_local, local_path):
+    """A blob whose last_modified sits `seconds_from_local` after the local file's mtime."""
+    from datetime import datetime, timezone
+
+    container.blobs[name] = content
+    stamp = datetime.fromtimestamp(local_path.stat().st_mtime + seconds_from_local, timezone.utc)
+    container.list_blobs = lambda name_starts_with="": [
+        SimpleNamespace(name=n, last_modified=stamp) for n in container.blobs if n.startswith(name_starts_with)
+    ]
+    return container
+
+
+def test_a_blob_changed_seconds_later_is_pulled_when_its_content_differs(tmp_path):
+    run = run_folder(tmp_path)
+    local = run / "link_check.json"
+    local.write_text("old verdicts")
+    container = _blob_at(FakeContainer(), "outputs/runs/r/link_check.json", b"new verdicts", 2, local)
+    storage.pull("outputs/runs/r", run, client=container)
+    assert local.read_text() == "new verdicts"
+
+
+def test_an_identical_blob_within_the_window_is_left_alone_and_aligned(tmp_path):
+    run = run_folder(tmp_path)
+    local = run / "link_check.json"
+    local.write_text("same")
+    container = _blob_at(FakeContainer(), "outputs/runs/r/link_check.json", b"same", 2, local)
+    assert storage.pull("outputs/runs/r", run, client=container) == 0
+    blob_time = container.list_blobs()[0].last_modified.timestamp()
+    assert abs(local.stat().st_mtime - blob_time) < 0.01  # so the next push sees them as equal
+
+
+def test_push_never_overwrites_a_blob_changed_seconds_later(tmp_path, capsys):
+    run = tmp_path / "run"
+    run.mkdir()
+    local = run / "link_check.json"
+    local.write_text("stale verdicts")
+    container = _blob_at(FakeContainer(), "outputs/runs/r/link_check.json", b"another machine's verdicts", 2, local)
+    assert storage.push(run, "outputs/runs/r", client=container) == 0
+    assert container.blobs["outputs/runs/r/link_check.json"] == b"another machine's verdicts"
+    assert "newer in blob" in capsys.readouterr().out
+
+
+def test_push_sends_only_files_changed_since_their_blob(tmp_path):
+    import os
+    import time
+
+    run = tmp_path / "run"
+    run.mkdir()
+    unchanged, edited = run / "a.json", run / "b.json"
+    unchanged.write_text("a")
+    edited.write_text("b2")
+    container = FakeContainer({"outputs/runs/r/a.json": b"a", "outputs/runs/r/b.json": b"b1"})
+    from datetime import datetime, timezone
+
+    then = time.time() - 600
+    os.utime(unchanged, (then, then))
+    stamp = datetime.fromtimestamp(then, timezone.utc)
+    container.list_blobs = lambda name_starts_with="": [
+        SimpleNamespace(name=n, last_modified=stamp) for n in container.blobs if n.startswith(name_starts_with)
+    ]
+    assert storage.push(run, "outputs/runs/r", client=container) == 1
+    assert container.uploads == ["outputs/runs/r/b.json"]

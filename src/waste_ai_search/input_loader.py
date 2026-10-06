@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 from typing import Any
 
@@ -65,11 +66,23 @@ def merge_headers(*header_groups: list[str]) -> list[str]:
 
 
 def write_csv_records(path: Path, rows: list[dict[str, Any]], headers: list[str]) -> None:
+    """Write under a temporary name, then rename, so a kill mid-write never leaves half a file.
+
+    The run log is rewritten after every finished site; written in place, a kill during one of
+    those writes could empty it and lose every earlier site's Bing count. The temporary name is
+    hidden, so blob push skips it.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        with temporary.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 

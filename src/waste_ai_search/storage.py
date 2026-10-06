@@ -23,6 +23,7 @@ It is reported as VpnRequiredError instead, which says plainly that credentials 
 """
 from __future__ import annotations
 
+import io
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -190,17 +191,36 @@ def _in_stages(items: list[Any], relative: Any, work: Any) -> None:
 
 
 def push(source: Path, prefix: str, client: Any = None) -> int:
-    """Upload every file under `source` to `prefix/...`, overwriting. Returns the count."""
+    """Upload the files under `source` that are new or newer than their blob. Returns the count.
+
+    A blob newer than the local file - another machine changed it since - is never overwritten:
+    it is reported, and the next pull brings it down. Unchanged files are not sent again.
+    """
     client = client or container_client()
     files = [p for p in sorted(source.rglob("*")) if p.is_file() and not _skip(p, source)]
+    existing = {blob.name: blob for blob in client.list_blobs(name_starts_with=f"{prefix}/")}
+    name_of = lambda path: f"{prefix}/{path.relative_to(source).as_posix()}"  # noqa: E731
+    to_upload, newer_in_blob = [], []
+    for path in files:
+        blob = existing.get(name_of(path))
+        which = "local" if blob is None else newer_copy(blob, path, lambda name=name_of(path): _read(client, name))
+        if which in ("local", "unknown"):
+            to_upload.append(path)
+        elif which == "blob":
+            newer_in_blob.append(path)
 
     def upload(path: Path) -> None:
-        name = f"{prefix}/{path.relative_to(source).as_posix()}"
         with path.open("rb") as handle:
-            client.upload_blob(name, handle, overwrite=True)
+            result = client.upload_blob(name_of(path), handle, overwrite=True)
+        _align(path, (result or {}).get("last_modified") if isinstance(result, dict) else None)
 
-    _in_stages(files, lambda path: path.relative_to(source).as_posix(), upload)
-    return len(files)
+    _in_stages(to_upload, lambda path: path.relative_to(source).as_posix(), upload)
+    if newer_in_blob:
+        print(
+            f"Not pushed: {len(newer_in_blob)} file(s) are newer in blob (changed on another "
+            "machine); pull before pushing again."
+        )
+    return len(to_upload)
 
 
 def pull(prefix: str, target: Path, client: Any = None) -> int:
@@ -221,24 +241,57 @@ def pull(prefix: str, target: Path, client: Any = None) -> int:
             print(f"Skipped blob {name!r}: its name would write outside {target}.")
             continue
         if not path.exists():
-            wanted.append((name, path))
-        elif not pinned(name[len(prefix) + 1:]) and _blob_is_newer(blob, path):
-            wanted.append((name, path))
+            wanted.append((name, path, blob))
+        elif not pinned(name[len(prefix) + 1:]):
+            which = newer_copy(blob, path, lambda name=name: _read(client, name))
+            if which == "blob":
+                wanted.append((name, path, blob))
+            elif which == "same":
+                _align(path, getattr(blob, "last_modified", None))
 
-    def download(item: tuple[str, Path]) -> None:
-        name, path = item
+    def download(item: tuple[str, Path, Any]) -> None:
+        name, path, blob = item
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp")
         with temporary.open("wb") as handle:
             client.download_blob(name).readinto(handle)
         os.replace(temporary, path)
+        _align(path, getattr(blob, "last_modified", None))
 
     _in_stages(wanted, lambda item: item[0][len(prefix) + 1:], download)
     return len(wanted)
 
 
-def _blob_is_newer(blob: Any, path: Path) -> bool:
+def newer_copy(blob: Any, path: Path, read_blob: Any) -> str:
+    """Which copy of a file is newer: "blob", "local", "same", or "unknown" (no blob time).
+
+    Clearly apart - beyond CLOCK_TOLERANCE_SECONDS - the later timestamp wins. Within it, where
+    clock skew and timestamp rounding make the order unreliable, the contents decide: identical
+    copies are "same", and only a real difference lets the later timestamp win, even by a second.
+    Treating the whole window as "same" let a stale file overwrite a blob updated seconds later.
+    """
     modified = getattr(blob, "last_modified", None)
     if modified is None:
-        return False
-    return modified.timestamp() > path.stat().st_mtime + CLOCK_TOLERANCE_SECONDS
+        return "unknown"
+    blob_time, local_time = modified.timestamp(), path.stat().st_mtime
+    if blob_time > local_time + CLOCK_TOLERANCE_SECONDS:
+        return "blob"
+    if local_time > blob_time + CLOCK_TOLERANCE_SECONDS:
+        return "local"
+    if read_blob() == path.read_bytes():
+        return "same"
+    return "blob" if blob_time > local_time else "local"
+
+
+def _read(client: Any, name: str) -> bytes:
+    buffer = io.BytesIO()
+    client.download_blob(name).readinto(buffer)
+    return buffer.getvalue()
+
+
+def _align(path: Path, modified: Any) -> None:
+    """Stamp a just-synced file with its blob's time, so the next sync sees the two as equal
+    instead of re-sending every file this machine pushed or pulled."""
+    if modified is not None:
+        stamp = modified.timestamp()
+        os.utime(path, (stamp, stamp))

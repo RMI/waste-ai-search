@@ -150,6 +150,9 @@ def test_the_manifest_is_uploaded_after_the_data_and_the_seed_last(tmp_path):
     class _Client:
         uploaded = []
 
+        def list_blobs(self, name_starts_with=""):  # noqa: ARG002
+            return []
+
         def upload_blob(self, name, handle, overwrite):  # noqa: ARG002
             self.uploaded.append(name)
 
