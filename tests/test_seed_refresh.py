@@ -2,6 +2,7 @@
 from waste_ai_search.credibility import ai_filled_tiers
 from waste_ai_search.arbitration import resolve
 from waste_ai_search.prompt_builder import has_gas_collection, requested_attributes
+from waste_ai_search.schema import GCCS_ATTRIBUTES, UNSEARCHED_ATTRIBUTES
 from waste_ai_search.seed_refresh import REFRESH_COLUMNS, refresh_sites, refreshed_headers
 
 
@@ -37,14 +38,14 @@ def test_gccs_is_not_requested_until_gas_collection_is_known():
 
 def test_discovered_gas_collection_unlocks_gccs_on_the_next_pass():
     pass1 = site()
-    assert not [a for a in requested_attributes(pass1) if a.startswith("gccs")]
+    assert not set(requested_attributes(pass1)) & GCCS_ATTRIBUTES
 
     refreshed, stats = refresh_sites([pass1], [resolved("has_landfill_gas_collection", "TRUE")], "run1")
 
     assert stats["gas_collection_discovered"] == 1
     pass2 = refreshed[0]
     assert has_gas_collection(pass2)
-    assert len([a for a in requested_attributes(pass2) if a.startswith("gccs")]) == 7
+    assert set(requested_attributes(pass2)) & GCCS_ATTRIBUTES == GCCS_ATTRIBUTES - UNSEARCHED_ATTRIBUTES
 
 
 def test_answered_attributes_are_not_asked_again():
@@ -130,3 +131,24 @@ def test_repeated_refreshes_accumulate_run_ids_without_duplicating_fields():
     tiers = ai_filled_tiers(second[0]["ai_filled_fields"])
     assert tiers == {"facility_status": 3, "facility_type": 1}
     assert second[0]["ai_filled_run_ids"] == "run1; run2"
+
+
+def test_values_with_no_database_column_survive_the_refreshed_seed(tmp_path):
+    """A database seed has no column for these, so writing dropped them and pass 2 asked again."""
+    from waste_ai_search.input_loader import load_sites
+    from waste_ai_search.seed_refresh import write_refreshed_seed
+
+    found = {
+        "bulk_waste_type": "inert waste",
+        "operator": "Waste Authority",
+        "has_landfill_gas_collection": "TRUE",
+        "has_flare": "TRUE",
+        "flare_efficiency": "0.98",
+    }
+    refreshed, _stats = refresh_sites([site()], [resolved(a, v) for a, v in found.items()], "run1")
+    database_headers = list(site())  # no column for operator, bulk_waste_type or the flare pair
+    path = write_refreshed_seed(tmp_path / "refreshed_seed.csv", refreshed, database_headers)
+
+    reloaded, _headers = load_sites(path)
+    assert {a: reloaded[0][a] for a in found} == found
+    assert not set(found) & set(requested_attributes(reloaded[0]))

@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .credibility import SOURCE_TYPES, TIER_DEFINITIONS, trusted_baseline_name
+from .credibility import (
+    SOURCE_TYPES,
+    TIER_DEFINITIONS,
+    trusted_baseline_coordinates,
+    trusted_baseline_name,
+)
 from .schema import (
     CONTRADICTION_CHECK_SOURCES,
     CORROBORATING_ATTRIBUTES,
@@ -17,6 +22,7 @@ from .schema import (
     parse_tristate_bool,
     GAP_FILL_ATTRIBUTES,
     IDENTITY_ATTRIBUTES,
+    UNSEARCHED_ATTRIBUTES,
     is_blank,
 )
 
@@ -36,6 +42,7 @@ ATTRIBUTE_UNITS = {
     "gccs_ch4_collected_metric_tonnes": "metric tonnes CH4",
     "gccs_ch4_flow_to_project_metric_tonnes": "metric tonnes CH4",
     "gccs_collection_efficiency": "fraction between 0 and 1",
+    "flare_efficiency": "fraction between 0 and 1",
 }
 
 # Definitions for each facility_type (WP-531). Labelled with the enum values exactly, since the
@@ -132,6 +139,26 @@ ATTRIBUTE_GUIDANCE = {
     "gccs_collection_efficiency": (
         "Fraction of generated landfill gas that is collected, as a value between 0 and 1. "
         "If the source gives a percentage, report the number and set unit to '%'."
+    ),
+    "has_flare": "Whether the facility has a flare that burns collected landfill gas. Yes, No, or Unknown.",
+    "flare_efficiency": (
+        "Destruction efficiency of the flare: the fraction of the methane sent to it that is "
+        "destroyed, as a value between 0 and 1. If the source gives a percentage, report the "
+        "number and set unit to '%'."
+    ),
+    "bulk_waste_type": (
+        "The type of waste that makes up MOST of what the facility receives. Allowed values only. "
+        "municipal solid waste - waste from households, and similar waste from shops, offices, "
+        "markets and institutions, collected by or for a municipality. It contains food, garden, "
+        "paper and other material that decomposes. A site that mainly takes this but also some "
+        "rubble or soil is still municipal solid waste. "
+        "inert waste - waste that does not decompose or react: construction and demolition "
+        "rubble, concrete, bricks, soil, stones and excavation material. A site permitted for "
+        "inert waste only belongs here. "
+        "others - mainly another kind of waste, such as industrial, hazardous or mining waste, or "
+        "sewage sludge. "
+        "If no source says what waste the facility receives, or no one type makes up most of it, "
+        "do not return bulk_waste_type."
     ),
     "found_facility_name": "The source's exact official or canonical name for this facility.",
     "found_latitude": "Source-reported latitude only. Never infer from an address or nearby place.",
@@ -244,16 +271,17 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
         # everything else for these facilities is government-sourced and left alone.
         return list(COORDINATE_ATTRIBUTES) if location_is_inexact(site) else []
 
-    # Identity is always requested, except a name a Tier 1-2 source already supplied (WP-531).
-    # Coordinates are still asked of every facility.
-    requested = [
-        name
-        for name in IDENTITY_ATTRIBUTES
-        if not (name == "found_facility_name" and trusted_baseline_name(site))
-    ]
+    # Identity is always requested, except what a Tier 1-2 source already supplied: the name
+    # (WP-531) and the coordinates (F29). Coordinates flagged inexact are still searched.
+    known: set[str] = set()
+    if trusted_baseline_name(site):
+        known.add("found_facility_name")
+    if trusted_baseline_coordinates(site) and not location_is_inexact(site):
+        known.update(COORDINATE_ATTRIBUTES)
+    requested = [name for name in IDENTITY_ATTRIBUTES if name not in known]
     gas_present = has_gas_collection(site)
     for field in GAP_FILL_ATTRIBUTES:
-        if not is_blank(site.get(field)):
+        if field in UNSEARCHED_ATTRIBUTES or not is_blank(site.get(field)):
             continue
         if field in GCCS_ATTRIBUTES and not gas_present:
             continue
@@ -377,22 +405,51 @@ Names:
 """
 
     asks_name = "found_facility_name" in attributes
+    asks_coordinates = "found_latitude" in attributes
+    # Not asked is not the same as trusted: the gas-capture follow-up asks for GCCS alone, so only
+    # a Tier 1-2 provenance lets the prompt call the seed's identity confirmed.
+    name_confirmed = not asks_name and trusted_baseline_name(site)
+    coordinates_confirmed = not asks_coordinates and trusted_baseline_coordinates(site)
     if not asks_name:
-        # The name came from a Tier 1-2 source and is not being searched. Asking the agent to
-        # return one anyway would contradict "only the attributes listed below are wanted".
+        # Asking the agent to return a name anyway would contradict "only the attributes listed
+        # below are wanted".
         names_guidance = names_guidance.replace(
             "- Return found_facility_name exactly as your source spells it, in whatever script or\n"
             "  language that source uses. Do not translate it back.\n",
             "- site_name is already confirmed by an authoritative source. Use it to search; do not\n"
-            "  return a facility name.\n",
+            "  return a facility name.\n"
+            if name_confirmed
+            else "- Use site_name to search; do not return a facility name.\n",
         )
-    identity_rule = (
-        "- found_facility_name, found_latitude and found_longitude establish that you found the\n"
-        "  RIGHT facility. Always return them when a source supports them."
-        if asks_name
-        else "- found_latitude and found_longitude establish that you found the RIGHT facility.\n"
-        "  Always return them when a source supports them. The name is already confirmed."
-    )
+    if asks_name and asks_coordinates:
+        identity_rule = (
+            "- found_facility_name, found_latitude and found_longitude establish that you found the\n"
+            "  RIGHT facility. Always return them when a source supports them."
+        )
+    elif asks_coordinates:
+        identity_rule = (
+            "- found_latitude and found_longitude establish that you found the RIGHT facility.\n"
+            "  Always return them when a source supports them. "
+            + ("The name is already confirmed." if name_confirmed else "Do not return a name.")
+        )
+    elif asks_name:
+        identity_rule = (
+            "- found_facility_name establishes that you found the RIGHT facility. Always return it\n"
+            "  when a source supports it. "
+            + ("The coordinates are already confirmed: use them" if coordinates_confirmed else "Use the coordinates")
+            + " to check\n  that each source describes this facility, and do not return coordinates."
+        )
+    elif name_confirmed and coordinates_confirmed:
+        identity_rule = (
+            "- The name and coordinates are already confirmed by an authoritative source. Use them\n"
+            "  to check that each source describes THIS facility, and do not return a name or\n"
+            "  coordinates."
+        )
+    else:
+        identity_rule = (
+            "- The name and coordinates are not asked for here. Use them to check that each source\n"
+            "  describes THIS facility, and do not return a name or coordinates."
+        )
 
     closure_focus = ""
     if "closing_year" in attributes and looks_inactive(site):
@@ -442,6 +499,7 @@ Names:
         "cover_type": DEFINITION_VALUES["cover_type"],
         "gccs_energy_project_type": DEFINITION_VALUES["gccs_energy_project_type"],
         "gccs_current_project_status": DEFINITION_VALUES["gccs_current_project_status"],
+        "bulk_waste_type": DEFINITION_VALUES["bulk_waste_type"],
         "boolean_unknown": DEFINITION_VALUES["boolean_unknown"],
         "value_basis": DEFINITION_VALUES["value_basis"],
         "confidence_score": DEFINITION_VALUES["confidence_score"],

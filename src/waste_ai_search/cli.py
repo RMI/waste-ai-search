@@ -15,6 +15,7 @@ from .run_context import (
     default_run_id,
 )
 from .input_loader import refreshed_seed_path
+from .schema import LAST_BATCH
 from .search import run_search
 
 
@@ -64,6 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also search countries excluded by default (currently USA).",
     )
     search.add_argument("--site-ids", nargs="*", default=[], help="Search only these site_ids.")
+    search.add_argument(
+        "--batch",
+        type=int,
+        choices=range(1, LAST_BATCH + 1),
+        help="Search one country batch of the full run (see COUNTRY_BATCHES), most-needed first.",
+    )
     search.add_argument("--force", action="store_true", help="Re-query sites that already have a cached response.")
     search.add_argument("--site-delay-seconds", type=float, default=3.0)
     search.add_argument("--hard-site-timeout-seconds", type=int, default=240)
@@ -129,6 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--pilot-size", type=int, default=0, help="Sample N sites spread across countries.")
     full.add_argument("--iso3", nargs="*", default=[], help="Restrict to these country codes.")
     full.add_argument("--site-ids", nargs="*", default=[], help="Search only these site_ids.")
+    full.add_argument("--batch", type=int, choices=range(1, LAST_BATCH + 1), help="One country batch.")
     full.add_argument("--include-excluded-countries", action="store_true")
     full.add_argument("--force", action="store_true")
     full.add_argument("--site-delay-seconds", type=float, default=3.0)
@@ -229,6 +237,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         pilot_size=getattr(args, "pilot_size", 0),
         include_excluded_countries=getattr(args, "include_excluded_countries", False),
         iso3=list(getattr(args, "iso3", []) or []),
+        batch=getattr(args, "batch", None) or 0,
         site_ids=list(getattr(args, "site_ids", []) or []),
         force=getattr(args, "force", False),
         site_delay_seconds=getattr(args, "site_delay_seconds", 3.0),
@@ -347,6 +356,7 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
         input_csv=seed_path,
         site_ids=unlocked,
         iso3=[],
+        batch=0,
         limit=0,
         pilot_size=0,
     )

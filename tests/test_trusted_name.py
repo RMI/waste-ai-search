@@ -1,8 +1,7 @@
 """WP-531 item 5: don't re-search a facility_name a Tier 1-2 source already supplied.
 
 This reverses Q30 - "identity is always requested" - for those facilities only. Their identity
-confirmation rests on coordinates, which are still asked of every facility; the Q34 identity gate
-uses only coordinates, so it is unaffected.
+confirmation rests on coordinates, unless those are trusted too (F29, test_trusted_coordinates).
 
 The rule needs POSITIVE per-attribute provenance. With none, the name is still searched: the
 facility-wide composite takes the best tier of everything a facility draws on, and would credit an

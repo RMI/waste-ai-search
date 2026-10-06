@@ -126,8 +126,11 @@ def _existing_labels(value: Any) -> dict[str, str]:
 
 
 def refreshed_headers(original_headers: list[str]) -> list[str]:
+    # Gap-fill attributes with no database column (operator, bulk_waste_type, has_flare,
+    # flare_efficiency) are absent from a database seed's headers. Without them a merged value is
+    # dropped on write while its ai_filled_fields stamp survives, and the next pass asks again.
     headers = list(original_headers)
-    for column in REFRESH_COLUMNS:
+    for column in [*GAP_FILL_ATTRIBUTES, *REFRESH_COLUMNS]:
         if column not in headers:
             headers.append(column)
     return headers

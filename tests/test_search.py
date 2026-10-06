@@ -5,6 +5,7 @@ from pathlib import Path
 from waste_ai_search.arbitrate import extract_evidence
 from waste_ai_search.input_loader import load_sites
 from waste_ai_search.prompt_builder import requested_attributes
+from waste_ai_search.schema import GCCS_ATTRIBUTES, UNSEARCHED_ATTRIBUTES
 
 
 REGULATOR = {
@@ -240,7 +241,7 @@ def test_gccs_attributes_are_skipped_where_there_is_no_gas_collection():
 
     absent = requested_attributes({"site_id": "1", "has_landfill_gas_collection": "FALSE"})
     assert "has_landfill_gas_collection" not in absent  # already known
-    assert not [a for a in absent if a.startswith("gccs")]
+    assert not set(absent) & GCCS_ATTRIBUTES  # flare attributes included
     # The rest of the gap-fill set is unaffected.
     assert "waste_in_place_metric_tonnes" in absent
     assert "waste_depth" in absent
@@ -249,7 +250,8 @@ def test_gccs_attributes_are_skipped_where_there_is_no_gas_collection():
 def test_gccs_attributes_are_requested_where_gas_collection_exists():
 
     present = requested_attributes({"site_id": "1", "has_landfill_gas_collection": "TRUE"})
-    assert len([a for a in present if a.startswith("gccs")]) == 7
+    assert set(present) & GCCS_ATTRIBUTES == GCCS_ATTRIBUTES - UNSEARCHED_ATTRIBUTES
+    assert {"has_flare", "flare_efficiency"} <= set(present)
 
 
 def test_unknown_gas_collection_defers_gccs_rather_than_asking():

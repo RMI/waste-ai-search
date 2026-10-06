@@ -266,34 +266,51 @@ def attribute_sources(attribute_sources_text: Any) -> dict[str, str]:
     return out
 
 
-# A baseline facility_name this credible is not re-searched (WP-531). It reverses Q30 - which made
-# the name an identity attribute requested for every facility - for these facilities only, so
-# their identity confirmation rests on coordinates. The Q34 identity gate already uses only
-# coordinates, so it is unaffected. The gain: many such names come from translated sources, and
-# comparing the agent's local-language name with the English seed name produced conflicts that
-# were translation noise rather than real disagreement.
-TRUSTED_NAME_MAX_TIER = TIER_2
+# A baseline name or coordinates this credible are not re-searched. It reverses Q30 - which made
+# identity requested for every facility - for these facilities only. The name came first
+# (WP-531): many such names come from translated sources, and comparing the agent's local-language
+# name with the English seed name produced conflicts that were translation noise rather than real
+# disagreement. Coordinates followed (F29) to cut cost. Without found coordinates the Q34 identity
+# gate cannot run for that site, so a search that researched the wrong facility goes unflagged -
+# an accepted risk.
+TRUSTED_BASELINE_MAX_TIER = TIER_2
 
 
-def trusted_baseline_name(site: dict[str, Any]) -> bool:
-    """Whether the seed's facility_name is known to come from a Tier 1-2 source.
+def trusted_baseline(site: dict[str, Any], attribute_name: str) -> bool:
+    """Whether the seed's value for one identity attribute is known to come from a Tier 1-2 source.
 
-    Needs positive, per-attribute provenance: a name a previous pass supplied is tiered by the
+    Needs positive, per-attribute provenance: a value a previous pass supplied is tiered by the
     source that supplied it, otherwise by the ledger's per-attribute dataset. With neither, the
-    answer is False and the name is still searched - the facility-wide composite takes the best
-    tier of everything a facility draws on, and would credit an OSM name with a regulator's tier.
+    answer is False and the attribute is still searched - the facility-wide composite takes the
+    best tier of everything a facility draws on, and would credit an OSM name with a regulator's
+    tier.
     """
-    if normalize_scalar(site.get("site_name")) == "":
-        return False
-    name = "found_facility_name"
-    ai_tier = ai_filled_tiers(site.get("ai_filled_fields")).get(name)
+    ai_tier = ai_filled_tiers(site.get("ai_filled_fields")).get(attribute_name)
     if ai_tier is not None:
-        return ai_tier <= TRUSTED_NAME_MAX_TIER
-    source = attribute_sources(site.get("attribute_sources")).get(name)
+        return ai_tier <= TRUSTED_BASELINE_MAX_TIER
+    source = attribute_sources(site.get("attribute_sources")).get(attribute_name)
     if not source:
         return False
     tier, _note = attribute_baseline_tier(source)
-    return tier <= TRUSTED_NAME_MAX_TIER
+    return tier <= TRUSTED_BASELINE_MAX_TIER
+
+
+def trusted_baseline_name(site: dict[str, Any]) -> bool:
+    """Whether the seed's facility_name is known to come from a Tier 1-2 source (WP-531)."""
+    if normalize_scalar(site.get("site_name")) == "":
+        return False
+    return trusted_baseline(site, "found_facility_name")
+
+
+def trusted_baseline_coordinates(site: dict[str, Any]) -> bool:
+    """Whether both seed coordinates are present and each from a Tier 1-2 source (F29).
+
+    They are judged as a pair: searching one axis alone would still pay for the search.
+    """
+    return all(
+        normalize_scalar(site.get(column)) != "" and trusted_baseline(site, attribute)
+        for attribute, column in (("found_latitude", "latitude"), ("found_longitude", "longitude"))
+    )
 
 
 def attribute_baseline_tier(source_token: Any) -> tuple[int, str]:

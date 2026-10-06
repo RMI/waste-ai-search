@@ -36,6 +36,7 @@ from .schema import (
     DEFAULT_EXCLUDED_ISO3,
     DEFAULT_EXCLUSION_REASONS,
     FOUNDRY_RUN_LOG_HEADERS,
+    in_batch,
     normalize_scalar,
 )
 
@@ -60,6 +61,10 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
         wanted_iso = {value.strip().upper() for value in config.iso3}
         selected = [site for site in selected if normalize_scalar(site.get("country_iso3")).upper() in wanted_iso]
         explicit = explicit or bool(wanted_iso & DEFAULT_EXCLUDED_ISO3)
+    if config.batch:
+        selected = [site for site in selected if in_batch(normalize_scalar(site.get("country_iso3")), config.batch)]
+        countries = sorted({normalize_scalar(site.get("country_iso3")).upper() for site in selected})
+        print(f"Batch {config.batch}: {len(selected):,} site(s) in {len(countries)} country(ies).")
 
     if not explicit and not config.include_excluded_countries:
         dropped = Counter(
