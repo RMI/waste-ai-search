@@ -528,11 +528,14 @@ SOURCES_HEADERS = [
 REVIEW_QUEUE_HEADERS = [
     # translation_note sits beside the names it is about: the SME compares the two spellings and
     # records a translation problem there, separately from researcher_notes.
-    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "attribute_name", "resolution",
+    # baseline_coordinates is "lat, lon" as Google Maps accepts it pasted into its search box.
+    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "baseline_coordinates",
+    "attribute_name", "resolution",
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
     "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
     "agreeing_source_count",
-    "evidence_summary", "validation_status", "reviewer", "reviewed_date", "researcher_notes",
+    "evidence_summary", "validation_status", "rejection_reason", "reviewer", "reviewed_date",
+    "researcher_notes",
 ]
 
 SUPPLEMENTARY_LEADS_HEADERS = [
@@ -548,16 +551,6 @@ FOUNDRY_RUN_LOG_HEADERS = [
 ]
 
 PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
-
-# A read-only lens on the Review_Queue rows where facility_type came back "Not a Waste Facility". The decision is
-# still recorded on the Review_Queue row; this view exists so the verdicts can be read together,
-# beside what the same run found about closure.
-CONTRADICTION_HEADERS = [
-    "site_id", *SITE_NAME_COLUMNS, "country_iso3", "facility_type", "winning_source_tier",
-    "winning_source_url", "evidence_summary", "quoted_evidence_short", "closure_also_reported",
-    "validation_status",
-]
-
 
 # --- standardized facility table (Q19) --------------------------------------------------------
 AI_SEARCH_DATA_SOURCE = "ai_search_2026"
@@ -613,12 +606,16 @@ DEFINITION_VALUES = {
     "validation_status": ["Needs review", "Validated", "Rejected", "Auto-validated", "Routed to leads"],
     # What a reviewer may choose. The other statuses are set by the pipeline, not by hand.
     "review_decision": ["Validated", "Rejected"],
+    # Why a reviewer rejected a value. A fixed list, so rejections can be counted by cause to find
+    # where the AI goes wrong and where auto-validation is safe; detail goes in researcher_notes.
+    "rejection_reason": ["Wrong facility", "Not in source", "Wrong value", "Outdated", "Other"],
 }
 
 # Columns a reviewer may edit, and the vocabulary each offers. Anything absent here is
 # read-only in the workbook, so a dropdown never invites editing a pipeline-set field.
 FIELD_TO_DEFINITION = {
     "validation_status": "review_decision",
+    "rejection_reason": "rejection_reason",
 }
 
 FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS = [

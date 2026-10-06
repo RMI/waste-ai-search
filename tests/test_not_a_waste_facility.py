@@ -21,7 +21,7 @@ from datetime import date
 
 from openpyxl import load_workbook
 
-from waste_ai_search.arbitrate import contradiction_rows, extract_evidence
+from waste_ai_search.arbitrate import closure_reported, extract_evidence, review_summary
 from waste_ai_search.arbitration import needs_review, resolve
 from waste_ai_search.prompt_builder import (
     build_site_prompt,
@@ -29,7 +29,6 @@ from waste_ai_search.prompt_builder import (
     requested_attributes,
 )
 from waste_ai_search.schema import (
-    CONTRADICTION_HEADERS,
     FACILITY_TYPE_OFFERED,
     NOT_A_WASTE_FACILITY,
     PENDING_UPSTREAM_FACILITY_TYPES,
@@ -183,7 +182,7 @@ def test_a_capped_landfill_keeps_its_type_and_reports_closure():
     assert row_for(resolved, "facility_type")["resolved_value"] == "Sanitary Landfill"
     assert row_for(resolved, "facility_status")["resolved_value"] == "Inactive"
     assert row_for(resolved, "closing_year")["resolved_value"] == "2009"
-    assert contradiction_rows(resolved, evidence) == []
+    assert "CHECK:" not in review_summary(row_for(resolved, "facility_type"), closure_reported(resolved))
 
 
 def test_a_capped_landfill_wrongly_called_not_waste_is_caught_by_the_closure_cross_check():
@@ -194,11 +193,11 @@ def test_a_capped_landfill_wrongly_called_not_waste_is_caught_by_the_closure_cro
         attribute("facility_status", "Inactive", [NEWS]),
         attribute("closing_year", "2009", [NEWS]),
     )
-    [view] = contradiction_rows(resolved, evidence)
+    summary = review_summary(row_for(resolved, "facility_type"), closure_reported(resolved))
 
-    assert view["closure_also_reported"].startswith("CHECK:")
-    assert "facility_status = Inactive" in view["closure_also_reported"]
-    assert "closing_year = 2009" in view["closure_also_reported"]
+    assert "CHECK: this run also found" in summary
+    assert "facility_status = Inactive" in summary
+    assert "closing_year = 2009" in summary
 
 
 def test_the_guidance_tells_the_agent_closure_is_not_a_contradiction():
@@ -215,7 +214,7 @@ def test_no_contradicting_evidence_leaves_facility_type_empty():
 
     assert row["resolved_value"] == ""
     assert row["resolution"] == "Not found"
-    assert contradiction_rows(resolved, evidence) == []
+    assert all(r["resolved_value"] != NOT_A_WASTE_FACILITY for r in resolved)
 
 
 def test_a_site_the_agent_could_not_find_gets_no_verdict():
@@ -257,35 +256,22 @@ def test_the_value_is_declared_as_waiting_on_the_database():
     assert NOT_A_WASTE_FACILITY not in FACILITY_TYPE_VALUES
 
 
-def test_the_contradictions_view_carries_source_tier_and_quote():
-    resolved, evidence = arbitrate(unconfirmed_site(), quarry())
-    [view] = contradiction_rows(resolved, evidence)
+def test_the_verdict_is_reviewed_on_its_own_facility_type_row():
+    """No separate tab: the facility_type row carries the verdict, its source and tier."""
+    resolved, _ = arbitrate(unconfirmed_site(), quarry())
+    row = row_for(resolved, "facility_type")
 
-    assert set(CONTRADICTION_HEADERS) <= set(view)
-    assert view["facility_type"] == NOT_A_WASTE_FACILITY
-    assert view["winning_source_tier"] == "Tier 1"
-    assert view["evidence_summary"] == "Active granite quarry."
-    assert "Granite quarry" in view["quoted_evidence_short"]
-    assert view["closure_also_reported"] == ""
-    assert view["validation_status"] == "Needs review"
+    assert row["resolved_value"] == NOT_A_WASTE_FACILITY
+    assert row["winning_source_tier"] == "Tier 1"
+    assert row["validation_status"] == "Needs review"
+    assert "CHECK:" not in review_summary(row, closure_reported(resolved))
 
 
-def test_the_workbook_has_a_contradictions_tab(tmp_path):
+def test_the_workbook_has_no_contradictions_tab(tmp_path):
     from waste_ai_search.workbook_io import write_review_workbook
 
-    resolved, evidence = arbitrate(unconfirmed_site(), quarry())
-    path = write_review_workbook(
-        tmp_path / "r.xlsx",
-        run_config=[],
-        review_queue=[],
-        leads=[],
-        parse_warnings=[],
-        contradictions=contradiction_rows(resolved, evidence),
-    )
-    ws = load_workbook(path)["Contradictions"]
-    header = [c.value for c in ws[1]]
-    assert header == CONTRADICTION_HEADERS
-    assert ws.cell(2, header.index("facility_type") + 1).value == NOT_A_WASTE_FACILITY
+    path = write_review_workbook(tmp_path / "r.xlsx", run_config=[], review_queue=[], leads=[], parse_warnings=[])
+    assert "Contradictions" not in load_workbook(path).sheetnames
 
 
 # --- criterion 5: scope ---------------------------------------------------------------------------
