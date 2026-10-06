@@ -97,6 +97,11 @@ def refresh_sites(
                     stats["gas_collection_discovered"] += 1
 
             new_site[column] = value
+            if column == "site_name" and "facility_name" in new_site:
+                # On reload a site's name is read from facility_name first, so updating site_name
+                # alone lost the merged name while its Tier stamp survived - the old name, maybe
+                # an OSM one, then counted as trusted and was never searched again.
+                new_site["facility_name"] = value
             if attribute not in existing:
                 stamps.append(f"{attribute}@{tier_label_text}")
             merged_here += 1

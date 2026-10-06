@@ -74,6 +74,7 @@ def write_csv_records(path: Path, rows: list[dict[str, Any]], headers: list[str]
 
 
 REFRESHED_SEED_NAME = "refreshed_seed.csv"
+SEED_NAME = "seed.csv"
 
 
 def refreshed_seed_path(config: Any) -> Path:
@@ -83,10 +84,10 @@ def refreshed_seed_path(config: Any) -> Path:
 
 def run_seed_path(config: Any) -> Path:
     """Where a database-seeded run keeps the corpus it read."""
-    return config.run_dir / "seed.csv"
+    return config.run_dir / SEED_NAME
 
 
-def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
+def resolve_sites(config: Any, allow_database: bool = True) -> tuple[list[dict[str, Any]], list[str]]:
     """The run's seed: an explicit CSV, else this run's own snapshot, else the live database.
 
     The database is the source of truth, so a new run reads it directly rather than depending on
@@ -147,6 +148,16 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
                 "use a new --run-id."
             )
         return load_sites(snapshot)
+
+    if not allow_database:
+        # Only the search seeds a run. Anything after it - arbitrate, refresh-seed - must read the
+        # corpus the search used: seeding afresh would read today's database, which may have moved
+        # on, and would break arbitrate's promise to stay offline.
+        raise ValueError(
+            f"Run {config.run_id!r} has no pinned seed ({snapshot}), so there is nothing to read "
+            "without the database. Check the --run-id, or pass --input-csv with the corpus the "
+            "search used."
+        )
 
     from .seed_source import load_seed_sites, seed_headers
 

@@ -88,7 +88,10 @@ querying again — both arbitrations, the refresh between passes, a resumed sear
 `arbitrate`. So every phase sees the corpus the search ran against, `arbitrate` never needs the database (it makes no agent calls; with blob storage configured it pulls from blob, so pass `--local` to stay fully offline), and
 `seed_source` in the workbook's Run_Config records where the run is pinned.
 
-A run id is therefore pinned to its corpus. To seed afresh, use a new `--run-id`.
+A run id is therefore pinned to its corpus. To seed afresh, use a new `--run-id`. Only the
+search seeds a run: `arbitrate` and `refresh-seed` on a run with no `seed.csv` (a mistyped
+`--run-id`, or a run from before seeds were pinned) stop and say so rather than read today's
+database, which may no longer match what was searched.
 
 A run seeded with `--input-csv` is pinned the same way: the supplied file is copied, byte for byte, into the run's `seed.csv` on first use, and every later phase reads that copy — so the run can still be re-arbitrated after the file is moved or deleted. Passing a *different* file to an existing run id stops with an error rather than searching one corpus while the snapshot records another; use a new `--run-id`. The one exception is the pass-2 follow-up's `refreshed_seed.csv`, which is read as given once the original snapshot exists and never replaces it. Any other CSV is pinned and checked against the snapshot, even one stored inside the run directory.
 
@@ -112,9 +115,11 @@ run:
 `site_id` to its raw records now, and onto the new `internal_facility_id` later. That is also how a
 later run can search only what changed. Tables are read whole (every country, not just those
 searched) in one read-only transaction, so they describe one consolidation state; the run stops
-if consolidation is rebuilt while it is seeding. `manifest.json` is written and uploaded last, so a
-resumed run whose copy lacks it, or a file it lists, stops rather than carry on without its
-consolidation state. A run seeded with `--input-csv` reads no database, so it takes no snapshot.
+if consolidation is rebuilt while it is seeding. Blob transfers go in stages - data, then
+`manifest.json`, then `seed.csv` last - so a resumed run whose copy lacks the manifest, or a file it
+lists, stops rather than carry on without its consolidation state, and a seed with no snapshot
+folder at all can only be a run that never had one. A run seeded with `--input-csv` reads no
+database, so it takes no snapshot.
 
 A run therefore needs database access. Without the VPN, seed a file first with
 `scripts/seed_metadata_search.py` and pass it with `--input-csv`.
@@ -156,7 +161,10 @@ Each run folder is mirrored to blob storage at `outputs/runs/<run_id>/` (adapted
 refining-ai-search RDP-52):
 
 - **Before searching**, any earlier attempt at the same `--run-id` is pulled down, so responses
-  already in storage are reused instead of paid for again. Local files are never overwritten.
+  already in storage are reused instead of paid for again. A local file is replaced only by a
+  newer blob copy - another machine's later work, such as fresh link verdicts - and the run's
+  `seed.csv` and `consolidation_snapshot/` never are, since they pin the run's corpus.
+- **A search that fails or is interrupted still pushes** what it finished.
 - **Raw responses go up as soon as a search pass finishes**, so paid-for results are safe even if
   arbitration fails; the whole folder goes up again after arbitration.
 - `arbitrate` pulls first, so a run searched on another machine can be arbitrated here.
@@ -213,11 +221,17 @@ uv run waste-ai-search search --run-id pilot10 --pilot-size 10
 # With blob storage configured this pulls from blob first (VPN); add --local to stay fully offline.
 uv run waste-ai-search arbitrate --run-id pilot10
 
-# Phase 3 - what `run` does for you: fold promoted values back into the seed and search again.
+# Phase 3 - `run` does this for you. By hand: fold promoted values back into the seed, then
+# search ONLY the sites where gas collection was discovered - refresh-seed prints the command.
 uv run waste-ai-search refresh-seed --run-id pilot10
 uv run waste-ai-search search --run-id pilot10_pass2 \
-  --input-csv outputs/runs/pilot10/refreshed_seed.csv
+  --input-csv outputs/runs/pilot10/refreshed_seed.csv --site-ids <ids printed above>
 ```
+
+**Never search `refreshed_seed.csv` without `--site-ids`.** It holds the whole seeded corpus
+(19,492 facilities), not just the sites the run searched, so it would search all ~12,000
+searchable sites again (about $3,300). By hand, the narrowed search also re-asks those sites every
+attribute still missing; `run` asks only their gas-capture attributes.
 
 Re-running `search` skips sites that already have a cached response unless `--force` is passed, so
 an interrupted long run resumes where it stopped. Because `arbitrate` reads the cache rather than
@@ -399,7 +413,7 @@ before the change still re-arbitrates them into their standardized columns.
 
 | Attribute | Type | Purpose |
 |---|---|---|
-| `distance_to_original_coordinates_km` | numeric, `km` | Haversine between seed and found coordinates. No source, so no tier. Drives the identity gate; review-only, not a standardized column. |
+| `distance_to_original_coordinates_km` | numeric, `km` | Haversine between seed and found coordinates (or, when only one was found, that axis's offset). No source, so no tier. Drives the identity gate and is not written to any output; a site beyond 5 km carries the distance in its rows' `researcher_notes`. |
 
 #### Units are converted, not demanded
 
@@ -587,7 +601,9 @@ Edit only these four columns; everything else is read-only:
 
 Bing grounding bills per query, so the run log records the queries each site made in
 `web_searches` (every retried attempt, resumed run and follow-up pass included, since each is
-billed), and the search prints the run's total. One live site with 12 attributes made **39 queries**.
+billed), and the search prints the run's total. Each site's row is written as it finishes, so an
+interrupted run keeps its counts. One exception: a call abandoned at the time limit is billed for
+any queries it made, but returns no response to count them from. One live site with 12 attributes made **39 queries**.
 Retries are capped at 2 for both
 Foundry errors (`AZURE_FOUNDRY_MAX_RETRIES`) and reported search-tool failures
 (`--search-tool-retries`), so a site runs the agent at most 4 times, down from 9. A local `.env` that

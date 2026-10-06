@@ -63,8 +63,6 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
         explicit = explicit or bool(wanted_iso & DEFAULT_EXCLUDED_ISO3)
     if config.batch:
         selected = [site for site in selected if in_batch(normalize_scalar(site.get("country_iso3")), config.batch)]
-        countries = sorted({normalize_scalar(site.get("country_iso3")).upper() for site in selected})
-        print(f"Batch {config.batch}: {len(selected):,} site(s) in {len(countries)} country(ies).")
 
     if not explicit and not config.include_excluded_countries:
         dropped = Counter(
@@ -89,6 +87,11 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
     nothing_to_ask = before - len(selected)
     if nothing_to_ask:
         print(f"Skipped {nothing_to_ask:,} site(s) with no attributes left to search.")
+    if config.batch:
+        # Counted after the default exclusions, so batch 6 reports what it will search rather
+        # than the ~9,600 USA and Brazil sites it is about to drop.
+        countries = sorted({normalize_scalar(site.get("country_iso3")).upper() for site in selected})
+        print(f"Batch {config.batch}: {len(selected):,} site(s) in {len(countries)} country(ies).")
 
     if config.pilot_size > 0:
         return select_mixed_pilot(selected, size=config.pilot_size)
@@ -188,19 +191,34 @@ def run_search(
     log_path = config.run_dir / "foundry_run_log.csv"
     executor = ThreadPoolExecutor(max_workers=workers)
     futures = []
+    run_log: list[dict[str, Any]] = []
+
+    def log(rows: list[dict[str, Any]]) -> None:
+        # Each row is merged exactly once: merge_run_log adds Bing counts to the file's.
+        if rows:
+            write_csv_records(log_path, merge_run_log(log_path, rows), FOUNDRY_RUN_LOG_HEADERS)
+            run_log.extend(rows)
+
     try:
         futures = [executor.submit(search_one, site, attributes) for site, attributes in work]
         for done, future in enumerate(as_completed(futures), start=1):
             row = future.result()
+            # Logged as each site finishes, not at the end: a second Ctrl-C or a hard kill would
+            # otherwise lose every finished site's row and Bing count.
+            log([row])
             print(f"[{done}/{len(work)}] {row['site_id']} {row['site_name']}: {row['status']}", flush=True)
     except KeyboardInterrupt:
         print("\nStopping: sites not yet started are cancelled; waiting for those in flight.", flush=True)
         raise
     finally:
-        # Sites in flight finish and are logged, so an interrupted run keeps their Bing counts.
+        # Sites in flight finish and are logged too, so an interrupted run keeps their Bing counts.
         executor.shutdown(wait=True, cancel_futures=True)
-        run_log = [f.result() for f in futures if f.done() and not f.cancelled() and f.exception() is None]
-        write_csv_records(log_path, merge_run_log(log_path, run_log), FOUNDRY_RUN_LOG_HEADERS)
+        logged = {id(row) for row in run_log}
+        log([
+            f.result()
+            for f in futures
+            if f.done() and not f.cancelled() and f.exception() is None and id(f.result()) not in logged
+        ])
 
     failures = [row for row in run_log if str(row["status"]).startswith("Search tool failed")]
     print(f"\nSearched {len(work)} sites. Run log: {log_path}")
@@ -273,8 +291,15 @@ def search_one_site(
                 print(f"    {site_id}: search tool failed; retrying ({attempt}/{max_attempts - 1})", flush=True)
                 time.sleep(SEARCH_TOOL_RETRY_DELAY_SECONDS)
             else:
-                save_json(path, payload)
                 status = f"Search tool failed after {max_attempts} attempt(s)"
+                earlier = _usable_response(path)
+                if earlier is None:
+                    save_json(path, payload)
+                else:
+                    # --force on a site with a good response: a failed retry must not replace it,
+                    # or its findings drop out of arbitration.
+                    payload = earlier
+                    status += "; kept the earlier response"
         if config.site_delay_seconds > 0:
             time.sleep(config.site_delay_seconds)
 
@@ -301,6 +326,17 @@ def search_one_site(
         "retry_count": tool_retries,
         "web_searches": "" if web_searches is None else web_searches,
     }
+
+
+def _usable_response(path: Path) -> dict[str, Any] | None:
+    """A cached response worth keeping: readable, and not itself a search-tool failure."""
+    if not path.exists():
+        return None
+    try:
+        payload = load_json(path)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return None if search_tool_failed(payload) else payload
 
 
 def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

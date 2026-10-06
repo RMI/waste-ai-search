@@ -6,7 +6,6 @@ the environment).
 """
 from __future__ import annotations
 
-import io
 import json
 from types import SimpleNamespace
 
@@ -384,3 +383,62 @@ def test_an_identical_untracked_copy_is_not_claimed_as_ours(tmp_path):
     (run / "r_review.xlsx").write_bytes(b"re-arbitrated")
     dest = publish_review(run, "r", target_dir=sharepoint)
     assert foreign.read_bytes() == b"workbook" and dest != foreign
+
+
+# --- newer copies and transfer order (review fixes) -----------------------------------------------
+def _timed(container, **ages):
+    """Give each blob a last_modified, as the real ContainerClient listing does."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    stamps = {name: now + timedelta(seconds=offset) for name, offset in ages.items()}
+    container.list_blobs = lambda name_starts_with="": [
+        SimpleNamespace(name=n, last_modified=stamps.get(n.rsplit("/", 1)[-1], now - timedelta(days=1)))
+        for n in container.blobs if n.startswith(name_starts_with)
+    ]
+    return container
+
+
+def test_a_newer_blob_replaces_a_stale_local_file_but_never_the_seed(tmp_path):
+    """Another machine's fresh link verdicts must not be lost to this machine's older copy."""
+    import os
+    import time
+
+    run = run_folder(tmp_path)
+    (run / "link_check.json").write_text("old verdicts")
+    old = time.time() - 3600
+    for name in ("link_check.json", "seed.csv"):
+        os.utime(run / name, (old, old))
+    container = _timed(
+        FakeContainer({
+            "outputs/runs/r/link_check.json": b"new verdicts",
+            "outputs/runs/r/seed.csv": b"site_id\n2\n",
+        }),
+        **{"link_check.json": 0, "seed.csv": 0},
+    )
+
+    storage.pull("outputs/runs/r", run, client=container)
+
+    assert (run / "link_check.json").read_text() == "new verdicts"
+    assert (run / "seed.csv").read_text() == "site_id\n1\n"  # pinned: never re-pointed
+
+
+def test_an_older_blob_leaves_the_local_file_alone(tmp_path):
+    run = run_folder(tmp_path)
+    (run / "link_check.json").write_text("local verdicts")
+    container = _timed(FakeContainer({"outputs/runs/r/link_check.json": b"older"}), **{"link_check.json": -3600})
+    storage.pull("outputs/runs/r", run, client=container)
+    assert (run / "link_check.json").read_text() == "local verdicts"
+
+
+def test_the_seed_is_pulled_last(tmp_path):
+    order = []
+    container = FakeContainer({
+        "outputs/runs/r/seed.csv": b"s",
+        "outputs/runs/r/consolidation_snapshot/manifest.json": b"m",
+        "outputs/runs/r/consolidation_snapshot/t.csv.gz": b"t",
+    })
+    download = container.download_blob
+    container.download_blob = lambda name: order.append(name.rsplit("/", 1)[-1]) or download(name)
+    storage.pull("outputs/runs/r", tmp_path / "run", client=container)
+    assert order == ["t.csv.gz", "manifest.json", "seed.csv"]

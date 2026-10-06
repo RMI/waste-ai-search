@@ -93,16 +93,21 @@ def source_name_sql(spec: RawNameSource) -> str:
     """One source's join from the ledger to its raw table.
 
     DISTINCT because the ledger carries a row per resolved column, so a facility whose name came
-    from a source appears once per column it supplied.
+    from a source appears once per column it supplied. `winning` is the name consolidation chose:
+    a source code can match several raw rows (SINIR has 290 such facilities), and only the row
+    whose translation is that name holds the matching original spelling. Ordered, so the fallback
+    when none matches is the same on every run.
     """
     return (
         "SELECT DISTINCT l.internal_facility_id,\n"
+        "       l.winning_value AS winning,\n"
         f"       r.{spec.original_column} AS original,\n"
         f"       r.{spec.translated_column} AS translated,\n"
         f"       r.{spec.language_column} AS language\n"
         "FROM consolidation.value_resolution_ledger l\n"
         f"JOIN raw_data.{spec.table} r ON {spec.key_expression} = l.data_source_facility_id\n"
-        "WHERE l.column_name = %s AND l.data_source = %s"
+        "WHERE l.column_name = %s AND l.data_source = %s\n"
+        "ORDER BY l.internal_facility_id, original"
     )
 
 
@@ -136,10 +141,15 @@ def load_name_provenance(config: Any = None) -> dict[Any, dict[str, str]]:
         rows = fetch_all(
             source_name_sql(spec), (LEDGER_NAME_COLUMN, data_source), config=config
         )
+        chosen: dict[Any, tuple[bool, dict[str, Any]]] = {}
         for row in rows:
             facility_id = row["internal_facility_id"]
             if facility_id in found:
                 continue
+            matches = spec.extract(row["translated"]).casefold() == normalize_scalar(row.get("winning")).casefold()
+            if facility_id not in chosen or (matches and not chosen[facility_id][0]):
+                chosen[facility_id] = (matches, row)
+        for facility_id, (_matches, row) in chosen.items():
             original = spec.extract(row["original"])
             translated = spec.extract(row["translated"])
             differs = bool(original) and original.casefold() != translated.casefold()

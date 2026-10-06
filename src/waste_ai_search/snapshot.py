@@ -129,8 +129,10 @@ def take_snapshot(run_dir: Path, config: Any = None) -> dict[str, Any]:
 def missing_snapshot_files(run_dir: Path) -> list[str] | None:
     """What a run's snapshot lacks; None when the run has no snapshot folder at all.
 
-    The manifest is written, and pushed to blob, last, so a folder without one - or without a file
-    it lists - is an interrupted copy or upload, not a whole snapshot.
+    The manifest is written, and moved through blob, after the tables, so a folder without one - or
+    without a file it lists - is an interrupted copy or transfer, not a whole snapshot. The seed
+    moves after the manifest (storage.transfer_stage), so a run that has its seed but no folder at
+    all never had a snapshot: seeded from a file, or from before WP-548.
     """
     folder = snapshot_dir(run_dir)
     if not folder.exists():

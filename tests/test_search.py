@@ -171,7 +171,6 @@ def test_search_populates_admin_context_from_the_geocode_cache(tmp_path, monkeyp
     import json as _json
 
     from waste_ai_search import search as pl
-    from waste_ai_search.prompt_builder import build_site_prompt
 
     seed = tmp_path / "seed.csv"
     seed.write_text(
@@ -565,3 +564,34 @@ def test_merge_payloads_combines_passes():
     ])
     assert [a["attribute_name"] for a in merged["attributes"]] == ["a", "b"]
     assert merged["search_notes"] == "first | second"
+
+
+def test_force_does_not_carry_into_the_follow_up_pass(tmp_path, monkeypatch):
+    """--force re-searched every site ever followed up and overwrote its earlier findings."""
+    import csv as _csv
+
+    from waste_ai_search import arbitrate as ar
+    from waste_ai_search import cli, search as se
+    from waste_ai_search.run_context import PipelineConfig
+
+    seed = tmp_path / "seed.csv"
+    seed.write_text(
+        "site_id,internal_facility_id,site_name,country_iso3,latitude,longitude,"
+        "is_location_exact,has_landfill_gas_collection,reference_year\n"
+        "1,1,Test Landfill,PHL,6.5,3.3,TRUE,,2022\n",
+        encoding="utf-8",
+    )
+    client = _ScriptedClient()
+    monkeypatch.setattr(se, "get_client", lambda config: client)
+    monkeypatch.setattr(ar, "write_review_workbook", lambda path, **kw: path)
+    run_dir = tmp_path / "run"
+    config = PipelineConfig(input_csv=seed, run_dir=run_dir, run_id="t", site_delay_seconds=0)
+
+    cli.run_everything(config)
+    assert len(client.prompts) == 2  # pass 1, then the follow-up
+    cli.run_everything(PipelineConfig(input_csv=seed, run_dir=run_dir, run_id="t", site_delay_seconds=0, force=True))
+
+    assert len(client.prompts) == 3  # pass 1 forced again; the follow-up kept its response
+    resolved = list(_csv.DictReader((run_dir / "resolved.csv").open(encoding="utf-8-sig")))
+    found = {r["attribute_name"]: r["resolved_value"] for r in resolved if r["resolved_value"]}
+    assert found.get("gccs_ch4_flared_metric_tonnes") == "1200"

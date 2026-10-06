@@ -140,11 +140,11 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": "Review_Queue",
         "purpose": (
-            "YOUR WORKLIST. A filtered view of resolved.csv containing only rows the pipeline "
-            "would not sign off itself: a value from a weak or unclassifiable source, or a "
-            "candidate that disagrees with the existing baseline. Everything else was already "
-            "auto-validated (reviewer = AI Agent) and is not shown here. Every row here also "
-            "exists in resolved.csv - nothing lives only in this tab."
+            "YOUR WORKLIST. The values the pipeline would not sign off itself: a value from a "
+            "weak or unclassifiable source, or a candidate that disagrees with the existing "
+            "baseline. Values it did sign off (reviewer = AI Agent) are in resolved.csv instead "
+            "and are not shown here. These rows are not in resolved.csv: this tab is the only "
+            "place they live until you validate them."
         ),
         "sme_action": (
             "Work top to bottom. Compare site_name with original_site_name - the source's own "
@@ -179,11 +179,11 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": "(file) resolved.csv",
         "purpose": (
-            "One row per facility x attribute searched, INCLUDING 'Not found' and auto-validated "
-            "rows. This is the complete picture; the Review_Queue tab is the subset of it that "
-            "needs you."
+            "One row per value the agent found and the rules auto-validated: what the pipeline "
+            "now believes and why. Values awaiting your decision are in Review_Queue instead, and "
+            "attributes that were searched but not found are not written anywhere."
         ),
-        "sme_action": "Read only. Open it to see what was searched and found nothing.",
+        "sme_action": "Read only. Open it to see what was accepted without review.",
         "editable": "nothing",
     },
     {
@@ -281,7 +281,7 @@ def add_conditionals(ws) -> None:
     for value, color in RESOLUTION_FILLS.items():
         ws.conditional_formatting.add(
             span,
-            FormulaRule(formula=[f'$%s2="%s"' % (letter, value)], fill=PatternFill("solid", fgColor=color)),
+            FormulaRule(formula=['$%s2="%s"' % (letter, value)], fill=PatternFill("solid", fgColor=color)),
         )
 
 

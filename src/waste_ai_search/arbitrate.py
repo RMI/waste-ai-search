@@ -475,6 +475,23 @@ def axis_offset_km(site: dict[str, Any], attribute_name: str, value: Any) -> flo
     return None
 
 
+def single_axis_offset_km(site: dict[str, Any], resolved: list[dict[str, Any]]) -> float | None:
+    """How far the one found coordinate puts the site from the seed, when only one resolved.
+
+    Without it the identity gate never ran on a lone coordinate: a latitude 222 km off left the
+    site's other fills auto-validated. At gate distances one axis's offset is close to the full
+    distance, so a large one still shows the agent researched another facility.
+    """
+    offsets = [
+        axis_offset_km(site, row["attribute_name"], row.get("resolved_value"))
+        for row in resolved
+        if row.get("attribute_name") in {"found_latitude", "found_longitude"}
+        and normalize_scalar(row.get("resolved_value"))
+    ]
+    offsets = [km for km in offsets if km is not None]
+    return max(offsets) if offsets else None
+
+
 def settle_near_coordinates(site: dict[str, Any], resolved: list[dict[str, Any]]) -> int:
     """Stop sending sub-threshold coordinate differences to review (pilot feedback 5)."""
     settled = 0
@@ -559,14 +576,15 @@ def payload_leads(
 
 def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     access_date = date.today()
-    sites, _headers = resolve_sites(config)
-    sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
-
+    # Checked before the seed, so a mistyped --run-id says so rather than reaching for a database.
     cached = sorted(raw_dir(config.run_dir).glob("site_*.json"))
-    # Read only: the search phase did the fetching, so arbitration stays offline.
-    link_results = load_results(config.run_dir / LINK_CHECK_FILE)
     if not cached:
         raise ValueError(f"No cached responses in {raw_dir(config.run_dir)}. Run the search phase first.")
+    sites, _headers = resolve_sites(config, allow_database=False)
+    sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
+
+    # Read only: the search phase did the fetching, so arbitration stays offline.
+    link_results = load_results(config.run_dir / LINK_CHECK_FILE)
 
     # A site may have several cached responses - one per pass - and all of them count as evidence.
     by_site: dict[str, list[Path]] = {}
@@ -668,6 +686,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             )
 
         km = append_distance_row(site, site_resolved, reviewed_on=access_date)
+        if km is None:
+            km = single_axis_offset_km(site, site_resolved)
         settle_near_coordinates(site, site_resolved)
         if flag_identity_mismatch(site_resolved, km):
             parse_warnings.append(
