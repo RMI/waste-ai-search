@@ -157,17 +157,30 @@ def test_waste_depth_is_exported_as_a_check_backed_vocabulary():
     assert DB_ENUMS["waste_depth"] == ["<=5m", ">5m"]
 
 
-def test_transfer_station_is_not_emitted_while_the_database_rejects_it():
-    """The spec (5cfeadfa) lists 'Transfer Station'; the database enum and CHECK do not.
+@pytest.mark.parametrize(
+    "answer, expected",
+    [
+        ("transfer station", "Transfer Station"),
+        ("waste transfer station", "Transfer Station"),
+        ("recycling center", "Recycling Center"),
+        ("recycling centre", "Recycling Center"),
+        ("recycling depot", "Recycling Center"),
+        ("materials recovery facility", "Recycling Center"),
+    ],
+)
+def test_every_new_facility_type_answer_maps_to_its_value(answer, expected):
+    from waste_ai_search.schema import map_enum_value
 
-    Emitting it would fail chk_facility_type on load. This pins the deliberate lag so that
-    mapping it through becomes a conscious change, made once the database has the value.
-    """
+    assert map_enum_value("facility_type", answer)[0] == expected
+
+
+def test_transfer_station_is_emitted_as_a_pending_value():
+    """In every transformed.* CHECK, but not yet the enum type or consolidated_facility's CHECK."""
     from waste_ai_search.db_enums import FACILITY_TYPE_VALUES
-    from waste_ai_search.schema import FACILITY_TYPE_MAP
+    from waste_ai_search.schema import FACILITY_TYPE_MAP, PENDING_UPSTREAM_FACILITY_TYPES
 
-    assert "Transfer Station" not in FACILITY_TYPE_VALUES
-    assert FACILITY_TYPE_MAP["transfer station"] is None
+    assert FACILITY_TYPE_MAP["transfer station"] == "Transfer Station"
+    assert "Transfer Station" in PENDING_UPSTREAM_FACILITY_TYPES
 
     # Nothing the map emits may fall outside what the database accepts - except values explicitly
     # declared as waiting on an upstream enum change. That list is the only way past this check,
@@ -178,15 +191,20 @@ def test_transfer_station_is_not_emitted_while_the_database_rejects_it():
     assert emitted <= set(FACILITY_TYPE_VALUES) | set(PENDING_UPSTREAM_FACILITY_TYPES)
 
 
-def test_the_only_pending_upstream_facility_type_is_not_a_waste_facility():
+def test_the_pending_upstream_facility_types_are_pinned():
     """Pins the exception. Adding to it is a deliberate decision to emit a value the DB rejects."""
     from waste_ai_search.db_enums import FACILITY_TYPE_VALUES
     from waste_ai_search.schema import PENDING_UPSTREAM_FACILITY_TYPES
 
-    assert PENDING_UPSTREAM_FACILITY_TYPES == ["Not a Waste Facility"]
-    # Once the database carries it, generate_enums.py picks it up and it stops being pending:
-    # this assertion then fails, prompting its removal from the pending list.
-    assert "Not a Waste Facility" not in FACILITY_TYPE_VALUES
+    assert PENDING_UPSTREAM_FACILITY_TYPES == ["Transfer Station", "Recycling Center", "Not a Waste Facility"]
+    # The enum alone is not the gate: consolidated_facility's chk_facility_type is separate and can
+    # lag. When this fails, run check_db_schema.py and remove the value from the pending list only
+    # once it reports the value accepted by both.
+    for value in PENDING_UPSTREAM_FACILITY_TYPES:
+        assert value not in FACILITY_TYPE_VALUES, (
+            f"{value!r} is now in the enum. Remove it from PENDING_UPSTREAM_FACILITY_TYPES only once "
+            "check_db_schema.py reports it accepted by the enum AND chk_facility_type."
+        )
 
 
 def test_first_present_keeps_a_zero(): 

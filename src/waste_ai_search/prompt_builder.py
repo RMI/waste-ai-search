@@ -13,6 +13,7 @@ from .schema import (
     CONTRADICTION_CHECK_SOURCES,
     CORROBORATING_ATTRIBUTES,
     FACILITY_TYPE_ALLOWED,
+    FACILITY_TYPE_OFFERED,
     NOT_A_WASTE_FACILITY,
     COORDINATES_ONLY_ISO3,
     COORDINATE_ATTRIBUTES,
@@ -69,13 +70,21 @@ FACILITY_TYPE_DEFINITIONS = (
     "Classify from what sources say about the facility's engineering and operation, NEVER from "
     "words in its name. Names are often regulatory terms or literal translations: Catalan "
     "'dipòsit controlat' and Spanish 'vertedero controlado' can describe a fully engineered "
-    "sanitary landfill, and 'controlled' in a name is not evidence of a Controlled Dumpsite."
+    "sanitary landfill, and 'controlled' in a name is not evidence of a Controlled Dumpsite. "
+    "Transfer Station - a site where collected waste is unloaded, consolidated and reloaded for "
+    "transport to a disposal site; no waste is disposed of there. "
+    "Recycling Center - a site where recyclable or separated waste is dropped off, sorted or "
+    "processed for recovery, including drop-off centres and materials recovery facilities; no "
+    "waste is disposed of there. "
+    "If waste was ever landfilled or dumped on the site - for example a transfer station or "
+    "recycling centre built on a closed landfill - classify the disposal site (Sanitary Landfill, "
+    "Controlled Dumpsite or Dumpsite), not the facility now on it: the buried waste still emits."
 )
 
 ATTRIBUTE_GUIDANCE = {
     "facility_status": "Allowed values only: Active, Inactive. A closed or former site is Inactive.",
     "facility_type": (
-        "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility."
+        f"Allowed values only: {', '.join(FACILITY_TYPE_OFFERED)}."
         + FACILITY_TYPE_DEFINITIONS
     ),
     "cover_types": "Array. Allowed members only: clay cover, organic cover, sand cover, other soil mixture.",

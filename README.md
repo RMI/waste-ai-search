@@ -467,7 +467,26 @@ site closed, the likeliest misreading, the row's `evidence_summary` says so.
 > `transformed.transformed_ai_search`, which does not exist yet either.
 
 Facilities with any other source, or any corroborating attribute, are never offered the value, so
-the other 10,928 prompts carry the four database values and none of this guidance.
+the other 10,928 prompts carry the ordinary values and none of this guidance.
+
+### Transfer stations and recycling centres
+
+`facility_type` also offers **`Transfer Station`** and **`Recycling Center`**, both pending upstream
+like `Not a Waste Facility`. Neither disposes of waste, so a site that is only
+one of these is out of scope for methane. A name scan of OSM sites found about 100 in the corpus,
+52 of them in batch 1.
+
+**A transfer station or recycling centre built on a closed landfill is still the landfill.** The
+agent is told to classify the disposal site (Sanitary Landfill, Controlled Dumpsite or Dumpsite)
+whenever waste was ever landfilled or dumped there, because the buried waste still emits.
+
+> **Pending upstream.** `Transfer Station` is in `chk_facility_type` on every `transformed.*` table,
+> but not yet in the `facility_type` enum type or `consolidation.consolidated_facility`'s
+> `chk_facility_type`; `Recycling Center` is in none of them. Until they are, consolidating a row
+> with either is rejected, as with `Not a Waste Facility`. Taking a value off
+> `PENDING_UPSTREAM_FACILITY_TYPES` is a manual step: do it only once `check_db_schema.py` reports
+> it accepted by **both** the enum and `consolidated_facility`'s `chk_facility_type`, which roll out
+> separately. Then regenerate `db_enums.py`; `generate_enums.py` does not edit the pending list.
 
 ### Outputs
 
