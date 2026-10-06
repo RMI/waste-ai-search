@@ -83,3 +83,12 @@ def test_a_rejection_reason_is_picked_from_a_fixed_list(tmp_path):
     offered = [defs.cell(r, columns["rejection_reason"]).value for r in range(2, 7)]
     assert offered == ["Wrong facility", "Not in source", "Wrong value", "Outdated", "Other"]
     assert REVIEW_QUEUE_HEADERS.index("rejection_reason") == REVIEW_QUEUE_HEADERS.index("validation_status") + 1
+
+
+def test_baseline_coordinates_paste_straight_into_google_maps():
+    """SMEs copy the seed location into Google Maps' search box, which takes "lat, lon"."""
+    from waste_ai_search.arbitrate import baseline_coordinates
+
+    assert baseline_coordinates({"latitude": "45.51234", "longitude": "-73.55432"}) == "45.512340, -73.554320"
+    assert baseline_coordinates({"latitude": "", "longitude": "-73.5"}) == ""
+    assert REVIEW_QUEUE_HEADERS.index("baseline_coordinates") == REVIEW_QUEUE_HEADERS.index("country_iso3") + 1

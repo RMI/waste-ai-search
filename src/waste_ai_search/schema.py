@@ -518,7 +518,9 @@ SOURCES_HEADERS = [
 REVIEW_QUEUE_HEADERS = [
     # translation_note sits beside the names it is about: the SME compares the two spellings and
     # records a translation problem there, separately from researcher_notes.
-    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "attribute_name", "resolution",
+    # baseline_coordinates is "lat, lon" as Google Maps accepts it pasted into its search box.
+    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "baseline_coordinates",
+    "attribute_name", "resolution",
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
     "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
     "agreeing_source_count",

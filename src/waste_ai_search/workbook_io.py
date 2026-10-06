@@ -146,7 +146,8 @@ REVIEW_INSTRUCTIONS = [
             "place they live until you validate them."
         ),
         "sme_action": (
-            "Work top to bottom. Compare site_name with original_site_name - the source's own "
+            "Work top to bottom. To see where the database puts the site, paste "
+            "baseline_coordinates into Google Maps. Compare site_name with original_site_name - the source's own "
             "spelling - and note any translation problem in translation_note. Open "
             "winning_source_url and check the source says this, about THIS facility. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason. Put your name in "
             "reviewer and the date in reviewed_date, and say why in researcher_notes. An empty "

@@ -350,6 +350,14 @@ def attach_site_names(rows: list[dict[str, Any]], sites_by_id: dict[str, dict[st
         row["source_language"] = normalize_scalar(site.get("source_language"))
 
 
+def baseline_coordinates(site: dict[str, Any]) -> str:
+    """The seed location as "lat, lon", which Google Maps finds when pasted into its search box."""
+    lat, lon = parse_float(site.get("latitude")), parse_float(site.get("longitude"))
+    if lat is None or lon is None:
+        return ""
+    return f"{lat:.6f}, {lon:.6f}"
+
+
 def closure_reported(resolved: list[dict[str, Any]]) -> dict[str, list[str]]:
     """What the run found about each site's closure, keyed by site.
 
@@ -762,6 +770,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             continue
         queue_row = {header: row.get(header, "") for header in REVIEW_QUEUE_HEADERS}
         queue_row["evidence_summary"] = review_summary(row, closure)
+        queue_row["baseline_coordinates"] = baseline_coordinates(sites_by_id.get(row["site_id"], {}))
         review_queue.append(queue_row)
 
     not_a_waste_facility = sum(
