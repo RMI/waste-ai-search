@@ -456,9 +456,9 @@ with closure in `facility_status = Inactive` and `closing_year`. The question is
 waste disposal site?*, not *is it operating today?*
 
 The value is **promoted like any facility_type**, so it reaches the standardized table and the next
-pass's seed. Every such verdict is also routed to review whatever its tier, and the workbook's
-**Contradictions** tab lists them, flagging any where the same run also found the site closed —
-the likeliest misreading.
+pass's seed. Every such verdict is also routed to review whatever its tier, on the site's own
+`facility_type` row in Review_Queue — there is no separate tab. Where the same run also found the
+site closed, the likeliest misreading, the row's `evidence_summary` says so.
 
 > **Pending upstream.** The database's `facility_type` enum and `chk_facility_type` do not carry
 > `Not a Waste Facility` yet, so a load containing it will be rejected — and `COPY` is
@@ -556,6 +556,8 @@ The five columns that decide your judgement:
 
 Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab.
 
+**Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and compare it with what the source describes.
+
 **Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `resolved.csv` and `evidence.csv`; they are blank where the source was never translated.
 
 **Source links.** `winning_link_status` beside the URL says whether it was checked and found working (`OK`) or could not be verified (`Unverified` — usually a site refusing automated checks, so it may still open for you). A source whose link is dead never wins: it is routed to Leads instead. `winning_source_url` is clickable, and shows the URL exactly as the source gave it. The link behind it is made safe (spaces and accented characters encoded), so it opens even when the text has them. A URL that is not `http`/`https`, or longer than Excel can follow, is shown as plain text rather than linked.
@@ -577,11 +579,12 @@ sign-off. In the pilot this caught a site whose findings were 238 km from the fa
 
 ### 4. Record the decision
 
-Edit only these four columns; everything else is read-only:
+Edit only these columns; everything else is read-only:
 
 | Column | Enter |
 |---|---|
 | `validation_status` | `Validated` or `Rejected` (dropdown) |
+| `rejection_reason` | For a rejection: `Wrong facility`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Counted by cause to find where the AI errs and where auto-validation is safe |
 | `reviewer` | Your name |
 | `reviewed_date` | The date |
 | `researcher_notes` | Why, especially for a rejection |

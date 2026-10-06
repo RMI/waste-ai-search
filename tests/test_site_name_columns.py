@@ -18,7 +18,6 @@ from waste_ai_search.arbitrate import attach_site_names, run_arbitration
 from waste_ai_search.input_loader import write_csv_records
 from waste_ai_search.run_context import PipelineConfig
 from waste_ai_search.schema import (
-    CONTRADICTION_HEADERS,
     EVIDENCE_HEADERS,
     RESOLVED_HEADERS,
     REVIEW_QUEUE_HEADERS,
@@ -32,7 +31,6 @@ ALL_OUTPUTS = {
     "resolved.csv": RESOLVED_HEADERS,
     "Review_Queue": REVIEW_QUEUE_HEADERS,
     "Leads": SUPPLEMENTARY_LEADS_HEADERS,
-    "Contradictions": CONTRADICTION_HEADERS,
 }
 
 
@@ -126,6 +124,8 @@ def test_a_real_arbitration_writes_both_names_everywhere(tmp_path):
     for name in ("review_queue.csv", "evidence.csv"):
         row = next(csv.DictReader((run_dir / name).open()))
         assert (row["site_name"], row["original_site_name"], row["source_language"]) == ("THE FUNGUS", "EL HONGO", "es"), name
+    # A real arbitration fills the seed location for pasting into Google Maps.
+    assert next(csv.DictReader((run_dir / "review_queue.csv").open()))["baseline_coordinates"] == "32.500000, -116.200000"
 
     ws = load_workbook(run_dir / "run_review.xlsx")["Review_Queue"]
     header = [c.value for c in ws[1]]
