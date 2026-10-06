@@ -40,6 +40,14 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def non_negative_int(text: str) -> int:
+    """A count where 0 means "no limit": a negative typo would otherwise also mean "search all"."""
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, not {value}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="waste-ai-search",
@@ -50,11 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
     search = subparsers.add_parser("search", help="Query Foundry and cache one raw response per site.")
     add_common(search)
     search.add_argument(
-        "--limit", type=int, default=0, help="Search the first N sites in seed order (0 = all)."
+        "--limit", type=non_negative_int, default=0, help="Search the first N sites in seed order (0 = all)."
     )
     search.add_argument(
         "--pilot-size",
-        type=int,
+        type=non_negative_int,
         default=0,
         help="Sample N sites spread across countries and hard cases, instead of the first N.",
     )
@@ -132,8 +140,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="search -> arbitrate -> follow up on newly found gas collection -> arbitrate. One command.",
     )
     add_common(full)
-    full.add_argument("--limit", type=int, default=0, help="Search the first N sites in seed order (0 = all).")
-    full.add_argument("--pilot-size", type=int, default=0, help="Sample N sites spread across countries.")
+    full.add_argument("--limit", type=non_negative_int, default=0, help="Search the first N sites in seed order (0 = all).")
+    full.add_argument("--pilot-size", type=non_negative_int, default=0, help="Sample N sites spread across countries.")
     full.add_argument("--iso3", nargs="*", default=[], help="Restrict to these country codes.")
     full.add_argument("--site-ids", nargs="*", default=[], help="Search only these site_ids.")
     full.add_argument("--batch", type=int, choices=range(1, LAST_BATCH + 1), help="One country batch.")
@@ -197,10 +205,10 @@ def read_arbitrated_rows(run_dir: Path) -> list[dict[str, str]]:
 
 
 def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: bool) -> int:
-    import csv
 
     from .input_loader import resolve_sites
-    from .prompt_builder import requested_attributes
+    from .prompt_builder import has_gas_collection, requested_attributes
+    from .schema import normalize_scalar
     from .seed_refresh import refresh_sites, write_refreshed_seed
 
     resolved_path = config.run_dir / "resolved.csv"
@@ -208,7 +216,7 @@ def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: b
         print(f"No resolved.csv in {config.run_dir}. Run arbitrate first.")
         return 1
 
-    sites, headers = resolve_sites(config)
+    sites, headers = resolve_sites(config, allow_database=False)
     resolved_rows = read_arbitrated_rows(config.run_dir)
 
     before = sum(len(requested_attributes(site)) for site in sites)
@@ -222,6 +230,25 @@ def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: b
     print(f"Gas collection discovered:  {stats['gas_collection_discovered']}")
     print(f"\nAttribute-requests for the next pass: {before:,} -> {after:,}")
     print(f"Wrote {output_csv}")
+
+    # The refreshed seed holds the whole seeded corpus, not just the sites this run searched, so
+    # a search on it without --site-ids would search everything again.
+    had_gas = {normalize_scalar(site.get("site_id")) for site in sites if has_gas_collection(site)}
+    unlocked = [
+        site_id
+        for site in refreshed
+        if has_gas_collection(site) and (site_id := normalize_scalar(site.get("site_id"))) not in had_gas
+    ]
+    if unlocked:
+        print("\nGas collection was discovered at these sites; to search them again by hand:")
+        print(
+            f"  uv run waste-ai-search search --run-id {config.run_id}_pass2 "
+            f"--input-csv {output_csv} --site-ids {' '.join(unlocked)}"
+        )
+    print(
+        "\nDo not search the refreshed seed without --site-ids: it holds the whole seeded corpus. "
+        "`run` does this follow-up for you, asking only gas-capture attributes."
+    )
     return 0
 
 
@@ -311,7 +338,6 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
     only discovered during pass 1 needs a second, narrow pass to pick up its GCCS attributes.
     Doing that by hand took three commands, a second run id and a second input file.
     """
-    import csv
 
     from .arbitrate import run_arbitration
     from .input_loader import resolve_sites
@@ -331,10 +357,9 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
     if not followup:
         return 0
 
-    resolved_path = config.run_dir / "resolved.csv"
     resolved_rows = read_arbitrated_rows(config.run_dir)
 
-    sites, headers = resolve_sites(config)
+    sites, headers = resolve_sites(config, allow_database=False)
     before = {
         normalize_scalar(site.get("site_id")): has_gas_collection(site) for site in sites
     }
@@ -351,6 +376,9 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
 
     print(f"\n== pass 2: {len(unlocked)} site(s) revealed a gas collection system ==")
     seed_path = write_refreshed_seed(refreshed_seed_path(config), refreshed, headers)
+    # Never forced: `unlocked` spans every site the run folder has ever found gas collection at,
+    # not just this selection, and forcing would re-bill them all and overwrite their earlier
+    # follow-up responses with a narrower ask. A site already followed up keeps its response.
     followup_config = replace(
         config,
         input_csv=seed_path,
@@ -359,6 +387,7 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
         batch=0,
         limit=0,
         pilot_size=0,
+        force=False,
     )
     run_search(followup_config, pass_label="gccs", only_attributes=sorted(GCCS_ATTRIBUTES))
     after_search()
@@ -389,8 +418,12 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
     if args.command == "search":
         sync = RunSync(config, local=args.local)
         sync.down()
-        run_search(config)
-        sync.up()
+        try:
+            run_search(config)
+        finally:
+            # Pushed even when the search fails or is interrupted: every finished site is saved
+            # and should outlive this laptop too.
+            sync.up()
         print(f"\nNow arbitrate:\n  uv run waste-ai-search arbitrate --run-id {config.run_id}")
         return 0
 
@@ -404,9 +437,12 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
     if args.command == "run":
         sync = RunSync(config, local=args.local)
         sync.down()
-        code = run_everything(config, followup=not args.no_followup, after_search=sync.up)
-        sync.up()
-        publish(config, publishing)
+        try:
+            code = run_everything(config, followup=not args.no_followup, after_search=sync.up)
+            # Before the push, so the publish ledger (published.json) is mirrored too.
+            publish(config, publishing)
+        finally:
+            sync.up()
         return code
 
     if args.command == "refresh-seed":
@@ -424,8 +460,8 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
         print("\nOutputs:")
         for name, path in paths.items():
             print(f"  {name:<14} {path}")
+        publish(config, publishing)  # before the push, so published.json is mirrored too
         sync.up()
-        publish(config, publishing)
         return 0
 
     return 2

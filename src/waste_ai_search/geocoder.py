@@ -66,10 +66,15 @@ def enrich_sites_from_cache(
             enriched.append(copy)
             continue
         for field in GEOCODE_FIELDS:
-            if field in record:
-                copy[field] = normalize_scalar(record[field])
+            # A blank cache field must not erase a value the seed already had, such as SINIR's
+            # municipality from the database.
+            value = normalize_scalar(record.get(field))
+            if value:
+                copy[field] = value
         copy["geocode_status"] = "cache_hit"
-        copy.setdefault("geocoded_at", today)
+        # Blank-filled above, so setdefault never fired and a hit without its own date stayed blank.
+        if not normalize_scalar(copy.get("geocoded_at")):
+            copy["geocoded_at"] = today
         enriched.append(copy)
     return enriched
 

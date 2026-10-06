@@ -35,6 +35,13 @@ AREA_TARGET_ATTRIBUTES = {"area_square_meters"}
 # A unit has to carry a letter or a unit symbol; bare digits and punctuation are not a unit.
 UNIT_WORD_PATTERN = re.compile(r"[a-z%°]")
 
+CO2_PATTERN = re.compile(r"co\s?2|co₂|carbon dioxide")
+
+# Degrees, then minutes, then optional seconds: 51°30'26"N, 0° 7' 39" W, 51°30.4'N.
+DMS_PATTERN = re.compile(
+    r"([-+]?\d+(?:\.\d+)?)\s*°\s*(\d+(?:\.\d+)?)\s*['′’]\s*(?:(\d+(?:\.\d+)?)\s*(?:\"|″|”|''))?"
+)
+
 # Spec: methane density 0.0192 kg/ft3 (0.679 kg/m3) at roughly 15 C and 1 atm.
 CH4_KG_PER_CUBIC_FOOT = 0.0192
 CH4_KG_PER_CUBIC_METRE = 0.679
@@ -102,7 +109,7 @@ def convert_attribute_value(attribute_name: str, value: Any, unit: Any) -> Conve
             original_unit=original_unit,
         )
 
-    parsed_numbers, multiplier = parse_numbers(original_value)
+    parsed_numbers, multiplier = parse_numbers(original_value, original_unit)
     if not parsed_numbers:
         return ConversionResult(
             value=original_value,
@@ -113,6 +120,16 @@ def convert_attribute_value(attribute_name: str, value: Any, unit: Any) -> Conve
         )
 
     combined_unit = detect_unit_text(original_value, original_unit)
+    if CO2_PATTERN.search(combined_unit):
+        # A CO2-equivalent figure is neither waste nor methane mass; for methane it is ~25-28x
+        # too high. Canada's GHGRP reports landfill methane this way.
+        return ConversionResult(
+            value=original_value,
+            unit=original_unit,
+            original_value=original_value,
+            original_unit=original_unit,
+            warning=f"{attribute_name}: {combined_unit!r} is a CO2 or CO2-equivalent quantity; not converted.",
+        )
     if attribute_name in CH4_MASS_ATTRIBUTES:
         volume_result = convert_ch4_volume(attribute_name, original_value, original_unit, combined_unit)
         if volume_result is not None:
@@ -199,7 +216,7 @@ def convert_distance_value(attribute_name: str, original_value: str, original_un
             original_unit=original_unit,
         )
 
-    parsed_numbers, multiplier = parse_numbers(original_value)
+    parsed_numbers, multiplier = parse_numbers(original_value, original_unit)
     if not parsed_numbers:
         return ConversionResult(
             value=original_value,
@@ -242,7 +259,7 @@ def convert_area_value(attribute_name: str, original_value: str, original_unit: 
     if not original_value:
         return ConversionResult(original_value, original_unit, original_value, original_unit)
 
-    numbers, multiplier = parse_numbers(original_value)
+    numbers, multiplier = parse_numbers(original_value, original_unit)
     if not numbers:
         return ConversionResult(
             original_value, original_unit, original_value, original_unit,
@@ -250,7 +267,10 @@ def convert_area_value(attribute_name: str, original_value: str, original_unit: 
         )
 
     text = detect_unit_text(original_value, original_unit)
-    if re.search(r"\b(ha|hectares?)\b", text):
+    if re.search(r"(mi2|mi\^2|mi²|square miles?|sq\.?\s*mi(?:les?)?\b)", text):
+        # Checked before square metres, whose "sq m" pattern would otherwise match "sq mi".
+        factor, note = 2_589_988.110336, "Converted from square miles to square meters."
+    elif re.search(r"\b(ha|hectares?)\b", text):
         factor, note = 10_000.0, "Converted from hectares to square meters."
     elif re.search(r"(km2|km\^2|km²|square kilomet(?:er|re)s?|sq\.?\s*km)", text):
         factor, note = 1_000_000.0, "Converted from square kilometers to square meters."
@@ -282,7 +302,7 @@ def convert_length_value(attribute_name: str, original_value: str, original_unit
     if not original_value:
         return ConversionResult(original_value, original_unit, original_value, original_unit)
 
-    numbers, multiplier = parse_numbers(original_value)
+    numbers, multiplier = parse_numbers(original_value, original_unit)
     if not numbers:
         return ConversionResult(
             original_value, original_unit, original_value, original_unit,
@@ -323,6 +343,13 @@ def convert_fraction_value(attribute_name: str, original_value: str, original_un
         return ConversionResult(
             original_value, original_unit, original_value, original_unit,
             warning=f"Could not parse numeric value {original_value!r} for {attribute_name}.",
+        )
+
+    if len(numbers) > 1:
+        # A range is not one value; taking its lower end would promote a number no source gave.
+        return ConversionResult(
+            original_value, original_unit, original_value, original_unit,
+            warning=f"{attribute_name} value {original_value!r} is a range, not a single value.",
         )
 
     value = numbers[0]
@@ -381,7 +408,7 @@ def convert_ch4_volume(
             ),
         )
 
-    numbers, multiplier = parse_numbers(original_value)
+    numbers, multiplier = parse_numbers(original_value, original_unit)
     if not numbers:
         return ConversionResult(
             original_value, original_unit, original_value, original_unit,
@@ -424,18 +451,33 @@ def convert_ch4_volume(
 
 def parse_coordinate(value: str) -> float | None:
     text = value.lower().replace(",", "")
-    match = re.search(r"[-+]?\d*\.?\d+(?:e[-+]?\d+)?", text)
-    if not match:
-        return None
-
-    number = float(match.group(0))
+    dms = DMS_PATTERN.search(text)
+    if dms:
+        # 51°30'26"N is 51.5072, not 51: the minutes and seconds are part of the coordinate.
+        degrees, minutes, seconds = (float(part) if part else 0.0 for part in dms.groups())
+        if minutes >= 60 or seconds >= 60:
+            return None
+        number = abs(degrees) + minutes / 60 + seconds / 3600
+        if text.lstrip().startswith("-"):
+            number = -number
+    else:
+        match = re.search(r"[-+]?\d*\.?\d+(?:e[-+]?\d+)?", text)
+        if not match:
+            return None
+        number = float(match.group(0))
     hemisphere = re.search(r"\b(n|north|s|south|e|east|w|west)\b", text)
     if hemisphere and hemisphere.group(1) in {"s", "south", "w", "west"}:
         number = -abs(number)
     return number
 
 
-def parse_numbers(value: str) -> tuple[list[float], float]:
+def parse_numbers(value: str, unit: str = "") -> tuple[list[float], float]:
+    """The numbers in a value, and the magnitude its wording implies.
+
+    The magnitude may sit in the unit instead - "1.2" with "million tonnes" - since the prompt
+    asks for digits in value and the source's unit in unit. Only whole words are read from the
+    unit: an abbreviation there is a unit in its own right ("mm" is millimetres).
+    """
     text = value.lower().replace(",", "")
     # A hyphen BETWEEN two digits is a range separator, not a sign: sources write "3-8 metres"
     # far more often than they write a negative quantity. Left as-is, "3-8" parses to [3, -8],
@@ -449,6 +491,12 @@ def parse_numbers(value: str) -> tuple[list[float], float]:
     elif re.search(r"\b(million|mn|mm)\b", text):
         multiplier = 1_000_000.0
     elif re.search(r"\b(thousand|k)\b", text):
+        multiplier = 1_000.0
+    elif re.search(r"\bbillions?\b", unit.lower()):
+        multiplier = 1_000_000_000.0
+    elif re.search(r"\bmillions?\b", unit.lower()):
+        multiplier = 1_000_000.0
+    elif re.search(r"\bthousands?\b", unit.lower()):
         multiplier = 1_000.0
     return [float(match) for match in matches], multiplier
 
@@ -523,7 +571,11 @@ def distance_to_km_factor(unit_text: str) -> tuple[float | None, str, str]:
 def annualization_factor(unit_text: str, expected_kind: str) -> tuple[float | None, str, str]:
     text = unit_text
     has_time_denominator = bool(
-        re.search(r"(/day|/d\b|daily|/week|weekly|/month|monthly|/year|annual|annually|per year)", text)
+        re.search(
+            r"(/day|/d\b|daily|/week|weekly|/month|monthly|/year|annual|annually|per year"
+            r"|/hour|/hr\b|/h\b|hourly|/minute|/min\b)",
+            text,
+        )
     )
 
     if expected_kind == "mass":
@@ -539,7 +591,8 @@ def annualization_factor(unit_text: str, expected_kind: str) -> tuple[float | No
         return 12.0, "Annualized monthly rate using 12 months/year.", ""
     if re.search(r"(/minute|/min\b)", text):
         return 525600.0, "Annualized per-minute rate using 525600 minutes/year.", ""
-    if re.search(r"(/hour|/hr\b|hourly)", text):
+    # "/h" is how European sources write gas flow (Nm3/h); missing it read an hourly flow as annual.
+    if re.search(r"(/hour|/hr\b|/h\b|hourly)", text):
         return 8760.0, "Annualized hourly rate using 8760 hours/year.", ""
     if re.search(r"(/year|annual|annually|per year)", text):
         return 1.0, "", ""

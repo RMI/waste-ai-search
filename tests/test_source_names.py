@@ -377,3 +377,16 @@ def test_sinir_municipality_reaches_the_seed_and_the_prompt(monkeypatch):
     assert (records[1]["municipality"], records[1]["admin1"]) == ("", "")
     prompt = build_site_prompt(records[0], ["found_latitude", "found_longitude"])
     assert '"municipality": "Araguari"' in prompt and '"admin1": "Minas Gerais"' in prompt
+
+
+def test_load_takes_the_raw_row_whose_translation_is_the_chosen_name(monkeypatch):
+    """A SINIR code matched several raw rows, and the first one returned paired 'Dump' with 'ATERRO'."""
+    found = _run_load(monkeypatch, {
+        "sinir_2024": [
+            {"internal_facility_id": 7, "winning": "Itaresidue dump", "original": "ATERRO",
+             "translated": "Landfill", "language": "pt"},
+            {"internal_facility_id": 7, "winning": "Itaresidue dump", "original": "Lixao Itaresidue",
+             "translated": "Itaresidue dump", "language": "pt"},
+        ],
+    })
+    assert found[7]["original_site_name"] == "Lixao Itaresidue"

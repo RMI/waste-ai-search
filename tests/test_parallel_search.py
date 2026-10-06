@@ -110,3 +110,29 @@ def test_a_response_is_written_whole_or_not_at_all(tmp_path, monkeypatch):
     save_json(path, {"attributes": []})
     assert path.read_text(encoding="utf-8").startswith("{")
     assert [p.name for p in tmp_path.iterdir()] == ["site_1.json"]
+
+
+def test_each_site_is_logged_as_it_finishes(tmp_path, monkeypatch):
+    """A second Ctrl-C or a hard kill must not lose the rows of sites already finished."""
+    from waste_ai_search import search as pl
+
+    seen = []
+
+    class _Client:
+        calls = 0
+
+        def search_site(self, site, prompt):  # noqa: ARG002
+            _Client.calls += 1
+            time.sleep(0.3)  # a real search takes ~40 s; the finished site's row lands meanwhile
+            log = tmp_path / "run" / "foundry_run_log.csv"
+            seen.append(len(list(csv.DictReader(log.open(encoding="utf-8-sig")))) if log.exists() else 0)
+            self.web_searches = 3
+            return {"attributes": [], "search_notes": "found nothing"}
+
+    monkeypatch.setattr(pl, "get_client", lambda config: _Client())
+    pl.run_search(pl.PipelineConfig(
+        input_csv=_seed(tmp_path, 3), run_dir=tmp_path / "run", run_id="t", site_delay_seconds=0, workers=1,
+    ))
+
+    assert seen == [0, 1, 2]  # each finished site's row was on disk while the next one ran
+    assert [row["web_searches"] for row in _log(tmp_path)] == ["3", "3", "3"]  # merged once each

@@ -138,9 +138,23 @@ def test_the_load_statement_names_every_column():
 
     for column in STANDARDIZED_FACILITY_COLUMNS:
         assert column in sql, column
-    # the column list is the parenthesised block, not the whole file
-    block = sql.split("(", 1)[1].split(")", 1)[0]
-    assert [c.strip() for c in block.strip().split(",\n")] == STANDARDIZED_FACILITY_COLUMNS
+    assert _copied_columns(sql) == STANDARDIZED_FACILITY_COLUMNS
+
+
+def _copied_columns(sql):
+    """The column list of the \\copy line - which psql requires to be ONE line."""
+    copy_lines = [line for line in sql.splitlines() if line.startswith("\\copy")]
+    assert len(copy_lines) == 1 and copy_lines[0].rstrip().endswith("HEADER true)"), copy_lines
+    block = copy_lines[0].split("(", 1)[1].split(")", 1)[0]
+    return [column.strip() for column in block.split(",")]
+
+
+def test_a_failed_load_stops_psql():
+    from pathlib import Path
+
+    from waste_ai_search.standardized import load_statement
+
+    assert "\\set ON_ERROR_STOP on" in load_statement(Path("x.csv"))
 
 
 def test_the_load_statement_is_not_a_bare_copy():
@@ -165,8 +179,7 @@ def test_the_load_statement_survives_reordering_the_column_list(monkeypatch):
     monkeypatch.setattr(standardized, "STANDARDIZED_FACILITY_COLUMNS", reordered)
 
     sql = standardized.load_statement(Path("x.csv"))
-    block = sql.split("(", 1)[1].split(")", 1)[0]
-    assert [c.strip() for c in block.strip().split(",\n")][-1] == "has_biocover"
+    assert _copied_columns(sql)[-1] == "has_biocover"
 
 
 def test_write_load_statement_lands_beside_the_csv(tmp_path):

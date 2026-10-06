@@ -96,6 +96,10 @@ IDENTITY_ATTRIBUTES = [
 ATTRIBUTE_ALIASES = {
     # WP-531: aligned with the upstream `facility_name` column.
     "found_site_name": "found_facility_name",
+    # b5033f3: renamed with the move to the standardized facility schema. waste_depth_meters was
+    # a depth in metres, which waste_depth still reads before binning it.
+    "area": "area_square_meters",
+    "waste_depth_meters": "waste_depth",
 }
 
 
@@ -388,6 +392,15 @@ BULK_WASTE_TYPE_MAP = {
     "industrial waste": "others",
     "hazardous": "others",
     "hazardous waste": "others",
+    # The prompt's own examples of `others`, and common spellings of the other two.
+    "mining waste": "others",
+    "mine waste": "others",
+    "sewage sludge": "others",
+    "sludge": "others",
+    "municipal solid waste (msw)": "municipal solid waste",
+    "c&d": "inert waste",
+    "construction waste": "inert waste",
+    "construction and demolition debris": "inert waste",
 }
 
 # `waste_depth` is the one categorical the spec derives from a numeric source measurement rather

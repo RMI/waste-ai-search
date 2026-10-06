@@ -103,14 +103,21 @@ def select_sql(where: str = "") -> str:
 
 
 def is_empty(value: Any) -> bool:
-    """Empty for folding purposes. False and 0 are real values and are never empty."""
+    """Empty for folding purposes. False and 0 are real values and are never empty.
+
+    NaN is empty too: Postgres numerics can hold it (687 gccs_ch4_flow_to_project rows do), and
+    as a value it blocked the backfill from older years and showed up in seeds as "NaN".
+    """
     if value is None:
         return True
     if isinstance(value, str):
         return value.strip() == ""
     if isinstance(value, (list, tuple)):
-        return len(value) == 0
-    return False
+        return all(is_empty(item) for item in value)
+    try:
+        return value != value  # only NaN is unequal to itself; works for float and Decimal
+    except TypeError:
+        return False
 
 
 def format_value(value: Any) -> str:

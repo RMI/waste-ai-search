@@ -152,3 +152,18 @@ def test_values_with_no_database_column_survive_the_refreshed_seed(tmp_path):
     reloaded, _headers = load_sites(path)
     assert {a: reloaded[0][a] for a in found} == found
     assert not set(found) & set(requested_attributes(reloaded[0]))
+
+
+def test_a_merged_name_survives_the_refreshed_seed(tmp_path):
+    """Reload reads facility_name before site_name, so the merge must update both."""
+    from waste_ai_search.input_loader import load_sites
+    from waste_ai_search.seed_refresh import write_refreshed_seed
+
+    database_site = site(facility_name="Test Landfill")
+    refreshed, _stats = refresh_sites(
+        [database_site], [resolved("found_facility_name", "Brand New Name Landfill")], "run1", merge_identity=True
+    )
+    path = write_refreshed_seed(tmp_path / "refreshed_seed.csv", refreshed, list(database_site))
+
+    reloaded, _headers = load_sites(path)
+    assert reloaded[0]["site_name"] == "Brand New Name Landfill"

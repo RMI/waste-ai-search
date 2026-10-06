@@ -6,6 +6,8 @@ offline against cached responses (Q17).
 """
 from __future__ import annotations
 
+import re
+
 from collections import Counter
 from typing import Any
 
@@ -25,8 +27,10 @@ from .credibility import (
 from .schema import (
     ALWAYS_REVIEW_VALUES,
     AI_SEARCH_DATA_SOURCE,
+    ARRAY_TARGET_ATTRIBUTES,
     AUTO_REVIEWER,
     GAP_FILL_ATTRIBUTES,
+    NUMERIC_ARRAY_TARGET_ATTRIBUTES,
     LEAD_ROUTED_RESOLUTIONS,
     is_blank,
     normalize_for_compare,
@@ -50,8 +54,17 @@ def baseline_for(site: dict[str, Any], attribute_name: str) -> str:
     return ""
 
 
-def comparable(value: Any) -> str:
-    """Value form used for agreement and conflict tests."""
+def comparable(value: Any, attribute_name: str = "") -> str:
+    """Value form used for agreement and conflict tests.
+
+    A list attribute compares as a set: "sand cover; other soil mixture" and the same two items in
+    the other order, or with one repeated (the seed holds "Electricity Generation; Electricity
+    Generation"), are the same value, not a conflict for a human to settle.
+    """
+    if attribute_name in ARRAY_TARGET_ATTRIBUTES | NUMERIC_ARRAY_TARGET_ATTRIBUTES:
+        items = value if isinstance(value, (list, tuple)) else re.split(r"[;,]", normalize_scalar(value))
+        keys = {comparable(item) for item in items if normalize_scalar(item)}
+        return "; ".join(sorted(keys))
     text = normalize_for_compare(value)
     try:
         return f"{float(text):.6g}"
@@ -171,16 +184,16 @@ def resolve(
         return row
 
     # Winner: best tier, then most corroborated, then first seen.
-    counts = Counter(comparable(item.get("value")) for item in candidates)
+    counts = Counter(comparable(item.get("value"), attribute_name) for item in candidates)
     candidates.sort(
         key=lambda item: (
             int(item.get("tier", TIER_5)),
-            -counts[comparable(item.get("value"))],
+            -counts[comparable(item.get("value"), attribute_name)],
             int(item.get("order", 0)),
         )
     )
     winner = candidates[0]
-    win_key = comparable(winner.get("value"))
+    win_key = comparable(winner.get("value"), attribute_name)
     win_tier = int(winner.get("tier", TIER_5))
 
     row["resolved_value"] = normalize_scalar(winner.get("value"))
@@ -197,7 +210,7 @@ def resolve(
     row["confidence_score"] = normalize_scalar(winner.get("confidence"))
     row["credibility_margin"] = base_tier - win_tier
 
-    matches_baseline = not baseline_empty and comparable(baseline) == win_key
+    matches_baseline = not baseline_empty and comparable(baseline, attribute_name) == win_key
 
     if matches_baseline:
         row["resolution"] = "Confirmed baseline"

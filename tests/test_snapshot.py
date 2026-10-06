@@ -4,7 +4,6 @@ from __future__ import annotations
 import contextlib
 import gzip
 import json
-from pathlib import Path
 
 import pytest
 
@@ -139,7 +138,7 @@ def test_the_crosswalk_pattern_matches_the_underscore_literally():
     assert "LIKE 'crosswalk\\_%%'" in seen[0]  # psycopg turns %% into %; \_ is a literal _
 
 
-def test_the_manifest_is_uploaded_after_every_other_file(tmp_path):
+def test_the_manifest_is_uploaded_after_the_data_and_the_seed_last(tmp_path):
     from waste_ai_search import storage
 
     folder = snapshot.snapshot_dir(tmp_path)
@@ -151,12 +150,16 @@ def test_the_manifest_is_uploaded_after_every_other_file(tmp_path):
     class _Client:
         uploaded = []
 
+        def list_blobs(self, name_starts_with=""):  # noqa: ARG002
+            return []
+
         def upload_blob(self, name, handle, overwrite):  # noqa: ARG002
             self.uploaded.append(name)
 
     client = _Client()
     storage.push(tmp_path, "outputs/runs/r", client=client)
-    assert client.uploaded[-1].endswith("consolidation_snapshot/manifest.json")
+    # the seed goes up last, so a seed in blob proves the snapshot before it is whole
+    assert [name.rsplit("/", 1)[-1] for name in client.uploaded[-2:]] == ["manifest.json", "seed.csv"]
     assert len(client.uploaded) == 4
 
 

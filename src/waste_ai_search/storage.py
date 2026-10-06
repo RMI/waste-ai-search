@@ -23,6 +23,7 @@ It is reported as VpnRequiredError instead, which says plainly that credentials 
 """
 from __future__ import annotations
 
+import io
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -155,52 +156,142 @@ def _safe_local_path(name: str, prefix: str, target: Path) -> Path | None:
     return path
 
 
-def push(source: Path, prefix: str, client: Any = None) -> int:
-    """Upload every file under `source` to `prefix/...`, overwriting. Returns the count."""
-    client = client or container_client()
-    files = [p for p in sorted(source.rglob("*")) if p.is_file() and not _skip(p, source)]
+# Seconds a blob must be newer than the local file before it replaces it, so clock skew between
+# machines and filesystem timestamp rounding never make an unchanged file look newer.
+CLOCK_TOLERANCE_SECONDS = 5.0
 
-    def upload(path: Path) -> None:
-        name = f"{prefix}/{path.relative_to(source).as_posix()}"
-        with path.open("rb") as handle:
-            client.upload_blob(name, handle, overwrite=True)
 
-    # A manifest marks its folder complete (WP-548), so it goes up only once everything else has:
-    # an interrupted upload then leaves a folder without one, which a resumed run refuses.
+def transfer_stage(relative: str) -> int:
+    """Files move in stages, each starting only once the one before it has finished.
+
+    Data first; then each snapshot manifest, which marks its folder complete (WP-548); then the
+    run's seed. So a seed in blob, or pulled to disk, proves the snapshot taken before it is whole,
+    and a resumed run with a seed but no snapshot folder at all is a run that never had one.
+    """
+    from .input_loader import SEED_NAME
     from .snapshot import MANIFEST_NAME
 
+    if relative == SEED_NAME:
+        return 2
+    return 1 if Path(relative).name == MANIFEST_NAME else 0
+
+
+def pinned(relative: str) -> bool:
+    """Files that never change once written, and that a pull must therefore never replace."""
+    from .input_loader import SEED_NAME
+    from .snapshot import SNAPSHOT_DIR_NAME
+
+    return relative == SEED_NAME or relative.startswith(f"{SNAPSHOT_DIR_NAME}/")
+
+
+def _in_stages(items: list[Any], relative: Any, work: Any) -> None:
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        list(executor.map(upload, [path for path in files if path.name != MANIFEST_NAME]))
-        list(executor.map(upload, [path for path in files if path.name == MANIFEST_NAME]))
-    return len(files)
+        for stage in (0, 1, 2):
+            list(executor.map(work, [item for item in items if transfer_stage(relative(item)) == stage]))
+
+
+def push(source: Path, prefix: str, client: Any = None) -> int:
+    """Upload the files under `source` that are new or newer than their blob. Returns the count.
+
+    A blob newer than the local file - another machine changed it since - is never overwritten:
+    it is reported, and the next pull brings it down. Unchanged files are not sent again.
+    """
+    client = client or container_client()
+    files = [p for p in sorted(source.rglob("*")) if p.is_file() and not _skip(p, source)]
+    existing = {blob.name: blob for blob in client.list_blobs(name_starts_with=f"{prefix}/")}
+    name_of = lambda path: f"{prefix}/{path.relative_to(source).as_posix()}"  # noqa: E731
+    to_upload, newer_in_blob = [], []
+    for path in files:
+        blob = existing.get(name_of(path))
+        which = "local" if blob is None else newer_copy(blob, path, lambda name=name_of(path): _read(client, name))
+        if which in ("local", "unknown"):
+            to_upload.append(path)
+        elif which == "blob":
+            newer_in_blob.append(path)
+
+    def upload(path: Path) -> None:
+        with path.open("rb") as handle:
+            result = client.upload_blob(name_of(path), handle, overwrite=True)
+        _align(path, (result or {}).get("last_modified") if isinstance(result, dict) else None)
+
+    _in_stages(to_upload, lambda path: path.relative_to(source).as_posix(), upload)
+    if newer_in_blob:
+        print(
+            f"Not pushed: {len(newer_in_blob)} file(s) are newer in blob (changed on another "
+            "machine); pull before pushing again."
+        )
+    return len(to_upload)
 
 
 def pull(prefix: str, target: Path, client: Any = None) -> int:
-    """Download what is under `prefix/` into `target`, without overwriting local files.
+    """Download what is under `prefix/` into `target`: missing files, and newer copies.
 
-    Local wins: a file already on disk is newer than or the same as what is in storage - this
-    machine wrote it, or pulled it before - and overwriting it could undo work, such as a seed
-    snapshot that pins the run. Only files missing locally come down. Returns the count.
+    A file missing locally always comes down. One already on disk is replaced only when the blob
+    is newer - another machine changed it since, such as fresh link verdicts or run-log counts -
+    and never when it is pinned: a run's seed and consolidation snapshot do not change once
+    written, and replacing them could re-point the run at another corpus. Keeping every stale local
+    file instead let the next push overwrite another machine's newer work. Returns the count.
     """
     client = client or container_client()
-    names = [blob.name for blob in client.list_blobs(name_starts_with=f"{prefix}/")]
     wanted = []
-    for name in names:
+    for blob in client.list_blobs(name_starts_with=f"{prefix}/"):
+        name = blob.name
         path = _safe_local_path(name, prefix, target)
         if path is None:
             print(f"Skipped blob {name!r}: its name would write outside {target}.")
             continue
         if not path.exists():
-            wanted.append((name, path))
+            wanted.append((name, path, blob))
+        elif not pinned(name[len(prefix) + 1:]):
+            which = newer_copy(blob, path, lambda name=name: _read(client, name))
+            if which == "blob":
+                wanted.append((name, path, blob))
+            elif which == "same":
+                _align(path, getattr(blob, "last_modified", None))
 
-    def download(item: tuple[str, Path]) -> None:
-        name, path = item
+    def download(item: tuple[str, Path, Any]) -> None:
+        name, path, blob = item
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp")
         with temporary.open("wb") as handle:
             client.download_blob(name).readinto(handle)
         os.replace(temporary, path)
+        _align(path, getattr(blob, "last_modified", None))
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        list(executor.map(download, wanted))
+    _in_stages(wanted, lambda item: item[0][len(prefix) + 1:], download)
     return len(wanted)
+
+
+def newer_copy(blob: Any, path: Path, read_blob: Any) -> str:
+    """Which copy of a file is newer: "blob", "local", "same", or "unknown" (no blob time).
+
+    Clearly apart - beyond CLOCK_TOLERANCE_SECONDS - the later timestamp wins. Within it, where
+    clock skew and timestamp rounding make the order unreliable, the contents decide: identical
+    copies are "same", and only a real difference lets the later timestamp win, even by a second.
+    Treating the whole window as "same" let a stale file overwrite a blob updated seconds later.
+    """
+    modified = getattr(blob, "last_modified", None)
+    if modified is None:
+        return "unknown"
+    blob_time, local_time = modified.timestamp(), path.stat().st_mtime
+    if blob_time > local_time + CLOCK_TOLERANCE_SECONDS:
+        return "blob"
+    if local_time > blob_time + CLOCK_TOLERANCE_SECONDS:
+        return "local"
+    if read_blob() == path.read_bytes():
+        return "same"
+    return "blob" if blob_time > local_time else "local"
+
+
+def _read(client: Any, name: str) -> bytes:
+    buffer = io.BytesIO()
+    client.download_blob(name).readinto(buffer)
+    return buffer.getvalue()
+
+
+def _align(path: Path, modified: Any) -> None:
+    """Stamp a just-synced file with its blob's time, so the next sync sees the two as equal
+    instead of re-sending every file this machine pushed or pulled."""
+    if modified is not None:
+        stamp = modified.timestamp()
+        os.utime(path, (stamp, stamp))

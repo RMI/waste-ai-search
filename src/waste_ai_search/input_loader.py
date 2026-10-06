@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 from typing import Any
 
@@ -65,15 +66,28 @@ def merge_headers(*header_groups: list[str]) -> list[str]:
 
 
 def write_csv_records(path: Path, rows: list[dict[str, Any]], headers: list[str]) -> None:
+    """Write under a temporary name, then rename, so a kill mid-write never leaves half a file.
+
+    The run log is rewritten after every finished site; written in place, a kill during one of
+    those writes could empty it and lose every earlier site's Bing count. The temporary name is
+    hidden, so blob push skips it.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        with temporary.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 
 REFRESHED_SEED_NAME = "refreshed_seed.csv"
+SEED_NAME = "seed.csv"
 
 
 def refreshed_seed_path(config: Any) -> Path:
@@ -83,10 +97,10 @@ def refreshed_seed_path(config: Any) -> Path:
 
 def run_seed_path(config: Any) -> Path:
     """Where a database-seeded run keeps the corpus it read."""
-    return config.run_dir / "seed.csv"
+    return config.run_dir / SEED_NAME
 
 
-def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
+def resolve_sites(config: Any, allow_database: bool = True) -> tuple[list[dict[str, Any]], list[str]]:
     """The run's seed: an explicit CSV, else this run's own snapshot, else the live database.
 
     The database is the source of truth, so a new run reads it directly rather than depending on
@@ -147,6 +161,16 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
                 "use a new --run-id."
             )
         return load_sites(snapshot)
+
+    if not allow_database:
+        # Only the search seeds a run. Anything after it - arbitrate, refresh-seed - must read the
+        # corpus the search used: seeding afresh would read today's database, which may have moved
+        # on, and would break arbitrate's promise to stay offline.
+        raise ValueError(
+            f"Run {config.run_id!r} has no pinned seed ({snapshot}), so there is nothing to read "
+            "without the database. Check the --run-id, or pass --input-csv with the corpus the "
+            "search used."
+        )
 
     from .seed_source import load_seed_sites, seed_headers
 

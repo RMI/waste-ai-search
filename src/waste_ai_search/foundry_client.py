@@ -77,7 +77,10 @@ class AzureFoundryAgentClient:
         limit = self.config.site_timeout_seconds
         deadline = time.monotonic() + limit if limit > 0 else None
         last_error: Exception | None = None
-        for attempt in range(1, self.config.max_retries + 1):
+        # At least one attempt: 0 retries means "do not retry", not "never call" (which then
+        # failed every site on an empty loop).
+        attempts = max(1, self.config.max_retries)
+        for attempt in range(1, attempts + 1):
             try:
                 remaining = None if deadline is None else deadline - time.monotonic()
                 text = self._invoke_agent(prompt, remaining)
@@ -85,7 +88,7 @@ class AzureFoundryAgentClient:
             except Exception as exc:  # noqa: BLE001 - preserve retries around SDK/network calls
                 last_error = exc
                 delay = min(2 * attempt, 10)
-                if attempt >= self.config.max_retries:
+                if attempt >= attempts:
                     break
                 # A retry that cannot finish in time would only add billed queries.
                 if deadline is not None and time.monotonic() + delay >= deadline:
