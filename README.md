@@ -103,7 +103,7 @@ run:
 
 | File | What it gives you |
 |---|---|
-| `consolidation.consolidated_facility.csv.gz` | The baseline the search filled gaps in, every facility-year row |
+| `consolidation.consolidated_facility.csv.gz` | The baseline the search filled gaps in, with all facility-year rows |
 | `consolidation.value_resolution_ledger.csv.gz` | For each baseline value, the source and the record in it (`data_source`, `data_source_facility_id`) |
 | `entity_linkage.crosswalk_*.csv.gz` | Every source record linked to each facility, whether or not it supplied a value |
 | `manifest.json` | When it was taken, the `consolidation_run_id`, and each table's row count and checksum |
