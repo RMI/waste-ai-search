@@ -15,7 +15,7 @@ import json
 import pytest
 
 from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
-from waste_ai_search.schema import NOT_A_WASTE_FACILITY
+from waste_ai_search.schema import FACILITY_TYPE_OFFERED, NOT_A_WASTE_FACILITY
 
 
 def guidance(site):
@@ -89,10 +89,8 @@ def test_the_not_a_waste_facility_guidance_sits_alongside_the_definitions():
 
 def test_corroborated_sites_see_the_database_values_and_recycling_center():
     text = guidance(corroborated_site())
-    assert text.startswith(
-        "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility, "
-        "Transfer Station, Recycling Center."
-    )
+    assert text.startswith(f"Allowed values only: {', '.join(FACILITY_TYPE_OFFERED)}.")
+    assert {"Transfer Station", "Recycling Center"} <= set(FACILITY_TYPE_OFFERED)
     assert NOT_A_WASTE_FACILITY not in text
 
 

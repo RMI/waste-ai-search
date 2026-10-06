@@ -157,6 +157,23 @@ def test_waste_depth_is_exported_as_a_check_backed_vocabulary():
     assert DB_ENUMS["waste_depth"] == ["<=5m", ">5m"]
 
 
+@pytest.mark.parametrize(
+    "answer, expected",
+    [
+        ("transfer station", "Transfer Station"),
+        ("waste transfer station", "Transfer Station"),
+        ("recycling center", "Recycling Center"),
+        ("recycling centre", "Recycling Center"),
+        ("recycling depot", "Recycling Center"),
+        ("materials recovery facility", "Recycling Center"),
+    ],
+)
+def test_every_new_facility_type_answer_maps_to_its_value(answer, expected):
+    from waste_ai_search.schema import map_enum_value
+
+    assert map_enum_value("facility_type", answer)[0] == expected
+
+
 def test_transfer_station_is_emitted_as_a_pending_value():
     """In every transformed.* CHECK, but not yet the enum type or consolidated_facility's CHECK."""
     from waste_ai_search.db_enums import FACILITY_TYPE_VALUES

@@ -30,6 +30,7 @@ from waste_ai_search.prompt_builder import (
 )
 from waste_ai_search.schema import (
     CONTRADICTION_HEADERS,
+    FACILITY_TYPE_OFFERED,
     NOT_A_WASTE_FACILITY,
     PENDING_UPSTREAM_FACILITY_TYPES,
     map_enum_value,
@@ -323,7 +324,7 @@ def test_a_corroborated_site_prompt_is_not_offered_the_value():
 
     assert NOT_A_WASTE_FACILITY not in prompt
     assert "IS STILL A WASTE DISPOSAL" not in prompt
-    assert "Allowed values only: Sanitary Landfill, Controlled Dumpsite, Dumpsite, Incineration Facility, Transfer Station, Recycling Center." in prompt
+    assert f"Allowed values only: {', '.join(FACILITY_TYPE_OFFERED)}." in prompt
 
 
 def test_an_unconfirmed_site_prompt_offers_it_in_guidance_and_definitions():
