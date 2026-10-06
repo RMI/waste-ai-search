@@ -125,3 +125,60 @@ def test_a_rebuild_during_seeding_stops_the_run(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="rebuilt"):
         resolve_sites(config)
     assert not run_seed_path(config).exists()  # so the next attempt seeds and snapshots afresh
+
+
+def test_the_crosswalk_pattern_matches_the_underscore_literally():
+    seen = []
+
+    class _Recorder(_Cursor):
+        def execute(self, sql, params=None):
+            seen.append(sql)
+            super().execute(sql, params)
+
+    snapshot.crosswalk_tables(_Recorder())
+    assert "LIKE 'crosswalk\\_%%'" in seen[0]  # psycopg turns %% into %; \_ is a literal _
+
+
+def test_the_manifest_is_uploaded_after_every_other_file(tmp_path):
+    from waste_ai_search import storage
+
+    folder = snapshot.snapshot_dir(tmp_path)
+    folder.mkdir(parents=True)
+    for name in ("a.csv.gz", "manifest.json", "b.csv.gz"):
+        (folder / name).write_text("x")
+    (tmp_path / "seed.csv").write_text("x")
+
+    class _Client:
+        uploaded = []
+
+        def upload_blob(self, name, handle, overwrite):  # noqa: ARG002
+            self.uploaded.append(name)
+
+    client = _Client()
+    storage.push(tmp_path, "outputs/runs/r", client=client)
+    assert client.uploaded[-1].endswith("consolidation_snapshot/manifest.json")
+    assert len(client.uploaded) == 4
+
+
+def test_a_resumed_run_refuses_an_incomplete_snapshot(tmp_path):
+    from waste_ai_search.input_loader import resolve_sites, run_seed_path, write_csv_records
+    from waste_ai_search.run_context import PipelineConfig
+
+    config = PipelineConfig(input_csv=None, run_dir=tmp_path / "run", run_id="t")
+    write_csv_records(run_seed_path(config), [{"site_id": "1", "site_name": "A"}], ["site_id", "site_name"])
+    resolve_sites(config)  # no snapshot folder at all: a run from before WP-548 still resumes
+
+    folder = snapshot.snapshot_dir(config.run_dir)
+    folder.mkdir()
+    (folder / "t.csv.gz").write_text("x")
+    with pytest.raises(RuntimeError, match="incomplete consolidation snapshot"):
+        resolve_sites(config)  # upload cut off before the manifest
+
+    manifest = {"tables": {"t": {"file": "t.csv.gz"}, "u": {"file": "u.csv.gz"}}}
+    (folder / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(RuntimeError, match="u.csv.gz"):
+        resolve_sites(config)  # manifest present, a listed file is not
+
+    (folder / "u.csv.gz").write_text("x")
+    sites, _headers = resolve_sites(config)
+    assert [s["site_id"] for s in sites] == ["1"]

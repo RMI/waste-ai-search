@@ -165,8 +165,13 @@ def push(source: Path, prefix: str, client: Any = None) -> int:
         with path.open("rb") as handle:
             client.upload_blob(name, handle, overwrite=True)
 
+    # A manifest marks its folder complete (WP-548), so it goes up only once everything else has:
+    # an interrupted upload then leaves a folder without one, which a resumed run refuses.
+    from .snapshot import MANIFEST_NAME
+
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        list(executor.map(upload, files))
+        list(executor.map(upload, [path for path in files if path.name != MANIFEST_NAME]))
+        list(executor.map(upload, [path for path in files if path.name == MANIFEST_NAME]))
     return len(files)
 
 

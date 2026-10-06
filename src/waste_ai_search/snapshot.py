@@ -51,7 +51,7 @@ def crosswalk_tables(cursor: Any) -> list[str]:
     """Every entity-linkage crosswalk, whichever strategy consolidation used this time."""
     cursor.execute(
         "SELECT table_name FROM information_schema.tables "
-        "WHERE table_schema = %s AND table_name LIKE 'crosswalk%%' ORDER BY table_name",
+        "WHERE table_schema = %s AND table_name LIKE 'crosswalk\\_%%' ORDER BY table_name",
         (CROSSWALK_SCHEMA,),
     )
     return [f"{CROSSWALK_SCHEMA}.{row[0]}" for row in cursor.fetchall()]
@@ -124,6 +124,22 @@ def take_snapshot(run_dir: Path, config: Any = None) -> dict[str, Any]:
         shutil.rmtree(staging, ignore_errors=True)
         raise
     return manifest
+
+
+def missing_snapshot_files(run_dir: Path) -> list[str] | None:
+    """What a run's snapshot lacks; None when the run has no snapshot folder at all.
+
+    The manifest is written, and pushed to blob, last, so a folder without one - or without a file
+    it lists - is an interrupted copy or upload, not a whole snapshot.
+    """
+    folder = snapshot_dir(run_dir)
+    if not folder.exists():
+        return None
+    manifest_path = folder / MANIFEST_NAME
+    if not manifest_path.exists():
+        return [MANIFEST_NAME]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return [info["file"] for info in manifest["tables"].values() if not (folder / info["file"]).exists()]
 
 
 def current_consolidation_run_ids(config: Any = None) -> list[str]:

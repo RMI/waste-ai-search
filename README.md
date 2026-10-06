@@ -103,7 +103,7 @@ run:
 
 | File | What it gives you |
 |---|---|
-| `consolidation.consolidated_facility.csv.gz` | The baseline the search filled gaps in, all 58,766 facility-year rows |
+| `consolidation.consolidated_facility.csv.gz` | The baseline the search filled gaps in, every facility-year row |
 | `consolidation.value_resolution_ledger.csv.gz` | For each baseline value, the source and the record in it (`data_source`, `data_source_facility_id`) |
 | `entity_linkage.crosswalk_*.csv.gz` | Every source record linked to each facility, whether or not it supplied a value |
 | `manifest.json` | When it was taken, the `consolidation_run_id`, and each table's row count and checksum |
@@ -112,8 +112,9 @@ run:
 `site_id` to its raw records now, and onto the new `internal_facility_id` later. That is also how a
 later run can search only what changed. Tables are read whole (every country, not just those
 searched) in one read-only transaction, so they describe one consolidation state; the run stops
-if consolidation is rebuilt while it is seeding. About 7 seconds and 4.6 MB per run. A run seeded
-with `--input-csv` reads no database, so it takes no snapshot.
+if consolidation is rebuilt while it is seeding. `manifest.json` is written and uploaded last, so a
+resumed run whose copy lacks it, or a file it lists, stops rather than carry on without its
+consolidation state. A run seeded with `--input-csv` reads no database, so it takes no snapshot.
 
 A run therefore needs database access. Without the VPN, seed a file first with
 `scripts/seed_metadata_search.py` and pass it with `--input-csv`.
