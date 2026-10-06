@@ -197,10 +197,14 @@ def test_the_pending_upstream_facility_types_are_pinned():
     from waste_ai_search.schema import PENDING_UPSTREAM_FACILITY_TYPES
 
     assert PENDING_UPSTREAM_FACILITY_TYPES == ["Transfer Station", "Recycling Center", "Not a Waste Facility"]
-    # Once the database carries one, generate_enums.py picks it up and it stops being pending:
-    # this assertion then fails, prompting its removal from the pending list.
+    # The enum alone is not the gate: consolidated_facility's chk_facility_type is separate and can
+    # lag. When this fails, run check_db_schema.py and remove the value from the pending list only
+    # once it reports the value accepted by both.
     for value in PENDING_UPSTREAM_FACILITY_TYPES:
-        assert value not in FACILITY_TYPE_VALUES
+        assert value not in FACILITY_TYPE_VALUES, (
+            f"{value!r} is now in the enum. Remove it from PENDING_UPSTREAM_FACILITY_TYPES only once "
+            "check_db_schema.py reports it accepted by the enum AND chk_facility_type."
+        )
 
 
 def test_first_present_keeps_a_zero(): 

@@ -185,15 +185,22 @@ def main() -> int:
     #     is rejected, and COPY is all-or-nothing, so it must never be a surprise.
     from waste_ai_search.schema import PENDING_UPSTREAM_FACILITY_TYPES
 
-    live_types = constrained.get("facility_type") or enum_values.get("facility_type") or []
+    # The enum and consolidated_facility's CHECK are separate surfaces and roll out separately
+    # (Transfer Station reached the transformed.* CHECKs before either), so a value counts as
+    # accepted only once every surface that exists carries it.
+    surfaces = {
+        "facility_type enum": enum_values.get("facility_type"),
+        "consolidated_facility chk_facility_type": constrained.get("facility_type"),
+    }
     for value in PENDING_UPSTREAM_FACILITY_TYPES:
-        if value in live_types:
-            print(f"ok    facility_type {value!r}: now accepted by the database - remove it from "
-                  "PENDING_UPSTREAM_FACILITY_TYPES and regenerate db_enums.py")
+        missing = [name for name, values in surfaces.items() if values is not None and value not in values]
+        if not missing:
+            print(f"ok    facility_type {value!r}: now accepted by the enum and chk_facility_type - "
+                  "remove it from PENDING_UPSTREAM_FACILITY_TYPES and regenerate db_enums.py")
         else:
-            print(f"WARN  facility_type {value!r}: emitted by the pipeline but NOT accepted by the "
-                  "database; any load containing it will be rejected until the enum and "
-                  "chk_facility_type are extended upstream")
+            print(f"WARN  facility_type {value!r}: emitted by the pipeline but NOT accepted by "
+                  f"{' or '.join(missing)}; any load containing it will be rejected until both "
+                  "are extended upstream")
 
     # 5. The raw-name joins. Every table, join key, name, translation and language column in
     #    RAW_NAME_SOURCES is named as a string, so a typo in any of them is invisible to the

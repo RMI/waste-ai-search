@@ -483,8 +483,10 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 > **Pending upstream.** `Transfer Station` is in `chk_facility_type` on every `transformed.*` table,
 > but not yet in the `facility_type` enum type or `consolidation.consolidated_facility`'s
 > `chk_facility_type`; `Recycling Center` is in none of them. Until they are, consolidating a row
-> with either is rejected, as with `Not a Waste Facility`. `generate_enums.py` picks them up from the
-> enum type, and each then comes off `PENDING_UPSTREAM_FACILITY_TYPES`.
+> with either is rejected, as with `Not a Waste Facility`. Taking a value off
+> `PENDING_UPSTREAM_FACILITY_TYPES` is a manual step: do it only once `check_db_schema.py` reports
+> it accepted by **both** the enum and `consolidated_facility`'s `chk_facility_type`, which roll out
+> separately. Then regenerate `db_enums.py`; `generate_enums.py` does not edit the pending list.
 
 ### Outputs
 
