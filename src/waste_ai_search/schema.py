@@ -676,6 +676,8 @@ def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
         return mapped_value, note
     for candidate in allowed:
         if candidate.lower() == text:
+            if candidate == normalize_scalar(value):
+                return candidate, ""
             return candidate, f"normalized case {normalize_scalar(value)!r} -> {candidate!r}"
     return None, f"{field_name} value {normalize_scalar(value)!r} is not a valid enum member; stored as NULL."
 
