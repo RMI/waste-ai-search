@@ -23,6 +23,19 @@ from waste_ai_search.input_loader import (
 from waste_ai_search.run_context import PipelineConfig
 
 
+@pytest.fixture(autouse=True)
+def no_snapshot(monkeypatch):
+    """Seeding from the database also copies the consolidation tables (F32); stub that too."""
+    import waste_ai_search.snapshot as snapshot
+
+    taken = []
+    monkeypatch.setattr(
+        snapshot, "take_snapshot", lambda run_dir: taken.append(run_dir) or {"consolidation_run_ids": ["c1"]}
+    )
+    monkeypatch.setattr(snapshot, "current_consolidation_run_ids", lambda: ["c1"])
+    return taken
+
+
 def _config(tmp_path: Path, input_csv: Path | None = None, iso3: list[str] | None = None):
     return PipelineConfig(
         input_csv=input_csv,
