@@ -44,6 +44,8 @@ class PipelineConfig:
     limit: int = 0
     iso3: list[str] = field(default_factory=list)
     site_ids: list[str] = field(default_factory=list)
+    # One of the country batches in schema.COUNTRY_BATCHES (F30); 0 means no batch filter.
+    batch: int = 0
     force: bool = False
     site_delay_seconds: float = 3.0
     hard_site_timeout_seconds: int = 240

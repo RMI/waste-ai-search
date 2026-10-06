@@ -115,6 +115,33 @@ COORDINATES_ONLY_ISO3 = {"BRA"}
 
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
 
+# The full run in six batches, run in order (F30). Batches 1-2 are English-speaking, so SMEs learn
+# the review process on familiar sources: English as the main language, then as an official one.
+# Batches 3-5 follow the most blank core fields (searchable sites x share of status, type, opening
+# year, gas collection, incoming waste, waste in place and area left blank), measured on the
+# 3 Oct 2026 seed at about 2,000-2,300 sites each. The last batch is every country not listed, so
+# a country new to the database is never left out. Default exclusions still apply in every batch.
+COUNTRY_BATCHES = {
+    1: ["CAN", "GBR", "AUS", "NZL", "IRL"],
+    2: [
+        "IND", "PHL", "NGA", "ZAF", "GHA", "KEN", "UGA", "TZA", "ZMB", "ZWE", "BWA", "NAM", "LSO",
+        "SGP", "MLT", "TTO", "GUY", "BLZ", "FJI", "PNG", "MUS", "SLE", "GMB", "PAK", "SSD", "JAM",
+        "LBR", "MWI", "RWA",
+    ],
+    3: ["MEX"],
+    4: ["DEU", "RUS", "TUR"],
+    5: ["CHN", "FRA", "ITA", "POL", "ESP", "IDN"],
+}
+LAST_BATCH = max(COUNTRY_BATCHES) + 1
+
+
+def in_batch(iso3: str, batch: int) -> bool:
+    """Whether a country belongs to a batch; the last batch takes every country not listed."""
+    code = iso3.strip().upper()
+    if batch == LAST_BATCH:
+        return not any(code in countries for countries in COUNTRY_BATCHES.values())
+    return code in COUNTRY_BATCHES.get(batch, [])
+
 
 # --- not a waste facility (WP-525) -------------------------------------------------------------
 # For facilities nothing independently confirms, facility_type may also come back as

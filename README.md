@@ -233,6 +233,28 @@ Each attempt at a site is cut off after `--hard-site-timeout-seconds` (240), ret
 call still running then is abandoned and not retried. The HTTP timeout
 (`AZURE_FOUNDRY_TIMEOUT_SECONDS`) cannot do this - one site waited 15 minutes past it.
 
+### The full run, in six country batches
+
+Run the batches in order, one run id each, so each gets its own review workbook and its own Bing
+total. Batches 1-2 are English-speaking, so SMEs learn the review process on familiar sources;
+3-5 follow the most blank core fields; 6 is every other country. The lists are `COUNTRY_BATCHES`
+in `schema.py`. Sizes and costs are from the 3 Oct 2026 seed at about 19 Bing queries per site.
+
+```bash
+uv run waste-ai-search run --run-id batch1 --batch 1 --workers 16
+```
+
+| Batch | Countries | Sites | Est. Bing cost |
+|---|---|---|---|
+| 1 | CAN, GBR, AUS, NZL, IRL (main language English) | 1,931 | ~$525 |
+| 2 | IND, PHL, NGA, ZAF and 21 smaller (English an official language) | 856 | ~$230 |
+| 3 | MEX | 2,220 | ~$605 |
+| 4 | DEU, RUS, TUR | 2,262 | ~$615 |
+| 5 | CHN, FRA, ITA, POL, ESP, IDN | 2,279 | ~$620 |
+| 6 | Every other country (110 today) | 2,574 | ~$700 |
+
+The six cover all 12,122 searchable sites once each. USA and Brazil stay excluded, as everywhere.
+
 ### What is actually searched — read this before a full run
 
 Three rules narrow the search. Together they mean a full run queries **12,392 of 15,537
@@ -275,7 +297,8 @@ Unknown is **not** treated as inexact: only an explicit FALSE triggers a coordin
 
 **3. Everywhere else: gap-fill, plus the gas-capture gate.**
 
-- Identity coordinates (`found_latitude`, `found_longitude`) are always requested. `found_facility_name` is too, **except** where the seed's name came from a Tier 1–2 source (about 10,600 facilities): there identity rests on coordinates, and the name is not re-searched. This needs per-attribute provenance; with none, the name is still asked.
+- Identity (`found_facility_name`, `found_latitude`, `found_longitude`) is requested **except** where the seed's value came from a Tier 1–2 source: the name for about 10,600 facilities, and both coordinates for 4,063 of the 12,122 searchable sites (Mexico INEGI, E-PRTR, Canada GHGRP). This needs per-attribute provenance; with none, the attribute is still asked. Coordinates flagged inexact are still searched.
+- **Where both are trusted, the wrong-facility check does not run.** That check compares the found coordinates with the seed and withdraws auto-validation beyond 5 km; with no found coordinates there is nothing to compare. Accepted to cut cost (design doc F29): skipping coordinates saves 8,126 of 175,293 attribute-requests (4.6%).
 - Metadata attributes are requested **only where that facility's baseline is empty**.
 - The seven `gccs_*` attributes are requested **only where gas collection is known present** —
   212 to 603 facilities each, not 13,000. See the two-pass note above for why this loses nothing.

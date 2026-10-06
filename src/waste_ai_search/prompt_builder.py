@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .credibility import SOURCE_TYPES, TIER_DEFINITIONS, trusted_baseline_name
+from .credibility import (
+    SOURCE_TYPES,
+    TIER_DEFINITIONS,
+    trusted_baseline_coordinates,
+    trusted_baseline_name,
+)
 from .schema import (
     CONTRADICTION_CHECK_SOURCES,
     CORROBORATING_ATTRIBUTES,
@@ -244,13 +249,14 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
         # everything else for these facilities is government-sourced and left alone.
         return list(COORDINATE_ATTRIBUTES) if location_is_inexact(site) else []
 
-    # Identity is always requested, except a name a Tier 1-2 source already supplied (WP-531).
-    # Coordinates are still asked of every facility.
-    requested = [
-        name
-        for name in IDENTITY_ATTRIBUTES
-        if not (name == "found_facility_name" and trusted_baseline_name(site))
-    ]
+    # Identity is always requested, except what a Tier 1-2 source already supplied: the name
+    # (WP-531) and the coordinates (F29). Coordinates flagged inexact are still searched.
+    known: set[str] = set()
+    if trusted_baseline_name(site):
+        known.add("found_facility_name")
+    if trusted_baseline_coordinates(site) and not location_is_inexact(site):
+        known.update(COORDINATE_ATTRIBUTES)
+    requested = [name for name in IDENTITY_ATTRIBUTES if name not in known]
     gas_present = has_gas_collection(site)
     for field in GAP_FILL_ATTRIBUTES:
         if not is_blank(site.get(field)):
@@ -386,13 +392,29 @@ Names:
             "- site_name is already confirmed by an authoritative source. Use it to search; do not\n"
             "  return a facility name.\n",
         )
-    identity_rule = (
-        "- found_facility_name, found_latitude and found_longitude establish that you found the\n"
-        "  RIGHT facility. Always return them when a source supports them."
-        if asks_name
-        else "- found_latitude and found_longitude establish that you found the RIGHT facility.\n"
-        "  Always return them when a source supports them. The name is already confirmed."
-    )
+    asks_coordinates = "found_latitude" in attributes
+    if asks_name and asks_coordinates:
+        identity_rule = (
+            "- found_facility_name, found_latitude and found_longitude establish that you found the\n"
+            "  RIGHT facility. Always return them when a source supports them."
+        )
+    elif asks_coordinates:
+        identity_rule = (
+            "- found_latitude and found_longitude establish that you found the RIGHT facility.\n"
+            "  Always return them when a source supports them. The name is already confirmed."
+        )
+    elif asks_name:
+        identity_rule = (
+            "- found_facility_name establishes that you found the RIGHT facility. Always return it\n"
+            "  when a source supports it. The coordinates are already confirmed: use them to check\n"
+            "  that each source describes this facility, and do not return coordinates."
+        )
+    else:
+        identity_rule = (
+            "- The name and coordinates are already confirmed by an authoritative source. Use them\n"
+            "  to check that each source describes THIS facility, and do not return a name or\n"
+            "  coordinates."
+        )
 
     closure_focus = ""
     if "closing_year" in attributes and looks_inactive(site):
