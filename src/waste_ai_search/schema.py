@@ -522,7 +522,8 @@ REVIEW_QUEUE_HEADERS = [
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
     "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
     "agreeing_source_count",
-    "evidence_summary", "validation_status", "reviewer", "reviewed_date", "researcher_notes",
+    "evidence_summary", "validation_status", "rejection_reason", "reviewer", "reviewed_date",
+    "researcher_notes",
 ]
 
 SUPPLEMENTARY_LEADS_HEADERS = [
@@ -603,12 +604,16 @@ DEFINITION_VALUES = {
     "validation_status": ["Needs review", "Validated", "Rejected", "Auto-validated", "Routed to leads"],
     # What a reviewer may choose. The other statuses are set by the pipeline, not by hand.
     "review_decision": ["Validated", "Rejected"],
+    # Why a reviewer rejected a value. A fixed list, so rejections can be counted by cause to find
+    # where the AI goes wrong and where auto-validation is safe; detail goes in researcher_notes.
+    "rejection_reason": ["Wrong facility", "Not in source", "Wrong value", "Outdated", "Other"],
 }
 
 # Columns a reviewer may edit, and the vocabulary each offers. Anything absent here is
 # read-only in the workbook, so a dropdown never invites editing a pipeline-set field.
 FIELD_TO_DEFINITION = {
     "validation_status": "review_decision",
+    "rejection_reason": "rejection_reason",
 }
 
 FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS = [

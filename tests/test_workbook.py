@@ -26,7 +26,7 @@ def test_expected_tabs_exist(tmp_path):
     ]
 
 
-def test_only_validation_status_is_editable_via_dropdown(tmp_path):
+def test_only_the_review_decision_columns_have_dropdowns(tmp_path):
     """A dropdown on a pipeline-set column reads as permission to change it."""
     ws = build(tmp_path)["Review_Queue"]
     headers = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
@@ -36,7 +36,7 @@ def test_only_validation_status_is_editable_via_dropdown(tmp_path):
         for rng in str(dv.sqref).split():
             validated_columns.add("".join(ch for ch in rng.split(":")[0] if ch.isalpha()))
 
-    assert validated_columns == {headers["validation_status"]}
+    assert validated_columns == {headers["validation_status"], headers["rejection_reason"]}
     assert headers["resolution"] not in validated_columns
     assert headers["winning_source_tier"] not in validated_columns
 
@@ -47,7 +47,8 @@ def test_the_dropdown_offers_only_reviewer_choosable_outcomes(tmp_path):
     defs = wb["Definitions"]
     columns = {defs.cell(1, c).value: c for c in range(1, defs.max_column + 1)}
 
-    dv = next(iter(ws.data_validations.dataValidation))
+    queue = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
+    dv = next(d for d in ws.data_validations.dataValidation if str(d.sqref).startswith(queue["validation_status"]))
     letter = get_column_letter(columns["review_decision"])
     assert f"${letter}$" in dv.formula1
     assert DEFINITION_VALUES["review_decision"] == ["Validated", "Rejected"]
@@ -66,3 +67,19 @@ def test_readme_tab_documents_every_tab_and_the_csv_sidecars(tmp_path):
     for tab in ("Review_Queue", "Leads", "Parse_Warnings", "Definitions"):
         assert tab in described
     assert any(str(name).startswith("(file)") for name in described)
+
+
+def test_a_rejection_reason_is_picked_from_a_fixed_list(tmp_path):
+    """Rejections are counted by cause to find where the AI errs, so the reason is a dropdown."""
+    wb = build(tmp_path)
+    ws = wb["Review_Queue"]
+    defs = wb["Definitions"]
+    columns = {defs.cell(1, c).value: c for c in range(1, defs.max_column + 1)}
+    queue = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
+
+    dv = next(d for d in ws.data_validations.dataValidation if str(d.sqref).startswith(queue["rejection_reason"]))
+    letter = get_column_letter(columns["rejection_reason"])
+    assert f"${letter}$2:${letter}$6" in dv.formula1
+    offered = [defs.cell(r, columns["rejection_reason"]).value for r in range(2, 7)]
+    assert offered == ["Wrong facility", "Not in source", "Wrong value", "Outdated", "Other"]
+    assert REVIEW_QUEUE_HEADERS.index("rejection_reason") == REVIEW_QUEUE_HEADERS.index("validation_status") + 1

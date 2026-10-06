@@ -577,11 +577,12 @@ sign-off. In the pilot this caught a site whose findings were 238 km from the fa
 
 ### 4. Record the decision
 
-Edit only these four columns; everything else is read-only:
+Edit only these columns; everything else is read-only:
 
 | Column | Enter |
 |---|---|
 | `validation_status` | `Validated` or `Rejected` (dropdown) |
+| `rejection_reason` | For a rejection: `Wrong facility`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Counted by cause to find where the AI errs and where auto-validation is safe |
 | `reviewer` | Your name |
 | `reviewed_date` | The date |
 | `researcher_notes` | Why, especially for a rejection |
