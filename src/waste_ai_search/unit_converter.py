@@ -61,6 +61,7 @@ CANONICAL_UNITS = {
     "gccs_ch4_collected_metric_tonnes": "metric tonnes CH4",
     "gccs_ch4_flow_to_project_metric_tonnes": "metric tonnes CH4",
     "gccs_collection_efficiency": "fraction",
+    "flare_efficiency": "fraction",
     "distance_to_original_coordinates_km": "km",
 }
 

@@ -44,6 +44,7 @@ WASTE_SITE_BASE_EXTRA_FIELDS = [
 GAP_FILL_ATTRIBUTES = [
     "facility_status",
     "facility_type",
+    "bulk_waste_type",
     # WP-531. Review layer only for now: the upstream standardized spec has no operator column, so
     # it is deliberately absent from ATTRIBUTE_TO_STANDARD_COLUMN and never reaches the
     # standardized table. consolidated_facility has no operator either, so the baseline is always
@@ -61,6 +62,8 @@ GAP_FILL_ATTRIBUTES = [
     "cover_types",
     "has_biocover",
     "gccs_ch4_flared_metric_tonnes",
+    "has_flare",
+    "flare_efficiency",
     "gccs_ch4_generated_metric_tonnes",
     "gccs_ch4_collected_metric_tonnes",
     "gccs_ch4_flow_to_project_metric_tonnes",
@@ -68,6 +71,14 @@ GAP_FILL_ATTRIBUTES = [
     "gccs_current_project_status",
     "gccs_collection_efficiency",
 ]
+
+# Kept above so the seed, older cached responses and re-arbitrated runs still read them, but no
+# longer asked of the agent (F31).
+UNSEARCHED_ATTRIBUTES = {
+    "gccs_ch4_generated_metric_tonnes",
+    "gccs_ch4_collected_metric_tonnes",
+    "gccs_ch4_flow_to_project_metric_tonnes",
+}
 
 # Always requested. These are how we know the agent found the *right* facility, so they are not
 # gap-filled: identity confirmation is what makes an auto-validated fill defensible (Q30).
@@ -193,18 +204,21 @@ CALCULATED_ATTRIBUTES = [
 TARGET_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *CALCULATED_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
 REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
 
-BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover"}
+BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover", "has_flare"}
 ARRAY_TARGET_ATTRIBUTES = {"cover_types", "gccs_energy_project_type", "gccs_current_project_status"}
 # Stored as a numeric array in the spec, so multiple project rows can collapse into one record.
 NUMERIC_ARRAY_TARGET_ATTRIBUTES = {"gccs_ch4_flow_to_project_metric_tonnes"}
 # Spec requires a fraction between 0 and 1, never a percentage.
-FRACTION_TARGET_ATTRIBUTES = {"gccs_collection_efficiency"}
+FRACTION_TARGET_ATTRIBUTES = {"gccs_collection_efficiency", "flare_efficiency"}
 
 # Gas collection and control system attributes. Only meaningful at a facility that has a gas
 # collection system, so they are not requested where the baseline says there is none: asking
 # about methane flaring at a site with no capture system spends prompt on a certain "nothing".
+# A flare burns collected gas, so the flare attributes are gated the same way (F31).
 GCCS_ATTRIBUTES = {
     "gccs_ch4_flared_metric_tonnes",
+    "has_flare",
+    "flare_efficiency",
     "gccs_ch4_generated_metric_tonnes",
     "gccs_ch4_collected_metric_tonnes",
     "gccs_ch4_flow_to_project_metric_tonnes",
@@ -226,6 +240,7 @@ NUMERIC_TARGET_ATTRIBUTES = {
     "gccs_ch4_collected_metric_tonnes",
     "gccs_ch4_flow_to_project_metric_tonnes",
     "gccs_collection_efficiency",
+    "flare_efficiency",
 }
 
 # Ranges the spec states. Checked after conversion; out-of-range values are not promotable.
@@ -238,6 +253,7 @@ ATTRIBUTE_RANGES = {
     "gccs_ch4_collected_metric_tonnes": (0.0, None),
     "gccs_ch4_flow_to_project_metric_tonnes": (0.0, None),
     "gccs_collection_efficiency": (0.0, 1.0),
+    "flare_efficiency": (0.0, 1.0),
     "found_latitude": (-90.0, 90.0),
     "found_longitude": (-180.0, 180.0),
 }
@@ -348,6 +364,32 @@ GCCS_CURRENT_PROJECT_STATUS_MAP = {
     "unknown": None,
 }
 
+# F31. No database enum or standardized column exists yet, so these values are this project's own;
+# like `operator`, bulk_waste_type reaches resolved.csv and review but not the standardized table.
+BULK_WASTE_TYPE_VALUES = ["municipal solid waste", "inert waste", "others"]
+# The distinction that matters is municipal solid waste, which decomposes and generates methane,
+# against inert waste, which does not; the prompt defines each and classifies by the bulk received.
+BULK_WASTE_TYPE_MAP = {
+    "msw": "municipal solid waste",
+    "municipal waste": "municipal solid waste",
+    "household waste": "municipal solid waste",
+    "domestic waste": "municipal solid waste",
+    "commercial waste": "municipal solid waste",
+    "inert": "inert waste",
+    "construction and demolition waste": "inert waste",
+    "c&d waste": "inert waste",
+    "demolition waste": "inert waste",
+    "rubble": "inert waste",
+    "other": "others",
+    # Not knowing is not a finding: stored NULL, so the site is asked again next pass.
+    "unknown": None,
+    "mixed": None,
+    "industrial": "others",
+    "industrial waste": "others",
+    "hazardous": "others",
+    "hazardous waste": "others",
+}
+
 # `waste_depth` is the one categorical the spec derives from a numeric source measurement rather
 # than from a source category, so it has no mapping table and is not in ENUM_MAPS. Its values come
 # from db_enums.py like every other vocabulary, but via the CHECK constraint on
@@ -415,6 +457,7 @@ ENUM_MAPS = {
     "cover_types": (COVER_TYPE_MAP, COVER_TYPE_VALUES),
     "gccs_energy_project_type": (GCCS_ENERGY_PROJECT_TYPE_MAP, GCCS_ENERGY_PROJECT_TYPE_VALUES),
     "gccs_current_project_status": (GCCS_CURRENT_PROJECT_STATUS_MAP, GCCS_CURRENT_PROJECT_STATUS_VALUES),
+    "bulk_waste_type": (BULK_WASTE_TYPE_MAP, BULK_WASTE_TYPE_VALUES),
 }
 
 BOOLEAN_INPUT_MAP = {
@@ -538,6 +581,7 @@ DEFINITION_VALUES = {
     "waste_depth": WASTE_DEPTH_VALUES,
     "gccs_energy_project_type": GCCS_ENERGY_PROJECT_TYPE_VALUES,
     "gccs_current_project_status": GCCS_CURRENT_PROJECT_STATUS_VALUES,
+    "bulk_waste_type": BULK_WASTE_TYPE_VALUES,
     "boolean_unknown": ["Yes", "No", "Unknown"],
     "value_basis": ["Direct", "Inferred", "Conflicting", "Not found"],
     "confidence_score": ["High", "Medium", "Low", "Excluded candidate"],

@@ -2,6 +2,7 @@
 from waste_ai_search.credibility import ai_filled_tiers
 from waste_ai_search.arbitration import resolve
 from waste_ai_search.prompt_builder import has_gas_collection, requested_attributes
+from waste_ai_search.schema import GCCS_ATTRIBUTES, UNSEARCHED_ATTRIBUTES
 from waste_ai_search.seed_refresh import REFRESH_COLUMNS, refresh_sites, refreshed_headers
 
 
@@ -37,14 +38,14 @@ def test_gccs_is_not_requested_until_gas_collection_is_known():
 
 def test_discovered_gas_collection_unlocks_gccs_on_the_next_pass():
     pass1 = site()
-    assert not [a for a in requested_attributes(pass1) if a.startswith("gccs")]
+    assert not set(requested_attributes(pass1)) & GCCS_ATTRIBUTES
 
     refreshed, stats = refresh_sites([pass1], [resolved("has_landfill_gas_collection", "TRUE")], "run1")
 
     assert stats["gas_collection_discovered"] == 1
     pass2 = refreshed[0]
     assert has_gas_collection(pass2)
-    assert len([a for a in requested_attributes(pass2) if a.startswith("gccs")]) == 7
+    assert set(requested_attributes(pass2)) & GCCS_ATTRIBUTES == GCCS_ATTRIBUTES - UNSEARCHED_ATTRIBUTES
 
 
 def test_answered_attributes_are_not_asked_again():

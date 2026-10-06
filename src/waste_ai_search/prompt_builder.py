@@ -22,6 +22,7 @@ from .schema import (
     parse_tristate_bool,
     GAP_FILL_ATTRIBUTES,
     IDENTITY_ATTRIBUTES,
+    UNSEARCHED_ATTRIBUTES,
     is_blank,
 )
 
@@ -41,6 +42,7 @@ ATTRIBUTE_UNITS = {
     "gccs_ch4_collected_metric_tonnes": "metric tonnes CH4",
     "gccs_ch4_flow_to_project_metric_tonnes": "metric tonnes CH4",
     "gccs_collection_efficiency": "fraction between 0 and 1",
+    "flare_efficiency": "fraction between 0 and 1",
 }
 
 # Definitions for each facility_type (WP-531). Labelled with the enum values exactly, since the
@@ -137,6 +139,26 @@ ATTRIBUTE_GUIDANCE = {
     "gccs_collection_efficiency": (
         "Fraction of generated landfill gas that is collected, as a value between 0 and 1. "
         "If the source gives a percentage, report the number and set unit to '%'."
+    ),
+    "has_flare": "Whether the facility has a flare that burns collected landfill gas. Yes, No, or Unknown.",
+    "flare_efficiency": (
+        "Destruction efficiency of the flare: the fraction of the methane sent to it that is "
+        "destroyed, as a value between 0 and 1. If the source gives a percentage, report the "
+        "number and set unit to '%'."
+    ),
+    "bulk_waste_type": (
+        "The type of waste that makes up MOST of what the facility receives. Allowed values only. "
+        "municipal solid waste - waste from households, and similar waste from shops, offices, "
+        "markets and institutions, collected by or for a municipality. It contains food, garden, "
+        "paper and other material that decomposes. A site that mainly takes this but also some "
+        "rubble or soil is still municipal solid waste. "
+        "inert waste - waste that does not decompose or react: construction and demolition "
+        "rubble, concrete, bricks, soil, stones and excavation material. A site permitted for "
+        "inert waste only belongs here. "
+        "others - mainly another kind of waste, such as industrial, hazardous or mining waste, or "
+        "sewage sludge. "
+        "If no source says what waste the facility receives, or no one type makes up most of it, "
+        "do not return bulk_waste_type."
     ),
     "found_facility_name": "The source's exact official or canonical name for this facility.",
     "found_latitude": "Source-reported latitude only. Never infer from an address or nearby place.",
@@ -259,7 +281,7 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
     requested = [name for name in IDENTITY_ATTRIBUTES if name not in known]
     gas_present = has_gas_collection(site)
     for field in GAP_FILL_ATTRIBUTES:
-        if not is_blank(site.get(field)):
+        if field in UNSEARCHED_ATTRIBUTES or not is_blank(site.get(field)):
             continue
         if field in GCCS_ATTRIBUTES and not gas_present:
             continue
@@ -464,6 +486,7 @@ Names:
         "cover_type": DEFINITION_VALUES["cover_type"],
         "gccs_energy_project_type": DEFINITION_VALUES["gccs_energy_project_type"],
         "gccs_current_project_status": DEFINITION_VALUES["gccs_current_project_status"],
+        "bulk_waste_type": DEFINITION_VALUES["bulk_waste_type"],
         "boolean_unknown": DEFINITION_VALUES["boolean_unknown"],
         "value_basis": DEFINITION_VALUES["value_basis"],
         "confidence_score": DEFINITION_VALUES["confidence_score"],

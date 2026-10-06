@@ -324,12 +324,13 @@ At the measured 42s/site that is roughly **6.3 days** serial, down from 8.0.
 
 ### Attributes searched
 
-**22 attributes are requestable.** No site is asked for all 22 — the scoping rules above decide
-which ones a given facility gets.
+**23 attributes are searched.** No site is asked for all 23 — the scoping rules above decide
+which ones a given facility gets. Three more gas-capture volumes are no longer searched but are
+still read from the seed and from older cached responses (see below).
 
-**Always requested — identity.** These are the only evidence that the agent researched the *right*
-facility. They drive the distance check and the 5 km identity gate, and an auto-validated fill is
-only trustworthy because identity was confirmed.
+**Identity — requested unless a Tier 1–2 source already supplied it.** These are the evidence that
+the agent researched the *right* facility. Found coordinates drive the distance check and the 5 km
+identity gate; where they are not searched (F29), that check does not run.
 
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
@@ -343,6 +344,7 @@ only trustworthy because identity was confirmed.
 |---|---|---|---|
 | `facility_status` | enum | — | `facility_status` |
 | `facility_type` | enum | — | `facility_type` |
+| `bulk_waste_type` ‡ | enum: `municipal solid waste`, `inert waste`, `others` | — | *none yet — review layer only* |
 | `operator` ‡ | text | — | *none yet — review layer only* |
 | `opening_year` | integer year | `year` | `opening_year` |
 | `closing_year` | integer year | `year` | `closing_year` |
@@ -355,7 +357,14 @@ only trustworthy because identity was confirmed.
 | `cover_types` | enum array | — | `cover_types` |
 | `has_biocover` | boolean | — | `has_biocover` |
 
-‡ **`operator` is review-layer only.** The upstream standardized spec has no operator column yet, so a found operator reaches `resolved.csv` but never the standardized table. Like every attribute, a Tier 1–2 operator auto-validates into `resolved.csv`; Tier 3 and below go to the review queue instead. Promoting it is a follow-up once upstream adds the column. `consolidated_facility` has no operator either, so it is asked of every searched facility.
+‡ **Review-layer only: `operator`, `bulk_waste_type`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value reaches `resolved.csv` but never the standardized table. Like every attribute, a Tier 1–2 value auto-validates into `resolved.csv`; Tier 3 and below go to the review queue instead. Promoting them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
+
+`bulk_waste_type` is the waste that makes up **most** of what a site receives. It separates
+municipal solid waste (household and similar waste, which decomposes and generates methane) from
+inert waste (construction and demolition rubble, soil, stones); `others` is mainly industrial,
+hazardous or mining waste or sludge. A site taking mostly municipal waste plus some rubble is
+municipal solid waste. There is no `unknown`: with no source on the waste received, or no one
+main type, the value stays NULL, so the site is asked again on a later pass.
 
 `waste_depth` is the only **derived** categorical. The agent still reports a number and its
 unit; the pipeline converts to metres, then bins on the spec's 5 m boundary. The metre value is
@@ -376,12 +385,15 @@ discovery into the baseline and the next pass picks up that facility's GCCS attr
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
 | `gccs_ch4_flared_metric_tonnes` | numeric | `metric tonnes CH4` | `gccs_ch4_flared_metric_tonnes` |
-| `gccs_ch4_generated_metric_tonnes` | numeric | `metric tonnes CH4` | `gccs_ch4_generated_metric_tonnes` |
-| `gccs_ch4_collected_metric_tonnes` | numeric | `metric tonnes CH4` | `gccs_ch4_collected_metric_tonnes` |
-| `gccs_ch4_flow_to_project_metric_tonnes` | numeric array | `metric tonnes CH4` | `gccs_ch4_flow_to_project_metric_tonnes` |
+| `has_flare` ‡ | boolean | — | *none yet — review layer only* |
+| `flare_efficiency` ‡ | fraction 0–1 | `fraction between 0 and 1` | *none yet — review layer only* |
 | `gccs_energy_project_type` | enum array | — | `gccs_energy_project_type` |
 | `gccs_current_project_status` | enum array | — | `gccs_current_project_status` |
 | `gccs_collection_efficiency` | fraction 0–1 | `fraction between 0 and 1` | `gccs_collection_efficiency` |
+
+**No longer searched (F31):** `gccs_ch4_generated_metric_tonnes`, `gccs_ch4_collected_metric_tonnes`
+and `gccs_ch4_flow_to_project_metric_tonnes`. They are still read from the seed, and a run cached
+before the change still re-arbitrates them into their standardized columns.
 
 **Computed locally, never searched.**
 
@@ -402,7 +414,7 @@ an unconverted number can never land in a column whose name asserts a unit.
 | mass → metric tonnes | metric tonnes, kg, US short tons, long tons, pounds |
 | rates → per year | /day ×365, /week ×52, /month ×12, /hour, /minute |
 | CH₄ → metric tonnes | t, kg, **ft³ CH₄** (×0.0192 kg), **m³ CH₄** (0.679 kg), **MMCFD** (×1e6×365) |
-| `gccs_collection_efficiency` → 0–1 | fraction, or a percentage (÷100) |
+| `gccs_collection_efficiency`, `flare_efficiency` → 0–1 | fraction, or a percentage (÷100) |
 
 Bold entries are the spec's own conversion table. Three deliberate refusals: an ambiguous
 `"tons"` is **never** converted (metric vs short is a 10% error); a **landfill-gas** volume is
