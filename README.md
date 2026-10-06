@@ -62,6 +62,7 @@ Default outputs:
 
 ```text
 outputs/runs/<run_id>/seed.csv
+outputs/runs/<run_id>/consolidation_snapshot/
 outputs/runs/<run_id>/<run_id>_candidate.xlsx
 outputs/runs/<run_id>/raw_foundry_responses/site_<site_id>.json
 outputs/runs/<run_id>/status/site_<site_id>.json
@@ -93,6 +94,27 @@ A run seeded with `--input-csv` is pinned the same way: the supplied file is cop
 
 `--input-csv` remains for two cases: pinning an exact corpus, and the gas-collection follow-up,
 which rewrites the seed between passes into the run directory.
+
+**A run also keeps a copy of the consolidation tables it searched (F32).** Every consolidation
+rebuild reassigns `internal_facility_id`, which is every output's `site_id`, so once the database
+moves on a run's results no longer point at their facilities. Before seeding from the database, a
+run saves `outputs/runs/<run_id>/consolidation_snapshot/`, which goes to blob with the rest of the
+run:
+
+| File | What it gives you |
+|---|---|
+| `consolidation.consolidated_facility.csv.gz` | The baseline the search filled gaps in, with all facility-year rows |
+| `consolidation.value_resolution_ledger.csv.gz` | For each baseline value, the source and the record in it (`data_source`, `data_source_facility_id`) |
+| `entity_linkage.crosswalk_*.csv.gz` | Every source record linked to each facility, whether or not it supplied a value |
+| `manifest.json` | When it was taken, the `consolidation_run_id`, and each table's row count and checksum |
+
+`data_source` + `facility_id` in the crosswalk is the key that survives a rebuild: it maps a run's
+`site_id` to its raw records now, and onto the new `internal_facility_id` later. That is also how a
+later run can search only what changed. Tables are read whole (every country, not just those
+searched) in one read-only transaction, so they describe one consolidation state; the run stops
+if consolidation is rebuilt while it is seeding. `manifest.json` is written and uploaded last, so a
+resumed run whose copy lacks it, or a file it lists, stops rather than carry on without its
+consolidation state. A run seeded with `--input-csv` reads no database, so it takes no snapshot.
 
 A run therefore needs database access. Without the VPN, seed a file first with
 `scripts/seed_metadata_search.py` and pass it with `--input-csv`.

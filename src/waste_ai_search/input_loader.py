@@ -134,12 +134,29 @@ def resolve_sites(config: Any) -> tuple[list[dict[str, Any]], list[str]]:
         return load_sites(snapshot)
 
 
+    from . import snapshot as consolidation
+
     if snapshot.exists():
+        # A run resumed from blob can hold its seed but only part of its consolidation copy, if
+        # an upload was cut off. That copy cannot be retaken - the database has moved on - so stop.
+        missing = consolidation.missing_snapshot_files(config.run_dir)
+        if missing:
+            raise RuntimeError(
+                f"Run {config.run_id!r} has an incomplete consolidation snapshot (missing "
+                f"{', '.join(missing)}). Push the run again from the machine that took it, or "
+                "use a new --run-id."
+            )
         return load_sites(snapshot)
 
     from .seed_source import load_seed_sites, seed_headers
 
+    # F32: keep the consolidation tables this run searches against, because every rebuild
+    # reassigns internal_facility_id - the run's site_id. Taken before seeding and checked after,
+    # so the seed and the copy describe the same consolidation run.
+    manifest = consolidation.take_snapshot(config.run_dir)
     sites = load_seed_sites(iso3=config.iso3 or None)
+    if consolidation.current_consolidation_run_ids() != manifest["consolidation_run_ids"]:
+        raise RuntimeError("Consolidation was rebuilt while this run was seeding; run it again.")
     headers = seed_headers()
     write_snapshot_atomically(snapshot, sites, headers)
     return sites, headers
