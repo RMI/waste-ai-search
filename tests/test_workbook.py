@@ -94,21 +94,29 @@ def test_baseline_coordinates_paste_straight_into_google_maps():
     assert REVIEW_QUEUE_HEADERS.index("baseline_coordinates") == REVIEW_QUEUE_HEADERS.index("country_iso3") + 1
 
 
-def test_corrected_value_offers_facility_types_only_on_facility_type_rows(tmp_path):
-    """Site 2529: an SME records "Transfer Station" without overwriting the AI's own answer."""
+def test_corrected_value_offers_the_values_of_the_attribute_on_its_row(tmp_path):
+    """Site 2529: an SME picks "Transfer Station" without overwriting the AI's own answer."""
     blank = {h: "" for h in REVIEW_QUEUE_HEADERS}
-    wb = build(tmp_path, [
-        blank | {"site_id": "1", "attribute_name": "facility_type", "resolved_value": "Not a Waste Facility"},
-        blank | {"site_id": "1", "attribute_name": "opening_year", "resolved_value": "1990"},
-    ])
+    rows = [
+        ("facility_type", "Not a Waste Facility"),   # row 2
+        ("opening_year", "1990"),                    # row 3: free text
+        ("has_flare", "TRUE"),                       # row 4
+        ("cover_types", "clay cover"),               # row 5
+        ("facility_type", "Dumpsite"),               # row 6
+    ]
+    wb = build(tmp_path, [blank | {"site_id": "1", "attribute_name": a, "resolved_value": v} for a, v in rows])
     ws = wb["Review_Queue"]
     defs = wb["Definitions"]
-    queue = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
+    target = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}["corrected_value"]
     def_col = {defs.cell(1, c).value: get_column_letter(c) for c in range(1, defs.max_column + 1)}
+    by_list = {d.formula1: d for d in ws.data_validations.dataValidation if target in str(d.sqref)}
 
-    target = queue["corrected_value"]
-    [dv] = [d for d in ws.data_validations.dataValidation if target in str(d.sqref)]
-    assert str(dv.sqref) == f"{target}2"  # the facility_type row only; opening_year stays free text
-    assert f"${def_col['facility_type']}$" in dv.formula1
+    ft = by_list[next(f for f in by_list if f"${def_col['facility_type']}$" in f)]
+    assert str(ft.sqref) == f"{target}2 {target}6" and ft.showErrorMessage
+    flare = by_list[next(f for f in by_list if f"${def_col['true_false']}$" in f)]
+    assert str(flare.sqref) == f"{target}4" and flare.showErrorMessage
+    cover = by_list[next(f for f in by_list if f"${def_col['cover_type']}$" in f)]
+    assert str(cover.sqref) == f"{target}5" and not cover.showErrorMessage  # combinations may be typed
+    assert not any(f"{target}3" in str(d.sqref).split() for d in by_list.values())  # opening_year: free text
     assert "Transfer Station" in DEFINITION_VALUES["facility_type"]
     assert REVIEW_QUEUE_HEADERS.index("corrected_value") == REVIEW_QUEUE_HEADERS.index("rejection_reason") + 1

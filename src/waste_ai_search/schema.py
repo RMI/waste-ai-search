@@ -612,6 +612,25 @@ DEFINITION_VALUES = {
     # Why a reviewer rejected a value. A fixed list, so rejections can be counted by cause to find
     # where the AI goes wrong and where auto-validation is safe; detail goes in researcher_notes.
     "rejection_reason": ["Wrong facility", "Not in source", "Wrong value", "Outdated", "Other"],
+    # Booleans as resolved_value shows them, so a correction reads like the value it replaces.
+    "true_false": ["TRUE", "FALSE"],
+}
+
+# What corrected_value offers, per attribute under review: (Definitions column, strict). A strict
+# list accepts nothing else; a multi-value field suggests single values but still takes a typed
+# combination ("clay cover; sand cover"). Numbers, years and names stay free text.
+CORRECTED_VALUE_CHOICES = {
+    "facility_status": ("facility_status", True),
+    "facility_type": ("facility_type", True),
+    "bulk_waste_type": ("bulk_waste_type", True),
+    "waste_depth": ("waste_depth", True),
+    "has_landfill_gas_collection": ("true_false", True),
+    "has_cover": ("true_false", True),
+    "has_biocover": ("true_false", True),
+    "has_flare": ("true_false", True),
+    "cover_types": ("cover_type", False),
+    "gccs_energy_project_type": ("gccs_energy_project_type", False),
+    "gccs_current_project_status": ("gccs_current_project_status", False),
 }
 
 # Columns a reviewer may edit, and the vocabulary each offers. Anything absent here is
