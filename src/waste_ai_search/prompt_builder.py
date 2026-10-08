@@ -86,7 +86,12 @@ FACILITY_TYPE_DEFINITIONS = (
 )
 
 ATTRIBUTE_GUIDANCE = {
-    "facility_status": "Allowed values only: Active, Inactive. A closed or former site is Inactive.",
+    "facility_status": (
+        "Allowed values only: Active, Inactive. A closed or former site is Inactive. Status changes "
+        "over time, so base it on the most recent evidence you can find - a closure notice, council "
+        "resolution, current opening hours or fees page, or recent news - not an older permit, "
+        "inventory or directory listing. Give that evidence's date in value_date."
+    ),
     "facility_type": (
         f"Allowed values only: {', '.join(FACILITY_TYPE_OFFERED)}."
         + FACILITY_TYPE_DEFINITIONS
@@ -574,6 +579,10 @@ Source requirements:
   and publisher.
 - Attach every supporting source to the attribute. Agreement between independent
   sources is recorded, so list them all rather than only the best one.
+- Prefer the most recent source. Facilities open, close, change operator and add gas
+  systems, so when sources disagree, or a newer source exists, use the newest one and
+  give its publication_date and value_date. Mention an older conflicting source in
+  evidence_summary rather than returning its value.
 
 Value requirements:
 - Use only the allowed categorical values in Definitions. If the true value is not
