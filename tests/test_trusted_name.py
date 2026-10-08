@@ -118,3 +118,13 @@ def test_arbitration_records_no_name_row_for_a_skipped_name():
     resolved = [resolve(s, n, by_attr.get(n, [])) for n in names]
 
     assert "found_facility_name" not in {r["attribute_name"] for r in resolved}
+
+
+def test_a_found_name_must_be_specific_and_qualified_by_the_sources_own_place():
+    """'Waste Management Facility' identifies nothing; the municipality the source names does."""
+    from waste_ai_search.prompt_builder import ATTRIBUTE_GUIDANCE
+
+    text = ATTRIBUTE_GUIDANCE["found_facility_name"]
+    assert "over a generic label such as 'Waste Management Facility'" in text
+    assert "add the municipality, town or operator that the same source names" in text
+    assert "Never add a place the source does not mention." in text

@@ -173,7 +173,15 @@ ATTRIBUTE_GUIDANCE = {
         "If no source says what waste the facility receives, or no one type makes up most of it, "
         "do not return bulk_waste_type."
     ),
-    "found_facility_name": "The source's exact official or canonical name for this facility.",
+    "found_facility_name": (
+        "The most specific official name a source gives for this facility, in the source's own "
+        "spelling. Prefer a name that identifies this site on its own, such as 'Wonthaggi Transfer "
+        "Station' or 'Hartland Landfill', over a generic label such as 'Waste Management Facility', "
+        "'Landfill' or 'Transfer Station'. If the only name available is generic, add the "
+        "municipality, town or operator that the same source names - for example, a 'Waste "
+        "Management Facility' on the Bass Coast Shire website becomes 'Bass Coast Shire Waste "
+        "Management Facility'. Never add a place the source does not mention."
+    ),
     "found_latitude": "Source-reported latitude only. Never infer from an address or nearby place.",
     "found_longitude": "Source-reported longitude only. Never infer from an address or nearby place.",
 }
