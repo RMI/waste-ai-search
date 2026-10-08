@@ -139,3 +139,9 @@ def test_an_unconfirmed_eu_site_gets_the_prior_and_the_not_a_waste_addendum():
     text = guidance(unconfirmed_site())  # ESP, osm-only
     assert "EU Landfill Directive" in text
     assert NOT_A_WASTE_FACILITY in text
+
+
+def test_a_combined_transfer_and_recycling_site_is_typed_by_its_mixed_waste():
+    """Site 2529 is a "Waste Transfer & Recycling Centre"; the guidance says which type wins."""
+    text = guidance(corroborated_site())
+    assert "both a transfer station and a recycling centre is a Transfer Station if it takes mixed" in text

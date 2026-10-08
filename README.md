@@ -476,6 +476,8 @@ like `Not a Waste Facility`. Neither disposes of waste, so a site that is only
 one of these is out of scope for methane. A name scan of OSM sites found about 100 in the corpus,
 52 of them in batch 1.
 
+**A site that is both** (e.g. a "Waste Transfer & Recycling Centre") is a `Transfer Station` if it takes mixed waste, and a `Recycling Center` only if it takes nothing but separated recyclables.
+
 **A transfer station or recycling centre built on a closed landfill is still the landfill.** The
 agent is told to classify the disposal site (Sanitary Landfill, Controlled Dumpsite or Dumpsite)
 whenever waste was ever landfilled or dumped there, because the buried waste still emits.

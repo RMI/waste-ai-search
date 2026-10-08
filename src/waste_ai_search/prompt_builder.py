@@ -76,6 +76,10 @@ FACILITY_TYPE_DEFINITIONS = (
     "Recycling Center - a site where recyclable or separated waste is dropped off, sorted or "
     "processed for recovery, including drop-off centres and materials recovery facilities; no "
     "waste is disposed of there. "
+    # Site 2529, "Wonthaggi Waste Transfer & Recycling Centre": many sites are both.
+    "A site that is both a transfer station and a recycling centre is a Transfer Station if it "
+    "takes mixed (unsorted) waste, and a Recycling Center only if it takes nothing but separated "
+    "recyclables. "
     "If waste was ever landfilled or dumped on the site - for example a transfer station or "
     "recycling centre built on a closed landfill - classify the disposal site (Sanitary Landfill, "
     "Controlled Dumpsite or Dumpsite), not the facility now on it: the buried waste still emits."
