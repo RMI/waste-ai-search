@@ -59,3 +59,13 @@ def test_a_lower_tier_status_close_in_date_still_goes_to_leads():
     s = site(facility_status="Active", attribute_sources="facility_status@eprtr_2022", reference_year="2021")
     row = resolve(s, "facility_status", [ev("Inactive", TIER_3, 2022, 0)])
     assert row["resolution"] == "Conflict - lower credibility"
+
+
+def test_the_newest_eligible_source_wins_not_the_first_lower_tier_one():
+    """Copilot review: Tier 1/2010, Tier 2/2013, Tier 3/2024 must pick 2024, not 2013."""
+    row = resolve(site(), "facility_status", [
+        ev("Active", TIER_1, 2010, 0), ev("Inactive", TIER_2, 2013, 1), ev("Inactive", TIER_3, 2024, 2),
+    ])
+    assert row["value_date"] == "2024"
+    assert "Tier 3 source dated 2024 replaces the Tier 1 source dated 2010" in row["resolution_rule"]
+    assert needs_review(row)

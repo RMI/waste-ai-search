@@ -217,25 +217,34 @@ def resolve(
     # NEWER_SOURCE_YEARS newer - a dated permit (Tier 1) against recent news (Tier 3).
     recency_review = False
     if attribute_name in RECENCY_OVERRIDE_ATTRIBUTES and win_year:
-        for item in candidates:
+        eligible = [
+            item for item in candidates
+            if int(item.get("tier", TIER_5)) > win_tier
+            and is_promotable(int(item.get("tier", TIER_5)))
+            and comparable(item.get("value"), attribute_name) != win_key
+            and (parse_year(item.get("value_date")) or 0) >= win_year + NEWER_SOURCE_YEARS
+        ]
+        if eligible:
+            # The newest eligible source; tier, then corroboration, only break ties.
+            item = min(
+                eligible,
+                key=lambda e: (
+                    -parse_year(e.get("value_date")),
+                    int(e.get("tier", TIER_5)),
+                    -counts[comparable(e.get("value"), attribute_name)],
+                    int(e.get("order", 0)),
+                ),
+            )
             year = parse_year(item.get("value_date"))
-            if (
-                int(item.get("tier", TIER_5)) > win_tier
-                and is_promotable(int(item.get("tier", TIER_5)))
-                and comparable(item.get("value"), attribute_name) != win_key
-                and year
-                and year >= win_year + NEWER_SOURCE_YEARS
-            ):
-                new_tier = int(item.get("tier", TIER_5))
-                recency_notes.append(
-                    f"{tier_label(new_tier)} source dated {year} replaces the {tier_label(win_tier)} "
-                    f"source dated {win_year}: status from a source {year - win_year} years newer wins, "
-                    "always for review."
-                )
-                winner, win_year, win_tier = item, year, new_tier
-                win_key = comparable(winner.get("value"), attribute_name)
-                recency_review = True
-                break
+            new_tier = int(item.get("tier", TIER_5))
+            recency_notes.append(
+                f"{tier_label(new_tier)} source dated {year} replaces the {tier_label(win_tier)} "
+                f"source dated {win_year}: status from a source {year - win_year} years newer wins, "
+                "always for review."
+            )
+            winner, win_year, win_tier = item, year, new_tier
+            win_key = comparable(winner.get("value"), attribute_name)
+            recency_review = True
 
     row["resolved_value"] = normalize_scalar(winner.get("value"))
     row["resolved_unit"] = normalize_scalar(winner.get("unit"))
