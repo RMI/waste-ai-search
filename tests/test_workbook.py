@@ -36,7 +36,7 @@ def test_only_the_review_decision_columns_have_dropdowns(tmp_path):
         for rng in str(dv.sqref).split():
             validated_columns.add("".join(ch for ch in rng.split(":")[0] if ch.isalpha()))
 
-    assert validated_columns == {headers["validation_status"], headers["rejection_reason"]}
+    assert validated_columns == {headers["validation_status"], headers["rejection_reason"]}  # no facility_type row here
     assert headers["resolution"] not in validated_columns
     assert headers["winning_source_tier"] not in validated_columns
 
@@ -92,3 +92,23 @@ def test_baseline_coordinates_paste_straight_into_google_maps():
     assert baseline_coordinates({"latitude": "45.51234", "longitude": "-73.55432"}) == "45.512340, -73.554320"
     assert baseline_coordinates({"latitude": "", "longitude": "-73.5"}) == ""
     assert REVIEW_QUEUE_HEADERS.index("baseline_coordinates") == REVIEW_QUEUE_HEADERS.index("country_iso3") + 1
+
+
+def test_corrected_value_offers_facility_types_only_on_facility_type_rows(tmp_path):
+    """Site 2529: an SME records "Transfer Station" without overwriting the AI's own answer."""
+    blank = {h: "" for h in REVIEW_QUEUE_HEADERS}
+    wb = build(tmp_path, [
+        blank | {"site_id": "1", "attribute_name": "facility_type", "resolved_value": "Not a Waste Facility"},
+        blank | {"site_id": "1", "attribute_name": "opening_year", "resolved_value": "1990"},
+    ])
+    ws = wb["Review_Queue"]
+    defs = wb["Definitions"]
+    queue = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
+    def_col = {defs.cell(1, c).value: get_column_letter(c) for c in range(1, defs.max_column + 1)}
+
+    target = queue["corrected_value"]
+    [dv] = [d for d in ws.data_validations.dataValidation if target in str(d.sqref)]
+    assert str(dv.sqref) == f"{target}2"  # the facility_type row only; opening_year stays free text
+    assert f"${def_col['facility_type']}$" in dv.formula1
+    assert "Transfer Station" in DEFINITION_VALUES["facility_type"]
+    assert REVIEW_QUEUE_HEADERS.index("corrected_value") == REVIEW_QUEUE_HEADERS.index("rejection_reason") + 1

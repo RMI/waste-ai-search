@@ -534,7 +534,10 @@ REVIEW_QUEUE_HEADERS = [
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
     "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
     "agreeing_source_count",
-    "evidence_summary", "validation_status", "rejection_reason", "reviewer", "reviewed_date",
+    # corrected_value is the right value when the found one is wrong. resolved_value is never
+    # edited, so the AI's own answer survives for measuring its error rate.
+    "evidence_summary", "validation_status", "rejection_reason", "corrected_value", "reviewer",
+    "reviewed_date",
     "researcher_notes",
 ]
 

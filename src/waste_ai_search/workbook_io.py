@@ -149,12 +149,13 @@ REVIEW_INSTRUCTIONS = [
             "Work top to bottom. To see where the database puts the site, paste "
             "baseline_coordinates into Google Maps. Compare site_name with original_site_name - the source's own "
             "spelling - and note any translation problem in translation_note. Open "
-            "winning_source_url and check the source says this, about THIS facility. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason. Put your name in "
+            "winning_source_url and check the source says this, about THIS facility. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown on facility_type rows) - never edit resolved_value. Put your name in "
             "reviewer and the date in reviewed_date, and say why in researcher_notes. An empty "
             "queue means nothing needs you."
         ),
         "editable": (
-            "validation_status, rejection_reason, reviewer, reviewed_date, researcher_notes, "
+            "validation_status, rejection_reason, corrected_value, reviewer, reviewed_date, "
+            "researcher_notes, "
             "translation_note - "
             "nothing else"
         ),
@@ -253,6 +254,25 @@ def add_validations(wb, ws) -> None:
         ws.add_data_validation(validation)
         target = get_column_letter(headers[header])
         validation.add(f"{target}2:{target}{last_row}")
+
+    # corrected_value takes free text, except on facility_type rows, where it offers the allowed
+    # types - typing "transfer station" by hand would not match the vocabulary.
+    if {"corrected_value", "attribute_name"} <= set(headers) and "facility_type" in columns:
+        rows = [
+            r for r in range(2, ws.max_row + 1)
+            if ws.cell(r, headers["attribute_name"]).value == "facility_type"
+        ]
+        if rows:
+            letter = get_column_letter(columns["facility_type"])
+            count = len(DEFINITION_VALUES["facility_type"])
+            validation = DataValidation(
+                type="list", formula1=f"=Definitions!${letter}$2:${letter}${count + 1}",
+                allow_blank=True, showDropDown=False,
+            )
+            ws.add_data_validation(validation)
+            target = get_column_letter(headers["corrected_value"])
+            for r in rows:
+                validation.add(f"{target}{r}")
 
 
 def add_conditionals(ws) -> None:

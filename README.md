@@ -606,6 +606,7 @@ Edit only these columns; everything else is read-only:
 |---|---|
 | `validation_status` | `Validated` or `Rejected` (dropdown) |
 | `rejection_reason` | For a rejection: `Wrong facility`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Counted by cause to find where the AI errs and where auto-validation is safe |
+| `corrected_value` | If you know the right value: enter it here (a dropdown of allowed types on `facility_type` rows). Never edit `resolved_value` — it keeps the AI's own answer, which is how its error rate is measured |
 | `reviewer` | Your name |
 | `reviewed_date` | The date |
 | `researcher_notes` | Why, especially for a rejection |
