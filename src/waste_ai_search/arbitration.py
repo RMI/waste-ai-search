@@ -75,6 +75,14 @@ def comparable(value: Any, attribute_name: str = "") -> str:
         return text
 
 
+def date_key(value: Any) -> tuple[int, int, int]:
+    """A value_date as (year, month, day) for ordering; missing parts sort as 0, undated as oldest."""
+    match = re.search(r"\b(1[89]\d{2}|20\d{2})(?:-(\d{1,2}))?(?:-(\d{1,2}))?", normalize_scalar(value))
+    if not match:
+        return (0, 0, 0)
+    return tuple(int(part) if part else 0 for part in match.groups())
+
+
 def resolve(
     site: dict[str, Any],
     attribute_name: str,
@@ -194,7 +202,7 @@ def resolve(
     candidates.sort(
         key=lambda item: (
             int(item.get("tier", TIER_5)),
-            -(parse_year(item.get("value_date")) or 0),
+            tuple(-part for part in date_key(item.get("value_date"))),
             -counts[comparable(item.get("value"), attribute_name)],
             int(item.get("order", 0)),
         )
@@ -210,7 +218,8 @@ def resolve(
     ]
     if rivals and win_year:
         recency_notes.append(
-            f"Newest of the disagreeing {tier_label(win_tier)} sources (dated {win_year}) chosen."
+            f"Newest of the disagreeing {tier_label(win_tier)} sources "
+            f"(dated {normalize_scalar(winner.get('value_date'))}) chosen."
         )
 
     # For status, a lower-tier source down to the promotion floor may win if it is at least
@@ -221,20 +230,22 @@ def resolve(
             item for item in candidates
             if int(item.get("tier", TIER_5)) > win_tier
             and is_promotable(int(item.get("tier", TIER_5)))
-            and comparable(item.get("value"), attribute_name) != win_key
             and (parse_year(item.get("value_date")) or 0) >= win_year + NEWER_SOURCE_YEARS
         ]
-        if eligible:
-            # The newest eligible source; tier, then corroboration, only break ties.
-            item = min(
-                eligible,
-                key=lambda e: (
-                    -parse_year(e.get("value_date")),
-                    int(e.get("tier", TIER_5)),
-                    -counts[comparable(e.get("value"), attribute_name)],
-                    int(e.get("order", 0)),
-                ),
-            )
+        # The newest eligible source, agreeing or not; tier, then corroboration, only break ties.
+        # It overrides only if it disagrees - a newer source agreeing with the winner confirms it.
+        newest = min(
+            eligible,
+            key=lambda e: (
+                tuple(-part for part in date_key(e.get("value_date"))),
+                int(e.get("tier", TIER_5)),
+                -counts[comparable(e.get("value"), attribute_name)],
+                int(e.get("order", 0)),
+            ),
+            default=None,
+        )
+        if newest is not None and comparable(newest.get("value"), attribute_name) != win_key:
+            item = newest
             year = parse_year(item.get("value_date"))
             new_tier = int(item.get("tier", TIER_5))
             recency_notes.append(

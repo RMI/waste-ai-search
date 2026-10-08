@@ -69,3 +69,19 @@ def test_the_newest_eligible_source_wins_not_the_first_lower_tier_one():
     assert row["value_date"] == "2024"
     assert "Tier 3 source dated 2024 replaces the Tier 1 source dated 2010" in row["resolution_rule"]
     assert needs_review(row)
+
+
+def test_same_year_sources_are_ordered_by_full_date():
+    """Copilot review: 2024-12-31 is newer than 2024-01-01, even though the year ties."""
+    row = resolve(site(), "facility_status", [ev("Active", TIER_1, "2024-01-01", 0), ev("Inactive", TIER_1, "2024-12-31", 1)])
+    assert row["resolved_value"] == "Inactive"
+    assert "(dated 2024-12-31) chosen" in row["resolution_rule"]
+
+
+def test_a_newer_agreeing_source_stops_an_older_disagreement_from_winning():
+    """Copilot review: Tier 1/2010 Active, Tier 2/2020 Inactive, Tier 3/2024 Active stays Active."""
+    row = resolve(site(), "facility_status", [
+        ev("Active", TIER_1, 2010, 0), ev("Inactive", TIER_2, 2020, 1), ev("Active", TIER_3, 2024, 2),
+    ])
+    assert row["resolved_value"] == "Active"
+    assert "replaces" not in row["resolution_rule"]
