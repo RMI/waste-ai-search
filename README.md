@@ -352,7 +352,7 @@ identity gate; where they are not searched (F29), that check does not run.
 | `found_latitude` | numeric | `decimal degrees` | `latitude` |
 | `found_longitude` | numeric | `decimal degrees` | `longitude` |
 
-**Newer sources win.** The agent is told to prefer the most recent source when sources disagree, and to base `facility_status` on the latest evidence it can find (a closure notice, current opening hours, recent news) rather than an older permit or directory listing.
+**Newer sources win.** The agent is told to prefer the most recent source when sources disagree, and to base `facility_status` on the latest evidence it can find (a closure notice, current opening hours, recent news) rather than an older permit or directory listing. Arbitration follows the same rule: within a tier the newer `value_date` wins, and for `facility_status` only, a lower-tier source down to Tier 3 may win when it is at least 3 years newer than the source or baseline it replaces. Such a win always goes to review, and `resolution_rule` states the dates.
 
 `found_facility_name` must be **specific**: a name that identifies the site on its own ("Wonthaggi Transfer Station"), not a generic label ("Waste Management Facility"). If a source gives only a generic name, the agent adds the municipality, town or operator that the same source names ("Bass Coast Shire Waste Management Facility"), never a place the source doesn't mention.
 
