@@ -110,6 +110,14 @@ STALENESS_PENALTY_ATTRIBUTES = {
 STALENESS_GAP_YEARS = 3
 STALENESS_TIER_FLOOR = TIER_3
 
+# WP-558. Status changes over time, so for these attributes a lower-tier source, down to the
+# promotion floor (Tier 3), may still win
+# when it is at least this many years newer than the source or baseline it replaces - a 2023
+# closure report against a 2012 permit. Such a win is always reviewed. Every other attribute is
+# decided by tier, with date only breaking ties within a tier.
+RECENCY_OVERRIDE_ATTRIBUTES = {"facility_status"}
+NEWER_SOURCE_YEARS = 3
+
 # Source authority is attribute-dependent. A map gazetteer is a poor source for operational
 # metadata but a purpose-built one for a location, and the pilot showed 14 of 15 coordinate
 # sources floored at Tier 4 — which left identity unconfirmable and the distance QA check dead.

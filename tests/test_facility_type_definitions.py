@@ -139,3 +139,19 @@ def test_an_unconfirmed_eu_site_gets_the_prior_and_the_not_a_waste_addendum():
     text = guidance(unconfirmed_site())  # ESP, osm-only
     assert "EU Landfill Directive" in text
     assert NOT_A_WASTE_FACILITY in text
+
+
+def test_a_combined_transfer_and_recycling_site_is_typed_by_its_mixed_waste():
+    """Site 2529 is a "Waste Transfer & Recycling Centre"; the guidance says which type wins."""
+    text = guidance(corroborated_site())
+    assert "both a transfer station and a recycling centre is a Transfer Station if it takes mixed" in text
+
+
+def test_the_prompt_prefers_newer_sources_especially_for_status():
+    """A 2010 permit saying Active must not outweigh a 2023 closure notice."""
+    from waste_ai_search.prompt_builder import ATTRIBUTE_GUIDANCE, build_site_prompt, requested_attributes
+
+    assert "base it on the most recent evidence you can find" in ATTRIBUTE_GUIDANCE["facility_status"]
+    site = corroborated_site()
+    prompt = build_site_prompt(site, requested_attributes(site))
+    assert "- Prefer the most recent source." in prompt

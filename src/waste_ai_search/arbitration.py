@@ -22,7 +22,10 @@ from .credibility import (
     is_promotable,
     may_auto_validate,
     may_override_baseline,
+    parse_year,
     tier_label,
+    NEWER_SOURCE_YEARS,
+    RECENCY_OVERRIDE_ATTRIBUTES,
 )
 from .schema import (
     ALWAYS_REVIEW_VALUES,
@@ -72,6 +75,14 @@ def comparable(value: Any, attribute_name: str = "") -> str:
         return text
 
 
+def date_key(value: Any) -> tuple[int, int, int]:
+    """A value_date as (year, month, day) for ordering; missing parts sort as 0, undated as oldest."""
+    match = re.search(r"\b(1[89]\d{2}|20\d{2})(?:-(\d{1,2}))?(?:-(\d{1,2}))?", normalize_scalar(value))
+    if not match:
+        return (0, 0, 0)
+    return tuple(int(part) if part else 0 for part in match.groups())
+
+
 def resolve(
     site: dict[str, Any],
     attribute_name: str,
@@ -108,6 +119,8 @@ def resolve(
 
     backfills = backfilled_years(site.get("backfilled_fields"))
     is_backfilled = attribute_name in backfills
+    # The year the baseline value describes: the year it was carried from, else the seed's year.
+    baseline_year = backfills[attribute_name] if is_backfilled else parse_year(site.get("reference_year"))
     stale_note = ""
     if is_backfilled:
         base_tier, stale_note = apply_staleness_penalty(
@@ -183,11 +196,13 @@ def resolve(
         row["validation_status"] = "Routed to leads"
         return row
 
-    # Winner: best tier, then most corroborated, then first seen.
+    # Winner: best tier, then newest (undated counts as oldest), then most corroborated, then
+    # first seen (WP-558: within a tier, a newer source beats an older one).
     counts = Counter(comparable(item.get("value"), attribute_name) for item in candidates)
     candidates.sort(
         key=lambda item: (
             int(item.get("tier", TIER_5)),
+            tuple(-part for part in date_key(item.get("value_date"))),
             -counts[comparable(item.get("value"), attribute_name)],
             int(item.get("order", 0)),
         )
@@ -195,6 +210,52 @@ def resolve(
     winner = candidates[0]
     win_key = comparable(winner.get("value"), attribute_name)
     win_tier = int(winner.get("tier", TIER_5))
+    win_year = parse_year(winner.get("value_date"))
+    recency_notes: list[str] = []
+    rivals = [
+        item for item in candidates
+        if int(item.get("tier", TIER_5)) == win_tier and comparable(item.get("value"), attribute_name) != win_key
+    ]
+    if rivals and win_year:
+        recency_notes.append(
+            f"Newest of the disagreeing {tier_label(win_tier)} sources "
+            f"(dated {normalize_scalar(winner.get('value_date'))}) chosen."
+        )
+
+    # For status, a lower-tier source down to the promotion floor may win if it is at least
+    # NEWER_SOURCE_YEARS newer - a dated permit (Tier 1) against recent news (Tier 3).
+    recency_review = False
+    if attribute_name in RECENCY_OVERRIDE_ATTRIBUTES and win_year:
+        eligible = [
+            item for item in candidates
+            if int(item.get("tier", TIER_5)) > win_tier
+            and is_promotable(int(item.get("tier", TIER_5)))
+            and (parse_year(item.get("value_date")) or 0) >= win_year + NEWER_SOURCE_YEARS
+        ]
+        # The newest eligible source, agreeing or not; tier, then corroboration, only break ties.
+        # It overrides only if it disagrees - a newer source agreeing with the winner confirms it.
+        newest = min(
+            eligible,
+            key=lambda e: (
+                tuple(-part for part in date_key(e.get("value_date"))),
+                int(e.get("tier", TIER_5)),
+                -counts[comparable(e.get("value"), attribute_name)],
+                int(e.get("order", 0)),
+            ),
+            default=None,
+        )
+        if newest is not None and comparable(newest.get("value"), attribute_name) != win_key:
+            item = newest
+            year = parse_year(item.get("value_date"))
+            new_tier = int(item.get("tier", TIER_5))
+            recency_notes.append(
+                f"{tier_label(new_tier)} source dated {year} replaces the {tier_label(win_tier)} "
+                f"source dated {win_year}: status from a source {year - win_year} years newer wins, "
+                "always for review."
+            )
+            winner, win_year, win_tier = item, year, new_tier
+            win_key = comparable(winner.get("value"), attribute_name)
+            recency_review = True
 
     row["resolved_value"] = normalize_scalar(winner.get("value"))
     row["resolved_unit"] = normalize_scalar(winner.get("unit"))
@@ -243,6 +304,22 @@ def resolve(
             "no automatic winner."
         )
         row["validation_status"] = "Needs review"
+    elif (
+        attribute_name in RECENCY_OVERRIDE_ATTRIBUTES
+        and win_tier > base_tier
+        and is_promotable(win_tier)
+        and win_year
+        and baseline_year
+        and win_year >= baseline_year + NEWER_SOURCE_YEARS
+    ):
+        # A status this much newer than the baseline may replace it despite a lower tier.
+        row["resolution"] = "Overrides baseline"
+        row["resolution_rule"] = (
+            f"{tier_label(win_tier)} source dated {win_year} is {win_year - baseline_year} years newer "
+            f"than the {tier_label(base_tier)} baseline ({baseline_year}); a status this much newer "
+            "may replace it, always for review."
+        )
+        row["validation_status"] = "Needs review"
     else:
         row["resolution"] = "Conflict - lower credibility"
         row["resolution_rule"] = (
@@ -250,6 +327,11 @@ def resolve(
             "baseline; baseline retained and the candidate routed to leads."
         )
         row["validation_status"] = "Routed to leads"
+
+    if recency_notes:
+        row["resolution_rule"] = " ".join([row["resolution_rule"], *recency_notes]).strip()
+    if recency_review and row["validation_status"] == "Auto-validated":
+        row["validation_status"] = "Needs review"
 
     # Some verdicts are never the pipeline's to sign off. Without this a Tier 1-2 source calling a
     # site a quarry would take the ordinary empty-baseline path above and auto-validate. It sets

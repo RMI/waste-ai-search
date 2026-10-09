@@ -352,6 +352,10 @@ identity gate; where they are not searched (F29), that check does not run.
 | `found_latitude` | numeric | `decimal degrees` | `latitude` |
 | `found_longitude` | numeric | `decimal degrees` | `longitude` |
 
+**Newer sources win.** The agent is told to prefer the most recent source when sources disagree, and to base `facility_status` on the latest evidence it can find (a closure notice, current opening hours, recent news) rather than an older permit or directory listing. Arbitration follows the same rule: within a tier the newer `value_date` wins, and for `facility_status` only, a lower-tier source down to Tier 3 may win when it is at least 3 years newer than the source or baseline it replaces. Such a win always goes to review, and `resolution_rule` states the dates.
+
+`found_facility_name` must be **specific**: a name that identifies the site on its own ("Wonthaggi Transfer Station"), not a generic label ("Waste Management Facility"). If a source gives only a generic name, the agent adds the municipality, town or operator that the same source names ("Bass Coast Shire Waste Management Facility"), never a place the source doesn't mention.
+
 **Gap-fill — requested only where that facility's baseline value is empty.**
 
 | Attribute | Type | Unit asked for | → standardized column |
@@ -475,6 +479,8 @@ the other 10,928 prompts carry the ordinary values and none of this guidance.
 like `Not a Waste Facility`. Neither disposes of waste, so a site that is only
 one of these is out of scope for methane. A name scan of OSM sites found about 100 in the corpus,
 52 of them in batch 1.
+
+**A site that is both** (e.g. a "Waste Transfer & Recycling Centre") is a `Transfer Station` if it takes mixed waste, and a `Recycling Center` only if it takes nothing but separated recyclables.
 
 **A transfer station or recycling centre built on a closed landfill is still the landfill.** The
 agent is told to classify the disposal site (Sanitary Landfill, Controlled Dumpsite or Dumpsite)
@@ -604,6 +610,7 @@ Edit only these columns; everything else is read-only:
 |---|---|
 | `validation_status` | `Validated` or `Rejected` (dropdown) |
 | `rejection_reason` | For a rejection: `Wrong facility`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Counted by cause to find where the AI errs and where auto-validation is safe |
+| `corrected_value` | If you know the right value: enter it here. For categorical fields (site type, status, waste type, depth, yes/no fields, cover and gas-project types) it is a dropdown of the allowed values for that row's attribute; multi-value fields also accept a typed combination. Never edit `resolved_value` — it keeps the AI's own answer, which is how its error rate is measured |
 | `reviewer` | Your name |
 | `reviewed_date` | The date |
 | `researcher_notes` | Why, especially for a rejection |

@@ -13,6 +13,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
 from .schema import (
+    CORRECTED_VALUE_CHOICES,
     DEFINITION_VALUES,
     FIELD_TO_DEFINITION,
     PARSE_WARNING_HEADERS,
@@ -149,12 +150,13 @@ REVIEW_INSTRUCTIONS = [
             "Work top to bottom. To see where the database puts the site, paste "
             "baseline_coordinates into Google Maps. Compare site_name with original_site_name - the source's own "
             "spelling - and note any translation problem in translation_note. Open "
-            "winning_source_url and check the source says this, about THIS facility. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason. Put your name in "
+            "winning_source_url and check the source says this, about THIS facility. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields) - never edit resolved_value. Put your name in "
             "reviewer and the date in reviewed_date, and say why in researcher_notes. An empty "
             "queue means nothing needs you."
         ),
         "editable": (
-            "validation_status, rejection_reason, reviewer, reviewed_date, researcher_notes, "
+            "validation_status, rejection_reason, corrected_value, reviewer, reviewed_date, "
+            "researcher_notes, "
             "translation_note - "
             "nothing else"
         ),
@@ -221,6 +223,11 @@ def add_definitions(ws) -> None:
         "facility_type",
         "cover_type",
         "confidence_score",
+        "bulk_waste_type",
+        "waste_depth",
+        "true_false",
+        "gccs_energy_project_type",
+        "gccs_current_project_status",
     ]
     ws.append(names)
     longest = max(len(DEFINITION_VALUES[name]) for name in names)
@@ -253,6 +260,40 @@ def add_validations(wb, ws) -> None:
         ws.add_data_validation(validation)
         target = get_column_letter(headers[header])
         validation.add(f"{target}2:{target}{last_row}")
+
+    # corrected_value offers the allowed values of the attribute on its row, read from the same
+    # Definitions columns as everything else; attributes without a vocabulary stay free text.
+    if {"corrected_value", "attribute_name"} <= set(headers):
+        rows_by_attribute: dict[str, list[int]] = {}
+        for r in range(2, ws.max_row + 1):
+            attribute = ws.cell(r, headers["attribute_name"]).value
+            if attribute in CORRECTED_VALUE_CHOICES:
+                rows_by_attribute.setdefault(attribute, []).append(r)
+        target = get_column_letter(headers["corrected_value"])
+        for attribute, rows in rows_by_attribute.items():
+            definition_name, strict = CORRECTED_VALUE_CHOICES[attribute]
+            if definition_name not in columns:
+                continue
+            letter = get_column_letter(columns[definition_name])
+            count = len(DEFINITION_VALUES[definition_name])
+            validation = DataValidation(
+                type="list", formula1=f"=Definitions!${letter}$2:${letter}${count + 1}",
+                allow_blank=True, showDropDown=False, showErrorMessage=strict,
+            )
+            ws.add_data_validation(validation)
+            for start, end in _runs(rows):
+                validation.add(f"{target}{start}" if start == end else f"{target}{start}:{target}{end}")
+
+
+def _runs(rows: list[int]) -> list[tuple[int, int]]:
+    """Consecutive row numbers as (first, last) runs, to keep a validation's range list short."""
+    runs: list[tuple[int, int]] = []
+    for r in rows:
+        if runs and r == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], r)
+        else:
+            runs.append((r, r))
+    return runs
 
 
 def add_conditionals(ws) -> None:

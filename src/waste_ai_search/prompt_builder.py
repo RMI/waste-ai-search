@@ -76,13 +76,22 @@ FACILITY_TYPE_DEFINITIONS = (
     "Recycling Center - a site where recyclable or separated waste is dropped off, sorted or "
     "processed for recovery, including drop-off centres and materials recovery facilities; no "
     "waste is disposed of there. "
+    # Site 2529, "Wonthaggi Waste Transfer & Recycling Centre": many sites are both.
+    "A site that is both a transfer station and a recycling centre is a Transfer Station if it "
+    "takes mixed (unsorted) waste, and a Recycling Center only if it takes nothing but separated "
+    "recyclables. "
     "If waste was ever landfilled or dumped on the site - for example a transfer station or "
     "recycling centre built on a closed landfill - classify the disposal site (Sanitary Landfill, "
     "Controlled Dumpsite or Dumpsite), not the facility now on it: the buried waste still emits."
 )
 
 ATTRIBUTE_GUIDANCE = {
-    "facility_status": "Allowed values only: Active, Inactive. A closed or former site is Inactive.",
+    "facility_status": (
+        "Allowed values only: Active, Inactive. A closed or former site is Inactive. Status changes "
+        "over time, so base it on the most recent evidence you can find - a closure notice, council "
+        "resolution, current opening hours or fees page, or recent news - not an older permit, "
+        "inventory or directory listing. Give that evidence's date in value_date."
+    ),
     "facility_type": (
         f"Allowed values only: {', '.join(FACILITY_TYPE_OFFERED)}."
         + FACILITY_TYPE_DEFINITIONS
@@ -169,7 +178,15 @@ ATTRIBUTE_GUIDANCE = {
         "If no source says what waste the facility receives, or no one type makes up most of it, "
         "do not return bulk_waste_type."
     ),
-    "found_facility_name": "The source's exact official or canonical name for this facility.",
+    "found_facility_name": (
+        "The most specific official name a source gives for this facility, in the source's own "
+        "spelling. Prefer a name that identifies this site on its own, such as 'Wonthaggi Transfer "
+        "Station' or 'Hartland Landfill', over a generic label such as 'Waste Management Facility', "
+        "'Landfill' or 'Transfer Station'. If the only name available is generic, add the "
+        "municipality, town or operator that the same source names - for example, a 'Waste "
+        "Management Facility' on the Bass Coast Shire website becomes 'Bass Coast Shire Waste "
+        "Management Facility'. Never add a place the source does not mention."
+    ),
     "found_latitude": "Source-reported latitude only. Never infer from an address or nearby place.",
     "found_longitude": "Source-reported longitude only. Never infer from an address or nearby place.",
 }
@@ -562,6 +579,10 @@ Source requirements:
   and publisher.
 - Attach every supporting source to the attribute. Agreement between independent
   sources is recorded, so list them all rather than only the best one.
+- Prefer the most recent source. Facilities open, close, change operator and add gas
+  systems, so when sources disagree, or a newer source exists, use the newest one and
+  give its publication_date and value_date. Mention an older conflicting source in
+  evidence_summary rather than returning its value.
 
 Value requirements:
 - Use only the allowed categorical values in Definitions. If the true value is not
