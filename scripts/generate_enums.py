@@ -36,6 +36,7 @@ ENUM_TYPES = [
     "cover_type",
     "gccs_energy_project_type",
     "gccs_current_project_status",
+    "bulk_waste_type",
 ]
 
 # Categoricals defined only by a CHECK constraint on consolidated_facility. The key is the
