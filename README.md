@@ -98,11 +98,12 @@ A run seeded with `--input-csv` is pinned the same way: the supplied file is cop
 `--input-csv` remains for two cases: pinning an exact corpus, and the gas-collection follow-up,
 which rewrites the seed between passes into the run directory.
 
-**A run also keeps a copy of the consolidation tables it searched (F32).** Every consolidation
-rebuild reassigns `internal_facility_id`, which is every output's `site_id`, so once the database
-moves on a run's results no longer point at their facilities. Before seeding from the database, a
-run saves `outputs/runs/<run_id>/consolidation_snapshot/`, which goes to blob with the rest of the
-run:
+**A run also keeps a copy of the consolidation tables it searched (F32).** Since
+RMI/waste_data_ingestion_pipeline#196, a facility keeps its `wastemap_id` across consolidation
+rebuilds, and that is every output's `site_id`. The column keeps the name `internal_facility_id`,
+so older runs still read. Runs from before then used an `internal_facility_id` that every rebuild
+reassigned. Before seeding from the database, a run saves
+`outputs/runs/<run_id>/consolidation_snapshot/`, which goes to blob with the rest of the run:
 
 | File | What it gives you |
 |---|---|
@@ -111,9 +112,9 @@ run:
 | `entity_linkage.crosswalk_*.csv.gz` | Every source record linked to each facility, whether or not it supplied a value |
 | `manifest.json` | When it was taken, the `consolidation_run_id`, and each table's row count and checksum |
 
-`data_source` + `facility_id` in the crosswalk is the key that survives a rebuild: it maps a run's
-`site_id` to its raw records now, and onto the new `internal_facility_id` later. That is also how a
-later run can search only what changed. Tables are read whole (every country, not just those
+`data_source` + `facility_id` in the crosswalk maps a run's `site_id` to its raw records. For a run
+from before #196 it is the only way onto today's `wastemap_id`. It is also how a later run can
+search only what changed. Tables are read whole (every country, not just those
 searched) in one read-only transaction, so they describe one consolidation state; the run stops
 if consolidation is rebuilt while it is seeding. Blob transfers go in stages - data, then
 `manifest.json`, then `seed.csv` last - so a resumed run whose copy lacks the manifest, or a file it
