@@ -130,6 +130,12 @@ COORDINATES_ONLY_ISO3 = {"BRA"}
 
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
 
+# The agent reports latitude and longitude separately, and each is resolved against the seed on
+# its own, but a location is one fact. Arbitration combines the two into this attribute, valued
+# "lat, lon", so a location is accepted, reviewed and loaded as a pair, from one source, or not
+# at all.
+LOCATION_ATTRIBUTE = "found_location"
+
 # The full run in six batches, run in order (F30). Batches 1-2 are English-speaking, so SMEs learn
 # the review process on familiar sources: English as the main language, then as an official one.
 # Batches 3-5 follow the most blank core fields (searchable sites x share of status, type, opening
@@ -535,9 +541,11 @@ REVIEW_QUEUE_HEADERS = [
     "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
     "agreeing_source_count",
     # corrected_value is the right value when the found one is wrong. resolved_value is never
-    # edited, so the AI's own answer survives for measuring its error rate.
-    "evidence_summary", "validation_status", "rejection_reason", "corrected_value", "reviewer",
-    "reviewed_date",
+    # edited, so the AI's own answer survives for measuring its error rate. corrected_value_date
+    # is the date a correction applies to, where that isn't the source's value_date - a current
+    # figure replacing one rejected as outdated, say.
+    "evidence_summary", "validation_status", "rejection_reason", "corrected_value",
+    "corrected_value_date", "reviewer", "reviewed_date",
     "researcher_notes",
 ]
 

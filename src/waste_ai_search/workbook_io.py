@@ -150,12 +150,13 @@ REVIEW_INSTRUCTIONS = [
             "Work top to bottom. To see where the database puts the site, paste "
             "baseline_coordinates into Google Maps. Compare site_name with original_site_name - the source's own "
             "spelling - and note any translation problem in translation_note. Open "
-            "winning_source_url and check the source says this, about THIS facility. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields) - never edit resolved_value. Put your name in "
+            "winning_source_url and check the source says this, about THIS facility. A found_location row is one point, "
+            "lat, lon: paste it into Google Maps beside baseline_coordinates, and accept or reject the pair. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields; for a location, lat, lon) - never edit resolved_value. If your corrected value is for a different date than value_date, a current figure replacing an outdated one say, put that date in corrected_value_date (YYYY, YYYY-MM or YYYY-MM-DD). Put your name in "
             "reviewer and the date in reviewed_date, and say why in researcher_notes. An empty "
             "queue means nothing needs you."
         ),
         "editable": (
-            "validation_status, rejection_reason, corrected_value, reviewer, reviewed_date, "
+            "validation_status, rejection_reason, corrected_value, corrected_value_date, reviewer, reviewed_date, "
             "researcher_notes, "
             "translation_note - "
             "nothing else"
