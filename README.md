@@ -345,6 +345,18 @@ found by web search on the WP-543 test.
 A site left with no attributes to search is dropped from selection entirely — querying it would
 spend a request and a prompt to receive nothing.
 
+**Under review: sites whose name gives a search nothing to look for.** Filler such as
+`OpenStreetMap Landfill`, stray text such as a URL, or only a kind of site such as `domestic
+landfill` may be skipped too, but only once finished runs show that searching them rarely finds
+anything ([the plan](docs/plans/2026-10-15-skip-unsearchable-names.md)). This read-only script
+measures it, comparing each class of name with named sites from the same kind of source, and
+forecasts what each batch would spend on each class:
+
+```bash
+uv run python scripts/measure_name_yield.py                    # list the runs in blob
+uv run python scripts/measure_name_yield.py --run-id <run id>  # measure them
+```
+
 | Scope | Sites | Attribute-requests |
 |---|---|---|
 | Everything, no rules | 15,537 | 341,814 |
