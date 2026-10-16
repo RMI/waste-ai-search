@@ -261,7 +261,7 @@ def _run_load(monkeypatch, rows_by_source):
         return rows_by_source.get(params[1], [])
 
     monkeypatch.setattr(db_module, "fetch_all", fake_fetch_all)
-    return load_name_provenance()
+    return load_name_provenance("run-1")
 
 
 def test_load_emits_a_second_name_when_the_spelling_differs(monkeypatch):
@@ -371,7 +371,7 @@ def test_sinir_municipality_reaches_the_seed_and_the_prompt(monkeypatch):
         {"internal_facility_id": "9", "site_id": "9", "site_name": "Other", "country_iso3": "BRA",
          "municipality": "", "admin1": ""},
     ]
-    attach_municipalities(records, load_sinir_municipalities())
+    attach_municipalities(records, load_sinir_municipalities("run-1"))
 
     assert (records[0]["municipality"], records[0]["admin1"]) == ("Araguari", "Minas Gerais")
     assert (records[1]["municipality"], records[1]["admin1"]) == ("", "")

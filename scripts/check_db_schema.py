@@ -31,6 +31,7 @@ FALLBACK_TRANSFORMED_TABLE = "transformed_osm"
 
 
 def main() -> int:
+    from waste_ai_search.consolidation_run import RUN_COLUMNS, resolve_run
     from waste_ai_search.db import DatabaseConfig, fetch_all
     from waste_ai_search.db_enums import DB_ENUMS
     from waste_ai_search.db_introspect import (
@@ -99,8 +100,9 @@ def main() -> int:
     #    SELECT_FIELDS is the list that goes into the SQL verbatim, so it is the right thing to
     #    check. PROVENANCE_FIELDS are deliberately NOT here: reference_year, source_year_min/max,
     #    source_row_count and backfilled_fields are computed by the fold, and attribute_sources is
-    #    joined from the ledger. None of them is a column on this table.
-    seed_fields = list(SELECT_FIELDS)
+    #    joined from the ledger. None of them is a column on this table. The run-tracking columns
+    #    are: the seed reads one run, picked by them.
+    seed_fields = list(dict.fromkeys([*SELECT_FIELDS, *RUN_COLUMNS]))
     seed_missing, _ = compare_columns(seed_fields, consolidated)
     label = f"{CONSOLIDATION_SCHEMA}.{CONSOLIDATION_TABLE}"
     if seed_missing:
@@ -206,11 +208,21 @@ def main() -> int:
     #    RAW_NAME_SOURCES is named as a string, so a typo in any of them is invisible to the
     #    offline tests and to every check above -- it would surface as a failure in the middle of
     #    seed generation. Running each join proves all five names at once.
+    #    They run against the consolidation run a seed would read.
+    try:
+        run_id = resolve_run(config).run_id
+    except Exception as exc:
+        detail = str(exc).splitlines()[0]
+        problems.append(f"no consolidation run to read: {detail}")
+        print(f"FAIL  consolidation run: {detail}")
+        run_id = None
     for data_source, spec in RAW_NAME_SOURCES.items():
+        if run_id is None:
+            break
         try:
             matched = fetch_all(
                 f"SELECT count(*) AS n FROM ({source_name_sql(spec)}) t",
-                (LEDGER_NAME_COLUMN, data_source),
+                (LEDGER_NAME_COLUMN, data_source, run_id),
                 config=config,
             )[0]["n"]
         except Exception as exc:

@@ -219,23 +219,31 @@ def load_seed_sites(
     iso3: Sequence[str] | None = None,
     require_coordinates: bool = False,
     backfill: bool = True,
+    consolidation_run_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Read consolidated_facility and return one seed record per physical facility."""
+    """Read one consolidation run of consolidated_facility and return one seed record per physical
+    facility. The run is the one given, or else the one `consolidation_run.resolve_run` picks: the
+    table holds every run side by side, so reading it whole would blend them."""
     from .db import fetch_all
 
-    clauses: list[str] = []
-    params: list[Any] = []
+    if not consolidation_run_id:
+        from .consolidation_run import resolve_run
+
+        consolidation_run_id = resolve_run(config).run_id
+
+    clauses: list[str] = ["consolidation_run_id = %s"]
+    params: list[Any] = [consolidation_run_id]
     if iso3:
         clauses.append("iso3c_plus = ANY(%s)")
         params.append([code.strip().upper() for code in iso3])
     if require_coordinates:
         clauses.append("latitude IS NOT NULL AND longitude IS NOT NULL")
 
-    rows = fetch_all(select_sql(" AND ".join(clauses)), tuple(params) or None, config=config)
+    rows = fetch_all(select_sql(" AND ".join(clauses)), tuple(params), config=config)
     folded = dedupe_facility_rows(rows, backfill=backfill)
     records = [to_seed_record(record) for record in folded]
 
-    static, dated = load_attribute_sources(config=config)
+    static, dated = load_attribute_sources(consolidation_run_id, config=config)
     attach_attribute_sources(records, static, dated)
 
     # The stored facility_name has been translated; the original is what local sources use.
@@ -246,8 +254,8 @@ def load_seed_sites(
         load_sinir_municipalities,
     )
 
-    attach_name_provenance(records, load_name_provenance(config=config))
-    attach_municipalities(records, load_sinir_municipalities(config=config))
+    attach_name_provenance(records, load_name_provenance(consolidation_run_id, config=config))
+    attach_municipalities(records, load_sinir_municipalities(consolidation_run_id, config=config))
     records.sort(key=lambda item: int(item["facility_id"]) if item["facility_id"].isdigit() else 0)
     return records
 
@@ -256,12 +264,14 @@ def ledger_sql() -> str:
     return (
         f"SELECT {DB_FACILITY_KEY} AS {FACILITY_KEY}, year, column_name, data_source, resolution_granularity\n"
         f"FROM {SOURCE_SCHEMA}.{LEDGER_TABLE}\n"
-        "WHERE column_name = ANY(%s)"
+        "WHERE column_name = ANY(%s) AND consolidation_run_id = %s"
     )
 
 
-def load_attribute_sources(config: Any = None) -> tuple[dict[Any, str], dict[Any, str]]:
-    """Read per-attribute provenance from the value resolution ledger.
+def load_attribute_sources(
+    consolidation_run_id: str, config: Any = None
+) -> tuple[dict[Any, str], dict[Any, str]]:
+    """Read per-attribute provenance from one run of the value resolution ledger.
 
     Returns two lookups because the ledger records provenance at two grains:
     `facility` rows carry no year (static attributes), `facility_year` rows do.
@@ -269,7 +279,7 @@ def load_attribute_sources(config: Any = None) -> tuple[dict[Any, str], dict[Any
     from .db import fetch_all
 
     wanted = sorted(set(LEDGER_COLUMNS.values()))
-    rows = fetch_all(ledger_sql(), (wanted,), config=config)
+    rows = fetch_all(ledger_sql(), (wanted, consolidation_run_id), config=config)
     static: dict[Any, str] = {}
     dated: dict[Any, str] = {}
     for row in rows:
