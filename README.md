@@ -82,6 +82,22 @@ uv run python -m waste_ai_search.cli run --input-csv seed.csv   # pinned corpus 
 `--iso3` is pushed into SQL, so a single-country run reads only that country rather than pulling
 all 19,492 facilities to keep 83.
 
+**A run reads one consolidation run.** `consolidated_facility` keeps every consolidation run side
+by side, and so do the value resolution ledger and `entity_linkage.crosswalk`. Read whole, they
+would blend runs: sites a newer run dropped would come back, and one site's values could come from
+different runs. So a seed reads exactly one run, picked the way the Climate TRACE pipeline picks
+it, so both read the same sites:
+
+- `CONSOLIDATION_RUN_ID` in `.env` pins one run exactly;
+- otherwise the newest run for `CONSOLIDATION_STRATEGY` and `ENTITY_LINKAGE_STRATEGY`, both
+  `legacy_replica_v1` by default. The newest run overall can be an experiment against another
+  crosswalk.
+
+The run prints which one it read, and `consolidation_run` in the workbook's Run_Config records it.
+A pinned id that isn't there, or no run of the strategy, stops the run rather than falling back to
+another. Runs seeded before this read every run in the table; their Run_Config says "a blend of N
+runs" when there was more than one.
+
 **A run reads the database once.** The first read is written to
 `outputs/runs/<run_id>/seed.csv`, and every later phase of that run reads the snapshot instead of
 querying again — both arbitrations, the refresh between passes, a resumed search, and a standalone
@@ -109,14 +125,14 @@ reassigned. Before seeding from the database, a run saves
 |---|---|
 | `consolidation.consolidated_facility.csv.gz` | The baseline the search filled gaps in, with all facility-year rows |
 | `consolidation.value_resolution_ledger.csv.gz` | For each baseline value, the source and the record in it (`data_source`, `data_source_facility_id`) |
-| `entity_linkage.crosswalk_*.csv.gz` | Every source record linked to each facility, whether or not it supplied a value |
-| `manifest.json` | When it was taken, the `consolidation_run_id`, and each table's row count and checksum |
+| `entity_linkage.crosswalk.csv.gz` | Every source record linked to each facility, whether or not it supplied a value: the crosswalk run that consolidation consumed |
+| `manifest.json` | When it was taken, the consolidation run (id, strategies, crosswalk run, date, how it was chosen), and each table's row count and checksum |
 
 `data_source` + `facility_id` in the crosswalk maps a run's `site_id` to its raw records. For a run
 from before #196 it is the only way onto today's `wastemap_id`. It is also how a later run can
-search only what changed. Tables are read whole (every country, not just those
-searched) in one read-only transaction, so they describe one consolidation state; the run stops
-if consolidation is rebuilt while it is seeding. Blob transfers go in stages - data, then
+search only what changed. Each table is filtered to the one run, every country rather than just
+those searched, in one read-only transaction; the run stops if consolidation is rebuilt while it
+is seeding. Blob transfers go in stages - data, then
 `manifest.json`, then `seed.csv` last - so a resumed run whose copy lacks the manifest, or a file it
 lists, stops rather than carry on without its consolidation state, and a seed with no snapshot
 folder at all can only be a run that never had one. A run seeded with `--input-csv` reads no

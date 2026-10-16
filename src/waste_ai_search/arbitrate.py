@@ -18,6 +18,7 @@ from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, LinkResult, load_results
 from .prompt_builder import needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
+from .snapshot import recorded_run
 from .schema import (
     canonical_attribute,
     NOT_A_WASTE_FACILITY,
@@ -833,6 +834,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                 "setting": "seed_source",
                 "value": describe_seed(config),
             },
+            {"setting": "consolidation_run", "value": recorded_run(config.run_dir)},
             {"setting": "sites_arbitrated", "value": len(cached)},
             {"setting": "arbitrated_at", "value": datetime.now().replace(microsecond=0).isoformat()},
             {"setting": "review_queue_rows", "value": len(review_queue)},

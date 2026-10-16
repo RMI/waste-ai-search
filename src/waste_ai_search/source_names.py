@@ -107,12 +107,12 @@ def source_name_sql(spec: RawNameSource) -> str:
         f"       r.{spec.language_column} AS language\n"
         "FROM consolidation.value_resolution_ledger l\n"
         f"JOIN raw_data.{spec.table} r ON {spec.key_expression} = l.data_source_facility_id\n"
-        "WHERE l.column_name = %s AND l.data_source = %s\n"
+        "WHERE l.column_name = %s AND l.data_source = %s AND l.consolidation_run_id = %s\n"
         f"ORDER BY l.{DB_FACILITY_KEY}, original"
     )
 
 
-def load_name_provenance(config: Any = None) -> dict[Any, dict[str, str]]:
+def load_name_provenance(consolidation_run_id: str, config: Any = None) -> dict[Any, dict[str, str]]:
     """{internal_facility_id: {original_site_name, source_language, name_data_source}}.
 
     Every facility whose name came from a translated source is included, whether or not a second
@@ -140,7 +140,7 @@ def load_name_provenance(config: Any = None) -> dict[Any, dict[str, str]]:
     found: dict[Any, dict[str, str]] = {}
     for data_source, spec in RAW_NAME_SOURCES.items():
         rows = fetch_all(
-            source_name_sql(spec), (LEDGER_NAME_COLUMN, data_source), config=config
+            source_name_sql(spec), (LEDGER_NAME_COLUMN, data_source, consolidation_run_id), config=config
         )
         chosen: dict[Any, tuple[bool, dict[str, Any]]] = {}
         for row in rows:
@@ -186,16 +186,17 @@ SINIR_MUNICIPALITY_SQL = (
     "  ON r.facility_code::text = l.data_source_facility_id\n"
     "JOIN (SELECT DISTINCT geocode, city_name, state_name FROM raw_data.raw_sinir_general_city_data) c\n"
     "  ON c.geocode = r.facility_city_location\n"
-    "WHERE l.column_name = 'latitude' AND l.data_source = 'sinir_2024'"
+    "WHERE l.column_name = 'latitude' AND l.data_source = 'sinir_2024'\n"
+    "  AND l.consolidation_run_id = %s"
 )
 
 
-def load_sinir_municipalities(config: Any = None) -> dict[Any, dict[str, str]]:
+def load_sinir_municipalities(consolidation_run_id: str, config: Any = None) -> dict[Any, dict[str, str]]:
     """{internal_facility_id: {municipality, admin1}} for facilities whose location came from SINIR."""
     from .db import fetch_all
 
     found: dict[Any, dict[str, str]] = {}
-    for row in fetch_all(SINIR_MUNICIPALITY_SQL, config=config):
+    for row in fetch_all(SINIR_MUNICIPALITY_SQL, (consolidation_run_id,), config=config):
         found.setdefault(
             row["internal_facility_id"],
             {"municipality": normalize_scalar(row["city_name"]), "admin1": normalize_scalar(row["state_name"])},
