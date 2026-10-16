@@ -2,6 +2,8 @@
 
 AI-assisted waste site activity data discovery using Azure Foundry.
 
+Taking over this project? Start with [docs/HANDOFF.md](docs/HANDOFF.md): current state, open work and how batch 1 was run.
+
 This repository is designed to take a post-consolidated facility waste activity dataset, enrich the search context with cached reverse-geocode fields when
 available, call a Foundry-compatible search client, and write a review-ready
 Excel workbook.
