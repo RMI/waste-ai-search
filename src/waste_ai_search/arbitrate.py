@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .arbitration import calculated_row, date_key, needs_review, resolve, routed_to_leads
-from .credibility import assign_source_tier, is_promotable, tier_label
+from .credibility import TIER_BY_LABEL, assign_source_tier, is_promotable, tier_label
 from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, LinkResult, load_results
 from .prompt_builder import needs_contradiction_check, requested_attributes
@@ -482,7 +482,13 @@ def single_axis_offset_km(site: dict[str, Any], resolved: list[dict[str, Any]]) 
 
 
 def settle_near_coordinates(site: dict[str, Any], resolved: list[dict[str, Any]]) -> int:
-    """Stop sending sub-threshold coordinate differences to review (pilot feedback 5)."""
+    """Stop sending sub-threshold coordinate differences to review (pilot feedback 5).
+
+    A coordinate that close to the seed's is the same place, so it confirms the seed's, and its
+    resolution says so. Left as a conflict, it would be auto-validated but match neither
+    resolved.csv, which takes only promoted resolutions, nor the review queue, which takes only
+    rows needing review.
+    """
     settled = 0
     for row in resolved:
         name = normalize_scalar(row.get("attribute_name"))
@@ -494,6 +500,7 @@ def settle_near_coordinates(site: dict[str, Any], resolved: list[dict[str, Any]]
         if km is None or km > COORDINATE_REVIEW_KM_THRESHOLD:
             continue
         row["validation_status"] = "Auto-validated"
+        row["resolution"] = "Confirmed baseline"
         row["resolution_rule"] = (
             f"{row.get('resolution_rule', '')} Within {km:.3f} km of the seed location "
             f"(threshold {COORDINATE_REVIEW_KM_THRESHOLD:g} km); treated as the same place."
@@ -609,6 +616,7 @@ def combine_location(resolved: list[dict[str, Any]]) -> dict[str, Any] | None:
     pair = [latitude, longitude]
     verdict = _least([normalize_scalar(half.get("validation_status")) for half in pair], LOCATION_VERDICT_ORDER)
     rule = _joined(pair, "resolution_rule")
+    tiers = [normalize_scalar(half.get("winning_source_tier")) for half in pair]
     if normalize_scalar(latitude.get("winning_source_url")) != normalize_scalar(longitude.get("winning_source_url")):
         rule = (
             f"{rule} The two coordinates come from different sources (longitude: "
@@ -616,6 +624,9 @@ def combine_location(resolved: list[dict[str, Any]]) -> dict[str, Any] | None:
         ).strip()
         if verdict == "Auto-validated":
             verdict = "Needs review"
+    if tiers[0] != tiers[1]:
+        # The pair is only as credible as its weaker half, so that is the tier the SME compares.
+        rule = f"{rule} Latitude's source is {tiers[0]}, longitude's {tiers[1]}.".strip()
 
     notes = []
     for half in pair:
@@ -623,16 +634,26 @@ def combine_location(resolved: list[dict[str, Any]]) -> dict[str, Any] | None:
         if note and note not in notes:
             notes.append(note)
     baselines = [normalize_scalar(half.get("baseline_value")) for half in pair]
+    baseline = ", ".join(baselines) if all(baselines) else ""
+    resolution = _least([normalize_scalar(half.get("resolution")) for half in pair], LOCATION_RESOLUTION_ORDER)
+    value = f"{latitude['resolved_value']}, {longitude['resolved_value']}"
+    if resolution == "Confirmed baseline" and baseline:
+        # A location that confirms the seed's, by matching it or by lying within
+        # COORDINATE_REVIEW_KM_THRESHOLD of it, keeps the seed's point, so nothing moves.
+        if value != baseline:
+            rule = f"{rule} Found {value}, which confirms the seed's location, so the seed's is kept.".strip()
+        value = baseline
 
     row = dict(latitude)
     row.update(
         {
             "attribute_name": LOCATION_ATTRIBUTE,
-            "baseline_value": ", ".join(baselines) if all(baselines) else "",
-            "resolved_value": f"{latitude['resolved_value']}, {longitude['resolved_value']}",
+            "baseline_value": baseline,
+            "resolved_value": value,
             "resolved_unit": "decimal degrees",
-            "resolution": _least([normalize_scalar(half.get("resolution")) for half in pair], LOCATION_RESOLUTION_ORDER),
+            "resolution": resolution,
             "resolution_rule": rule,
+            "winning_source_tier": max(tiers, key=lambda tier: TIER_BY_LABEL.get(tier, 0)),
             "agreeing_source_count": min(int(half.get("agreeing_source_count") or 0) for half in pair),
             "dissenting_source_count": max(int(half.get("dissenting_source_count") or 0) for half in pair),
             "value_date": max((normalize_scalar(half.get("value_date")) for half in pair), key=date_key),
@@ -874,9 +895,13 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         }
         if LOCATION_ATTRIBUTE in promoted_attributes:
             promoted_attributes.update(COORDINATE_ATTRIBUTES)
+        # The lone coordinate of half a location is listed above, so its evidence isn't again.
+        half_location_evidence = normalize_scalar(half_location.get("winning_evidence_id")) if half_location else ""
 
         for row in site_evidence:
             if row["promotion_eligible"] == "TRUE" or not row["exclusion_reason"]:
+                continue
+            if half_location_evidence and normalize_scalar(row.get("evidence_id")) == half_location_evidence:
                 continue
             # A finding already promoted is not listed again as a lead. A dead-link source is the
             # exception: it never won anything - it was excluded before resolution - so the lead is

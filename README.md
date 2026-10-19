@@ -357,6 +357,8 @@ The two coordinates are asked for and checked separately, then combined into one
 loaded as a pair or not at all: it takes the less settled verdict of its two halves, and goes to
 review if they came from different sources. A coordinate found without its other half is listed
 under Leads. On batch 1, the halves had split at 55 of the 157 sites with a found coordinate.
+A coordinate within 1 km of the seed's is the same place, so it confirms the seed's, and a
+location that confirms the seed's keeps the seed's point: nothing moves.
 
 **Newer sources win.** The agent is told to prefer the most recent source when sources disagree, and to base `facility_status` on the latest evidence it can find (a closure notice, current opening hours, recent news) rather than an older permit or directory listing. Arbitration follows the same rule: within a tier the newer `value_date` wins, and for `facility_status` only, a lower-tier source down to Tier 3 may win when it is at least 3 years newer than the source or baseline it replaces. Such a win always goes to review, and `resolution_rule` states the dates.
 

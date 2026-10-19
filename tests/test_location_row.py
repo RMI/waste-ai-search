@@ -6,10 +6,11 @@ import json
 
 from openpyxl import load_workbook
 
-from waste_ai_search.arbitrate import combine_location, run_arbitration
+from waste_ai_search.arbitrate import auto_validated_rows, combine_location, run_arbitration, settle_near_coordinates
 from waste_ai_search.input_loader import write_csv_records
 from waste_ai_search.run_context import PipelineConfig
 from waste_ai_search.schema import LOCATION_ATTRIBUTE, REVIEW_QUEUE_HEADERS
+from waste_ai_search.seed_refresh import refresh_sites
 from waste_ai_search.workbook_io import REVIEW_INSTRUCTIONS
 
 REGISTRY = "https://registry.example/site-21"
@@ -86,6 +87,38 @@ def test_a_location_goes_to_review_when_either_half_does():
     )
 
 
+def test_a_location_near_the_seeds_confirms_it_and_keeps_the_seeds_point():
+    # The longitude is about 0.5 km from the seed's, under the review threshold: the same place.
+    # Left as a conflict, the auto-validated location matched neither resolved.csv nor the queue.
+    site = {"latitude": "32.51", "longitude": "-116.2"}
+    resolved = [
+        half("found_latitude", "32.51", "Confirmed baseline", "Auto-validated", baseline="32.51"),
+        half("found_longitude", "-116.205", "Conflict - needs review", "Needs review", baseline="-116.2"),
+    ]
+
+    assert settle_near_coordinates(site, resolved) == 1
+    combine_location(resolved)
+    location = only_location(resolved)
+    assert (location["resolution"], location["validation_status"]) == ("Confirmed baseline", "Auto-validated")
+    # A confirmation keeps the seed's point, so nothing moves.
+    assert location["resolved_value"] == "32.51, -116.2"
+    assert "Found 32.51, -116.205, which confirms the seed's location" in location["resolution_rule"]
+    assert auto_validated_rows(resolved) == [location]
+
+
+def test_a_location_from_two_tiers_shows_the_weaker():
+    resolved = [
+        half("found_latitude", "32.51", "Filled empty baseline", "Auto-validated"),
+        {**half("found_longitude", "-116.21", "Filled empty baseline", "Needs review", url="https://other.example"),
+         "winning_source_tier": "Tier 3"},
+    ]
+
+    combine_location(resolved)
+    location = only_location(resolved)
+    assert location["winning_source_tier"] == "Tier 3"
+    assert "Latitude's source is Tier 2, longitude's Tier 3." in location["resolution_rule"]
+
+
 def test_a_location_the_baseline_outranks_goes_to_leads():
     # Batch 1's usual split: one coordinate matched the seed's, the other lost to it.
     resolved = [
@@ -143,6 +176,25 @@ def test_a_site_with_no_coordinates_is_untouched():
     assert [row["attribute_name"] for row in resolved] == ["operator"]
 
 
+def test_refresh_seed_merges_a_found_location_into_both_coordinates():
+    site = {"site_id": "21", "latitude": "32.0", "longitude": "-116.0", "ai_filled_fields": ""}
+    location = {
+        **half("found_latitude", "", "Overrides baseline", "Auto-validated", baseline="32.0"),
+        "attribute_name": LOCATION_ATTRIBUTE,
+        "resolved_value": "32.51, -116.21",
+        "winning_source_tier": "Tier 2",
+    }
+
+    (refreshed,), stats = refresh_sites([site], [location], "run", merge_identity=True)
+    assert (refreshed["latitude"], refreshed["longitude"]) == ("32.51", "-116.21")
+    # Stamped per coordinate, the way the next pass reads them.
+    assert refreshed["ai_filled_fields"] == "found_latitude@Tier 2; found_longitude@Tier 2"
+    assert stats["values_merged"] == 2
+
+    (unchanged,), _ = refresh_sites([site], [location], "run")
+    assert (unchanged["latitude"], unchanged["longitude"]) == ("32.0", "-116.0")
+
+
 def test_a_correction_can_carry_its_own_date():
     assert REVIEW_QUEUE_HEADERS.index("corrected_value_date") == REVIEW_QUEUE_HEADERS.index("corrected_value") + 1
     queue = next(row for row in REVIEW_INSTRUCTIONS if row["tab_name"] == "Review_Queue")
@@ -150,7 +202,17 @@ def test_a_correction_can_carry_its_own_date():
 
 
 # --- end to end -----------------------------------------------------------------------------
-def test_a_real_arbitration_writes_one_location_row(tmp_path):
+NEWS = {
+    "source_title": "El Hongo dump to close",
+    "publisher": "Diario local",
+    "source_type": "News report",
+    "publication_date": "2023-05-01",
+    "url": "https://news.example.mx/el-hongo",
+}
+
+
+def arbitrate_el_hongo(tmp_path, coordinates, source=NEWS):
+    """Arbitrate one site, with no seed coordinates, whose agent response reports `coordinates`."""
     from waste_ai_search.seed_source import seed_headers
 
     run_dir = tmp_path / "run"
@@ -161,13 +223,6 @@ def test_a_real_arbitration_writes_one_location_row(tmp_path):
     }
     write_csv_records(run_dir / "seed.csv", [site], seed_headers())
 
-    source = {
-        "source_title": "El Hongo dump to close",
-        "publisher": "Diario local",
-        "source_type": "News report",
-        "publication_date": "2023-05-01",
-        "url": "https://news.example.mx/el-hongo",
-    }
     response = {
         "site_id": "21",
         "attributes": [
@@ -180,7 +235,7 @@ def test_a_real_arbitration_writes_one_location_row(tmp_path):
                 "evidence_summary": "The article gives the site's coordinates.",
                 "sources": [source],
             }
-            for name, value in (("found_latitude", "32.51"), ("found_longitude", "-116.21"))
+            for name, value in coordinates
         ],
         "unverified_leads": [],
     }
@@ -189,6 +244,11 @@ def test_a_real_arbitration_writes_one_location_row(tmp_path):
     (raw / "site_21.json").write_text(json.dumps(response))
 
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
+    return run_dir
+
+
+def test_a_real_arbitration_writes_one_location_row(tmp_path):
+    run_dir = arbitrate_el_hongo(tmp_path, [("found_latitude", "32.51"), ("found_longitude", "-116.21")])
 
     # A Tier 3 source fills an empty location, so the pair waits for review as one row.
     queue = list(csv.DictReader((run_dir / "review_queue.csv").open()))
@@ -200,3 +260,13 @@ def test_a_real_arbitration_writes_one_location_row(tmp_path):
 
     standardized = next(csv.DictReader((run_dir / "std_facility_tbl_ai_search_run.csv").open()))
     assert (standardized["latitude"], standardized["longitude"]) == ("32.51", "-116.21")
+
+
+def test_a_lone_low_tier_coordinate_is_listed_as_a_lead_once(tmp_path):
+    # A Tier 4 source may fill an empty baseline, so its latitude wins while sitting below the
+    # promotion floor. It is half a location, listed as such, and not again as a weak claim.
+    wiki = {**NEWS, "publisher": "Wikimapia", "source_type": "Wiki or aggregator", "url": "https://wiki.example/el-hongo"}
+    run_dir = arbitrate_el_hongo(tmp_path, [("found_latitude", "32.51")], source=wiki)
+
+    leads = [row for row in csv.DictReader((run_dir / "supplementary_leads.csv").open()) if row["attribute_name"] == "found_latitude"]
+    assert [row["exclusion_reason"] for row in leads] == ["Half a location: the other coordinate was not found."]
