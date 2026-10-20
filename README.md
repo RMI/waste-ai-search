@@ -670,6 +670,99 @@ written anywhere. `evidence.csv` holds one row per source-backed
 claim with the tier rule applied to each source, so you can see exactly why a value won or lost.
 `sources.csv` is the deduped source registry.
 
+## Re-keying batch 1 to wastemap_id
+
+Batch 1 ran on 6 Oct 2026, before facilities had a permanent ID. Its `site_id`s are
+`internal_facility_id`s, which every consolidation rebuild renumbered, so they no longer name a
+facility. The raw load in RMI/waste_data_ingestion_pipeline#261 reads `site_id` as a `wastemap_id`,
+so batch 1 can't be pinned there until its files are re-keyed. `scripts/relabel_to_wastemap_id.py`
+writes re-keyed copies into a new folder. It never edits the originals.
+
+**How an old ID finds its wastemap_id.** The run's own `consolidation_snapshot/` keeps the crosswalk
+it searched against, which lists each old ID's source records (`data_source`, `facility_id`).
+Today's `entity_linkage.crosswalk` lists the `wastemap_id` each of those records belongs to now.
+Joining the two gives every old ID one of these outcomes:
+
+| Outcome | Meaning | What happens |
+|---|---|---|
+| `mapped` | All its records are on one facility | Re-keyed |
+| `partly_linked` | Some records are no longer linked; the rest are on one facility | Re-keyed, and listed in the report |
+| `unmapped` | None of its records is linked any more | **Stops** |
+| `split` | Its records now belong to different facilities | **Stops** |
+| `merged` | Another of the run's old IDs lands on the same facility | **Stops** |
+
+A merge stops the run because two searches' results would land on one facility, and the ingestion
+transform would either stop on two values for one attribute or pair one search's latitude with the
+other's longitude. Choosing a wastemap_id for an ID that stops is a judgement, so the script doesn't
+guess: it writes only `relabel_report.csv`, with the IDs that stopped it listed first, each with the
+records behind it and the files and tabs it appears in.
+
+**What is rewritten:**
+
+- `resolved.csv`: `site_id`, and `internal_facility_id`, which holds the wastemap_id in runs since
+  RMI/waste_data_ingestion_pipeline#196.
+- `<run_id>_review.xlsx`: `site_id` on every tab that has one (Review_Queue, Leads, Parse_Warnings).
+  Run_Config gains two rows: `site_id_key = wastemap_id`, and `site_id_relabelled`, which records
+  the date and both crosswalks. A workbook that already has `site_id_key` is refused, because
+  re-keying it again would read its wastemap_ids as old IDs.
+
+Nothing else changes. The script reads both copies back and stops if anything but the IDs
+differs. It also stops early if either file has columns the raw load would refuse.
+`winning_evidence_id` keeps the old ID inside it (`WAIEV-1081-…`), because it points into batch 1's
+`evidence.csv`, which isn't re-keyed. The workbook copy is for loading only. Formulas are saved as
+their values, and some Excel-only formatting may be dropped, so SMEs keep working in the SharePoint
+original.
+
+### Running it
+
+The real run needs the dev database, so connect to the VPN and fill in `WASTEMAP_DB_*` in `.env`.
+Unzip the run folder somewhere **outside OneDrive**, such as `~/Developer/ai-search-runs/batch1/`.
+
+1. Check the mapping first. `--dry-run` writes only the report, to `batch1/wastemap_id/`:
+
+   ```bash
+   uv run python scripts/relabel_to_wastemap_id.py ~/Developer/ai-search-runs/batch1 --from-db --dry-run
+   ```
+
+   It prints the consolidation run and crosswalk it read, and how many old IDs got each outcome. By
+   default it reads the crosswalk consumed by the newest `legacy_replica_v1` consolidation run,
+   which is the run a seed reads. `--consolidation-run-id` (or `CONSOLIDATION_RUN_ID` in `.env`)
+   pins a different one.
+
+2. Once the SMEs have finished, download their workbook from SharePoint and re-key it together with
+   `resolved.csv`:
+
+   ```bash
+   uv run python scripts/relabel_to_wastemap_id.py ~/Developer/ai-search-runs/batch1 --from-db --workbook ~/Downloads/batch1_review.xlsx --out-dir ~/Developer/ai-search-runs/batch1-wastemap-id
+   ```
+
+   Without `--workbook`, it re-keys the run's own unreviewed `batch1_review.xlsx`. The copy is always
+   named `<run_id>_review.xlsx`, whatever the download was called. `--out-dir` must not already
+   hold a copy.
+
+3. Hand `resolved.csv` and `batch1_review.xlsx` from the output folder to whoever takes the ingestion
+   snapshot (`source_to_blob_raw_ai_search.py` in #261 reads them from `DATA_DIR/ai_search/batch1/`).
+   Send `relabel_report.csv` with them for the record.
+
+It exits 0 when it has written the copies (or a dry run maps every ID cleanly), 1 when it stopped,
+and 2 when it couldn't read the database.
+
+**Without the database.** `--crosswalk-csv` reads an export of the crosswalk instead of
+`--from-db`. The export must hold one entity linkage run, because the table keeps every run side by
+side. Someone with access can produce it:
+
+```sql
+-- The crosswalk run the newest legacy_replica_v1 consolidation consumed
+SELECT consolidation_run_id, MAX(entity_linkage_run_id) AS entity_linkage_run_id,
+       MAX(consolidation_created_date) AS created
+FROM consolidation.consolidated_facility
+WHERE consolidation_strategy = 'legacy_replica_v1' AND entity_linkage_strategy = 'legacy_replica_v1'
+GROUP BY consolidation_run_id ORDER BY created DESC NULLS LAST LIMIT 1;
+
+-- In psql, with that entity_linkage_run_id
+\copy (SELECT wastemap_id, data_source, facility_id, entity_linkage_run_id FROM entity_linkage.crosswalk WHERE entity_linkage_run_id = '<id>') TO 'crosswalk.csv' CSV HEADER
+```
+
 ## Reverse Geocoding
 
 Reverse geocoding is optional but strongly recommended for live pilot runs. The
