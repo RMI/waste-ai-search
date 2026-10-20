@@ -63,7 +63,8 @@ IDENTITY_DISTANCE_KM_THRESHOLD = 5.0
 # Coordinate disagreements below this are a more precise fix on the same place, not a different
 # facility, and reviewing them is wasted SME time. Measured on the pilot: four of five coordinate
 # conflicts were 0.003-0.195 km apart; the fifth was 238 km and is the one worth a human.
-COORDINATE_REVIEW_KM_THRESHOLD = 1.0
+# 0.5 km covers those four; it was 1 km until WP-552.
+COORDINATE_REVIEW_KM_THRESHOLD = 0.5
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

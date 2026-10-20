@@ -106,6 +106,15 @@ def test_a_location_near_the_seeds_confirms_it_and_keeps_the_seeds_point():
     assert auto_validated_rows(resolved) == [location]
 
 
+def test_a_coordinate_more_than_half_a_km_away_still_goes_to_review():
+    # About 0.7 km from the seed's: farther than the review threshold, so an SME decides.
+    site = {"latitude": "32.51", "longitude": "-116.2"}
+    resolved = [half("found_longitude", "-116.2075", "Conflict - needs review", "Needs review", baseline="-116.2")]
+
+    assert settle_near_coordinates(site, resolved) == 0
+    assert (resolved[0]["resolution"], resolved[0]["validation_status"]) == ("Conflict - needs review", "Needs review")
+
+
 def test_a_location_from_two_tiers_shows_the_weaker():
     resolved = [
         half("found_latitude", "32.51", "Filled empty baseline", "Auto-validated"),

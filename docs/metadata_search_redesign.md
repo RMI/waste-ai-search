@@ -338,7 +338,7 @@ All settled. Where an answer overrode my recommendation it is marked.
 | F2 | Conflicts route by relative tier | Candidate better than baseline → review. Equal → review. Worse → leads. |
 | F3 | Leads stay out of the queue | Lead-routed rows get `validation_status = Routed to leads` and are excluded from `review_queue.csv`. |
 | F4 | Closure emphasis | `closing_year` is flagged REQUIRED for inactive sites, with upfront emphasis when the baseline or the name already says closed. |
-| F5 | Coordinate review threshold | Coordinate differences under **1 km** auto-validate instead of queueing. |
+| F5 | Coordinate review threshold | Coordinate differences under **0.5 km** auto-validate instead of queueing (1 km until WP-552). |
 | F6 | Widened attribute set | Added `waste_depth_meters`, `has_cover`, 4 GCCS methane quantities, 2 GCCS project enums, `gccs_collection_efficiency`. 20 requestable attributes, up from 11. |
 | F7 | GCCS gated on gas collection | The 7 GCCS attributes are requested **only** where gas collection is known present. Unknown is deferred, not dropped. |
 | F8 | Two-pass seed refresh | `refresh-seed` merges a run's promoted values back into the seed, so a facility whose gas collection is discovered on pass 1 gets its GCCS attributes on pass 2. |
