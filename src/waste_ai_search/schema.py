@@ -80,12 +80,22 @@ UNSEARCHED_ATTRIBUTES = {
     "gccs_ch4_flow_to_project_metric_tonnes",
 }
 
-# Always requested. These are how we know the agent found the *right* facility, so they are not
-# gap-filled: the identity check rests on them (Q34).
+# A location is one fact, valued "lat, lon", so it is reviewed and loaded as a pair, from one
+# source, or not at all. It is read from where each source states the facility is (locate.py),
+# not from coordinates the agent returns as values.
+LOCATION_ATTRIBUTE = "found_location"
+
+# The two coordinates a location is made of. The seed and refresh-seed record a location's
+# provenance under these names, and responses cached before build step 4 of the source-matching
+# plan returned them as values.
+COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
+
+# Always requested, except where a Tier 1-2 source already supplied them. They are how we know
+# the agent found the *right* facility, so they are not gap-filled: the identity check rests on
+# them (Q34). The name is a value; the location comes from what each source states.
 IDENTITY_ATTRIBUTES = [
     "found_facility_name",
-    "found_latitude",
-    "found_longitude",
+    LOCATION_ATTRIBUTE,
 ]
 
 # Attribute names retired in favour of a new spelling, mapped to their replacement. Data written
@@ -127,13 +137,6 @@ DEFAULT_EXCLUDED_ISO3 = set(DEFAULT_EXCLUSION_REASONS)
 # government source, so searching it risks overwriting better data than the search can find.
 # Today that is Brazil's 3,913 SINIR facilities, whose coordinates are a municipality centre.
 COORDINATES_ONLY_ISO3 = {"BRA"}
-
-COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
-
-# A location is one fact, valued "lat, lon", so it is reviewed and loaded as a pair, from one
-# source, or not at all. It is read from where each source states the facility is (locate.py),
-# not from coordinates the agent returns as values.
-LOCATION_ATTRIBUTE = "found_location"
 
 # The full run in six batches, run in order (F30). Batches 1-2 are English-speaking, so SMEs learn
 # the review process on familiar sources: English as the main language, then as an official one.

@@ -49,7 +49,6 @@ from .schema import (
     ARRAY_TARGET_ATTRIBUTES,
     ATTRIBUTE_RANGES,
     BOOLEAN_TARGET_ATTRIBUTES,
-    COORDINATE_ATTRIBUTES,
     ENUM_MAPS,
     EVIDENCE_HEADERS,
     LOCATION_ATTRIBUTE,
@@ -801,11 +800,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         # A location is the exception: every source states one, but it is reviewed only where our
         # coordinates are asked for, as found_location.
         site_resolved: list[dict[str, Any]] = []
-        to_resolve = []
-        for name in requested_attributes(site):
-            name = LOCATION_ATTRIBUTE if name in COORDINATE_ATTRIBUTES else name
-            if name not in to_resolve:
-                to_resolve.append(name)
+        to_resolve = list(requested_attributes(site))
         to_resolve += [name for name in by_attribute if name not in to_resolve and name != LOCATION_ATTRIBUTE]
         for name in to_resolve:
             site_resolved.append(resolve(site, name, by_attribute.get(name, [])))

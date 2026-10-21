@@ -219,3 +219,24 @@ def test_a_value_row_carries_its_sources_facility_and_location(tmp_path):
     assert (operator["location_basis"], operator["located_latitude"], operator["located_longitude"]) == (
         "coordinates", "32.5122", "-116.2",
     )
+
+
+def test_a_coordinates_only_site_gets_its_found_location_from_a_source(tmp_path):
+    """Brazil's inexact SINIR sites are searched for sources that say where the dump is."""
+    from waste_ai_search.seed_source import seed_headers
+
+    run_dir = tmp_path / "run"
+    site = {"facility_id": "9", "site_id": "9", "internal_facility_id": "9", "year": "2024", "site_name": "Lixão",
+            "facility_name": "Lixão", "country_iso3": "BRA", "iso3c_plus": "BRA", "is_location_exact": "FALSE",
+            "contributing_data_sources": "sinir_2024", "reference_year": "2024",
+            "latitude": "-10.1800", "longitude": "-48.3300"}
+    write_csv_records(run_dir / "seed.csv", [site], seed_headers())
+    raw = run_dir / "raw_foundry_responses"
+    raw.mkdir(parents=True)
+    permit = {**REGULATOR, "publisher": "NATURATINS", "url": "https://naturatins.example.br/licenca/123"}
+    (raw / "site_9.json").write_text(json.dumps({"site_id": "9", **stated((permit, "-10.2481, -48.3612", "coordinates"))}))
+    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
+
+    assert [(row["attribute_name"], row["resolved_value"]) for row in rows(run_dir, "review_queue.csv")] == [
+        (LOCATION_ATTRIBUTE, "-10.2481, -48.3612")
+    ]

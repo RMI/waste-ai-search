@@ -377,7 +377,8 @@ def test_brazil_searches_coordinates_only_where_the_location_is_inexact():
 
     bra = {"site_id": "1", "country_iso3": "BRA", "is_location_exact": "FALSE"}
     assert coordinates_only(bra)
-    assert requested_attributes(bra) == ["found_latitude", "found_longitude"]
+    # Changed on purpose for build step 4: a location is what its sources state, as found_location.
+    assert requested_attributes(bra) == ["found_location"]
 
 
 def test_brazil_with_an_exact_location_is_searched_for_nothing():
@@ -418,7 +419,7 @@ def test_brazilian_sites_are_scoped_to_coordinates_or_skipped():
     from pathlib import Path as _Path
 
     from waste_ai_search.prompt_builder import location_is_inexact, requested_attributes
-    from waste_ai_search.schema import COORDINATE_ATTRIBUTES
+    from waste_ai_search.schema import LOCATION_ATTRIBUTE
 
     seed = _Path(__file__).parents[1] / "inputs" / "consolidated_sites.csv"
     if not seed.exists():
@@ -430,7 +431,7 @@ def test_brazilian_sites_are_scoped_to_coordinates_or_skipped():
     for site in bra:
         requested = requested_attributes(site)
         if location_is_inexact(site):
-            assert requested == list(COORDINATE_ATTRIBUTES), (
+            assert requested == [LOCATION_ATTRIBUTE], (
                 f"BRA site {site['site_id']} should be scoped to coordinates alone, got {requested}"
             )
         else:
