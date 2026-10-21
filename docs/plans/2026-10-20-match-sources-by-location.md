@@ -147,13 +147,13 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 
   Sources with no location are never grouped. With nothing to go on, each stays on its own.
 - **Names are fuzzy-matched, and they are a check, not the main test.** Name alone merges distant
-  sites: "Eastview Landfill" is both a Brandon and a Guelph site, 1,716 km apart. The scoring is
-  CJ's from #225 (`facility_names.py`):
+  sites: "Eastview Landfill" is both a Brandon and a Guelph site, 1,716 km apart. The scoring
+  started as a copy of entity linkage's (#225, `facility_names.py`), and is this repo's own:
+  matching is independent of entity linkage, so the two needn't agree.
   1. Case, accents and punctuation are ignored.
   2. Generic words ("landfill", "sanitary", "waste management"), company suffixes and permit codes
-     are dropped. More generic words would be added: tip, refuse, depot, grounds, nuisance, lieu,
-     enfouissement, technique, LET. That needs agreeing with CJ, so both repos mean the same by
-     "same name".
+     are dropped. More generic words are added: tip, refuse, depot, grounds, nuisance, lieu,
+     enfouissement, technique, LET, and words for a site's state, such as closed and former.
   3. The score, from 0 to 1, is the higher of two things: the share of the shorter name's words
      found in the longer one, and how alike the two read as strings. So "Seaton Meadows Landfil"
      still matches "Seaton Meadows".

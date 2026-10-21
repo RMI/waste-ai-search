@@ -306,11 +306,13 @@ as none.
 | No location | 5. Its name strongly matches exactly one other site of ours within 200 km of the site searched, and not the site searched | That site, **moved by name** |
 | No location | 6. Anything else | The site searched, flagged **no location**. The flag names any site of ours within 200 km that the name also fits, ties included, and says if the same page was cited for other searches. `corrected_site_id` offers those sites, and the sites whose searches cited the page. |
 
-**Names** are scored by CJ's `facility_names.py` from #225, kept here as
-[`facility_names.py`](src/waste_ai_search/facility_names.py), which must stay aligned with it. Case,
+**Names** are scored by [`facility_names.py`](src/waste_ai_search/facility_names.py), which
+started as a copy of entity linkage's name scoring (#225) and is this repository's own. Matching is
+independent of entity linkage, since AI search rows join the facility named by the wastemap_id they
+carry, so the two needn't agree. Case,
 accents, punctuation, company suffixes and permit codes are ignored, and generic words are dropped
-("landfill", "sanitary", "waste management", and more this corpus needs, to be agreed with CJ:
-tip, refuse, depot, grounds, nuisance, lieu, enfouissement, technique and LET; the words of other
+("landfill", "sanitary", "waste management", and more this corpus needs: words for a site's state,
+such as closed, former and disused; tip, refuse, depot, grounds, nuisance, lieu, enfouissement, technique and LET; the words of other
 kinds of site, such as Australia's "Resource Recovery Centre", Canada's "Integrated Waste Management
 Facility" (IWMF), France's "Installation de Stockage de Déchets Non Dangereux" and Mexico's "tiradero
 a cielo abierto"; and small words such as "for", "in"
