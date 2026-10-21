@@ -117,13 +117,20 @@ class Located:
 def format_point(latitude: float | None, longitude: float | None) -> str:
     if latitude is None or longitude is None:
         return ""
-    return f"{_trim(latitude)}, {_trim(longitude)}"
+    return f"{format_coordinate(latitude)}, {format_coordinate(longitude)}"
 
 
-def _trim(number: float) -> str:
+def format_coordinate(number: float | None) -> str:
     """Six decimals, about 0.1 m, without trailing zeros."""
+    if number is None:
+        return ""
     text = f"{number:.6f}".rstrip("0").rstrip(".")
     return "0" if text in {"-0", ""} else text
+
+
+def states_location(source: dict[str, Any]) -> bool:
+    """Whether a source states a location at all."""
+    return normalize_scalar(source.get("stated_location")).lower() not in NO_LOCATION_TEXT
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -816,7 +823,7 @@ def locate_source(
     """
     text = normalize_scalar(source.get("stated_location"))
     kind = normalize_scalar(source.get("stated_location_kind"))
-    if text.lower() in NO_LOCATION_TEXT:
+    if not states_location(source):
         return Located(reason="no location stated")
     iso3 = normalize_scalar(site.get("country_iso3")).upper()
     names = [source.get("facility_name_in_source"), source.get("facility_name_english")]

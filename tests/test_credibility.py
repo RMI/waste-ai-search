@@ -139,20 +139,19 @@ def test_gazetteer_is_credible_for_coordinates_but_not_for_metadata():
     """A coordinate directory is purpose-built for location and useless for operations."""
     gazetteer = source("Map or coordinate directory", publication_date="")
 
-    assert assign_source_tier(gazetteer, "found_latitude")[0] == TIER_3
-    assert assign_source_tier(gazetteer, "found_longitude")[0] == TIER_3
+    assert assign_source_tier(gazetteer, "found_location")[0] == TIER_3
     assert assign_source_tier(gazetteer, "annual_incoming_waste_metric_tonnes")[0] == TIER_4
     assert assign_source_tier(gazetteer, "facility_status")[0] == TIER_4
     assert assign_source_tier(gazetteer)[0] == TIER_4
 
 
 def test_wiki_is_not_a_gazetteer_and_stays_tier_4_for_coordinates():
-    assert assign_source_tier(source("Wiki or aggregator"), "found_latitude")[0] == TIER_4
+    assert assign_source_tier(source("Wiki or aggregator"), "found_location")[0] == TIER_4
 
 
 def test_coordinate_exception_cannot_override_a_baseline():
     """Tier 3 promotes and can confirm, but never silently overrides."""
-    tier = assign_source_tier(source("Map or coordinate directory"), "found_latitude")[0]
+    tier = assign_source_tier(source("Map or coordinate directory"), "found_location")[0]
     assert is_promotable(tier)
     assert not may_override_baseline(tier)
 

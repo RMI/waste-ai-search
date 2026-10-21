@@ -74,9 +74,8 @@ def test_citations_become_one_source_per_exact_url_with_their_values():
     sources = by_url(read)
     assert list(sources) == [PERMIT["url"], NEWS["url"]]
     permit = sources[PERMIT["url"]]
-    assert [value["attribute_name"] for value in permit["values"]] == [
-        "operator", "facility_status", "found_facility_name", "found_latitude", "found_longitude",
-    ]
+    # The coordinates are not values: they are the location the source states, below.
+    assert [value["attribute_name"] for value in permit["values"]] == ["operator", "facility_status", "found_facility_name"]
     # Each value keeps its own citation's quote, and the attribute's other fields.
     status = permit["values"][1]
     assert status["quoted_evidence_short"] == "Status: closed"
@@ -167,6 +166,8 @@ def test_validation_reports_each_shape_in_its_own_terms():
         "sources[1].values[1] has unsupported attribute_name 'colour'.",
     ]
     assert validate_foundry_payload({"sources": "none"}) == ["Payload field 'sources' must be a list."]
+    odd_kind = {"sources": [{"url": "https://a.example", "stated_location": "x", "stated_location_kind": "coordinates | postcode", "values": []}]}
+    assert validate_foundry_payload(odd_kind) == ["sources[1] has unrecognised stated_location_kind 'postcode'."]
     assert validate_foundry_payload(["not", "an", "object"]) == ["Response is not a JSON object."]
 
 
@@ -254,7 +255,7 @@ def test_the_run_log_counts_attributes_and_sources_in_either_shape(tmp_path, mon
 
     rows = list(csv.DictReader((tmp_path / "run" / "foundry_run_log.csv").open(encoding="utf-8-sig")))
     counts = {row["site_id"]: (row["parsed_attribute_count"], row["parsed_source_count"]) for row in rows}
-    assert counts == {"7": ("1", "2"), "8": ("5", "2")}
+    assert counts == {"7": ("1", "2"), "8": ("3", "2")}
 
 
 def test_a_converted_response_keeps_its_evidence_ids_and_order():

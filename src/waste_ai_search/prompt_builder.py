@@ -315,6 +315,15 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
     return requested
 
 
+def asks_location(site: dict[str, Any]) -> bool:
+    """Whether this site's found location is reviewed: where its coordinates are asked for.
+
+    Every source states a location, but where our coordinates come from a Tier 1-2 source (F29),
+    the sources' locations are recorded and not queued.
+    """
+    return bool(set(COORDINATE_ATTRIBUTES) & set(requested_attributes(site)))
+
+
 def search_budget(max_web_searches: int) -> str:
     """Prompt text capping the agent's web searches, which Bing bills one by one (WP-545)."""
     if max_web_searches <= 0:

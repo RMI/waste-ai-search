@@ -282,51 +282,39 @@ def test_numeric_attribute_with_a_real_number_still_promotes():
     assert by_attr["waste_in_place_metric_tonnes"][0]["value"] == "1200000"
 
 
-def test_gazetteer_coordinates_promote_and_confirm_identity():
+def located_by(stated, source=GAZETTEER, kind="coordinates"):
+    """A source-first response with one source stating where the facility is, and no values."""
+    return {"site_id": "1", "sources": [{**source, "stated_location": stated, "stated_location_kind": kind, "values": []}]}
+
+
+def test_a_gazetteer_location_is_tier_3_and_a_reviewable_conflict():
+    """Reversed on purpose for build step 4: the location is read from what the source states, as one
+    found_location, not as two coordinates the agent returned. A map directory keeps its Tier 3."""
     s = site(latitude="6.5", longitude="3.3")
-    by_attr, _rows, _sources, _warn = extract(
-        s,
-        payload(
-            attribute("found_latitude", "6.5", "decimal degrees", sources=[GAZETTEER]),
-            attribute("found_longitude", "3.3", "decimal degrees", sources=[GAZETTEER]),
-        ),
-    )
+    by_attr, rows, _sources, _warn = extract(s, located_by("6.512345, 3.312345"))
 
-    lat = resolve(s, "found_latitude", by_attr["found_latitude"])
-    assert lat["resolution"] == "Confirmed baseline"
-    assert lat["validation_status"] == NOTHING_TO_REVIEW
+    (item,) = by_attr["found_location"]
+    assert (item["value"], item["tier"]) == ("6.512345, 3.312345", 3)
+    assert rows[0]["location_basis"] == "coordinates"
+    location = resolve(s, "found_location", by_attr["found_location"])
+    assert location["baseline_value"] == "6.5, 3.3"
+    assert location["resolution"] == "Conflict - needs review"
+    assert location["resolved_value"] == "6.512345, 3.312345"
 
 
-def test_gazetteer_coordinates_that_disagree_become_a_reviewable_conflict():
-    s = site(latitude="6.5", longitude="3.3")
-    by_attr, _rows, _sources, _warn = extract(
-        s, payload(attribute("found_latitude", "7.9", "decimal degrees", sources=[GAZETTEER]))
-    )
-
-    lat = resolve(s, "found_latitude", by_attr["found_latitude"])
-    assert lat["resolution"] == "Conflict - needs review"
-    assert lat["resolved_value"] == "7.9"
+def test_a_location_equal_to_ours_at_comparison_precision_confirms_it():
+    # Six significant digits: a longitude past 100 degrees compares to about 100 m.
+    s = site(latitude="14.84481", longitude="120.331538")
+    by_attr, _rows, _sources, _warn = extract(s, located_by("14.844812, 120.331912"))
+    location = resolve(s, "found_location", by_attr["found_location"])
+    assert (location["resolution"], location["validation_status"]) == ("Confirmed baseline", NOTHING_TO_REVIEW)
 
 
-def test_distance_is_computed_once_coordinates_resolve():
-    from waste_ai_search.arbitrate import append_distance_row
-
-    s = site(latitude="6.5", longitude="3.3")
-    by_attr, _rows, _sources, _warn = extract(
-        s,
-        payload(
-            attribute("found_latitude", "6.6", "decimal degrees", sources=[GAZETTEER]),
-            attribute("found_longitude", "3.4", "decimal degrees", sources=[GAZETTEER]),
-        ),
-    )
-    resolved_rows = [resolve(s, name, by_attr[name]) for name in ("found_latitude", "found_longitude")]
-    append_distance_row(s, resolved_rows)
-
-    distance = resolved_rows[-1]
-    assert distance["attribute_name"] == "distance_to_original_coordinates_km"
-    assert distance["resolution"] == "Calculated"
-    assert distance["winning_source_tier"] == ""
-    assert 14.0 < float(distance["resolved_value"]) < 16.0
+def test_a_location_copied_from_ours_is_no_location():
+    s = site(latitude="6.5123456", longitude="3.3123456")
+    by_attr, rows, _sources, _warn = extract(s, located_by("6.5123456, 3.3123456"))
+    assert "found_location" not in by_attr
+    assert (rows[0]["location_basis"], rows[0]["exclusion_reason"]) == ("none", "No location: copied from the prompt.")
 
 
 def test_gazetteer_metadata_cannot_beat_an_existing_value():
@@ -342,83 +330,56 @@ def test_gazetteer_metadata_cannot_beat_an_existing_value():
     assert resolved["validation_status"] == "Routed to leads"
 
 
-def test_distant_coordinates_flag_every_value_for_the_sme():
+def test_distant_locations_flag_every_value_for_the_sme():
     """A credible source describing the wrong facility is what tier cannot catch. With nothing
     accepted automatically, the gate only adds its note; build step 5 replaces it."""
-    from waste_ai_search.arbitrate import append_distance_row, flag_identity_mismatch
+    from waste_ai_search.arbitrate import farthest_location_km, flag_identity_mismatch
 
     s = site(latitude="6.5", longitude="3.3")
-    by_attr, _rows, _sources, _warn = extract(
-        s,
-        payload(
-            attribute("found_latitude", "14.5", "decimal degrees", sources=[GAZETTEER]),
-            attribute("found_longitude", "121.0", "decimal degrees", sources=[GAZETTEER]),
-            attribute("facility_status", "active", sources=[REGULATOR]),
-        ),
-    )
-    resolved_rows = [
-        resolve(s, name, by_attr.get(name, []))
-        for name in ("found_latitude", "found_longitude", "facility_status")
-    ]
-    status = resolved_rows[-1]
+    response = located_by("14.5000, 121.0000")
+    status_value = {key: value for key, value in attribute("facility_status", "active").items() if key != "sources"}
+    response["sources"].append({**REGULATOR, "values": [status_value]})
+    by_attr, rows, _sources, _warn = extract(s, response)
+    status = resolve(s, "facility_status", by_attr["facility_status"])
     assert status["validation_status"] == "Needs review"
 
-    km = append_distance_row(s, resolved_rows)
-    assert flag_identity_mismatch(resolved_rows, km) is True
-
+    km = farthest_location_km(s, rows)
+    assert flag_identity_mismatch([status], km) is True
     assert status["validation_status"] == "Needs review"
-    assert "Identity not confirmed" in status["researcher_notes"]
+    assert status["researcher_notes"].startswith("Identity not confirmed: a source's stated location is")
     assert "Check the source is about this facility." in status["researcher_notes"]
-    assert "Auto-validation" not in status["researcher_notes"]
-    assert resolved_rows[-1]["resolution"] == "Calculated"
-    assert resolved_rows[-1]["validation_status"] == NOTHING_TO_REVIEW
-    assert "Identity not confirmed" not in resolved_rows[-1]["researcher_notes"]
 
 
-def test_nearby_coordinates_add_no_identity_note():
-    from waste_ai_search.arbitrate import append_distance_row, flag_identity_mismatch
+def test_nearby_locations_add_no_identity_note():
+    from waste_ai_search.arbitrate import farthest_location_km, flag_identity_mismatch
 
     s = site(latitude="6.5", longitude="3.3")
-    by_attr, _rows, _sources, _warn = extract(
-        s,
-        payload(
-            attribute("found_latitude", "6.501", "decimal degrees", sources=[GAZETTEER]),
-            attribute("found_longitude", "3.301", "decimal degrees", sources=[GAZETTEER]),
-            attribute("facility_status", "active", sources=[REGULATOR]),
-        ),
-    )
-    resolved_rows = [
-        resolve(s, name, by_attr.get(name, []))
-        for name in ("found_latitude", "found_longitude", "facility_status")
-    ]
-    km = append_distance_row(s, resolved_rows)
-    assert flag_identity_mismatch(resolved_rows, km) is False
-    assert not any("Identity not confirmed" in row["researcher_notes"] for row in resolved_rows)
+    _by, rows, _sources, _warn = extract(s, located_by("6.5010, 3.3010"))
+    resolved_rows = [{"attribute_name": "operator", "resolution": "Filled empty baseline", "researcher_notes": ""}]
+    assert flag_identity_mismatch(resolved_rows, farthest_location_km(s, rows)) is False
+    assert resolved_rows[0]["researcher_notes"] == ""
 
 
-def test_a_coordinate_200_m_from_ours_goes_to_review():
+def test_the_farthest_usable_location_is_measured_and_a_hint_is_not():
+    from waste_ai_search.arbitrate import farthest_location_km
+
+    s = site(latitude="6.5", longitude="3.3")
+    response = located_by("6.5010, 3.3010")
+    response["sources"] += located_by("7.6, 3.3")["sources"]  # one decimal: a hint, 122 km away
+    _by, rows, _sources, _warn = extract(s, response)
+    assert farthest_location_km(s, rows) < 1.0
+    response["sources"] += located_by("7.6000, 3.3000")["sources"]
+    _by, rows, _sources, _warn = extract(s, response)
+    assert 120 < farthest_location_km(s, rows) < 125
+
+
+def test_a_location_200_m_from_ours_goes_to_review():
     """Reversed on purpose. Four of five pilot coordinate conflicts were under 200 m apart, and the
     1 km rule (feedback 5) settled them as the same place. Every value that differs from ours is
     now reviewed; one equal to ours to comparison precision is still a confirmation."""
     s = site(latitude="14.844807966", longitude="120.33153842")
-    by_attr, _rows, _sources, _warn = extract(
-        s,
-        payload(
-            attribute("found_latitude", "14.84566", "decimal degrees", sources=[GAZETTEER]),
-            attribute("found_longitude", "120.32995", "decimal degrees", sources=[GAZETTEER]),
-        ),
-    )
-    resolved_rows = [resolve(s, name, by_attr[name]) for name in ("found_latitude", "found_longitude")]
-    assert all(needs_review(row) for row in resolved_rows)
-
-
-def test_single_axis_coordinate_is_judged_without_its_counterpart():
-    """Pilot site 2056 found a latitude but no longitude; it must still be judgeable."""
-    from waste_ai_search.arbitrate import axis_offset_km
-
-    s = site(latitude="6.6392530721", longitude="3.3021248334")
-    km = axis_offset_km(s, "found_latitude", "6.638125")
-    assert km is not None and km < 1.0
+    by_attr, _rows, _sources, _warn = extract(s, located_by("14.84566, 120.32995"))
+    assert needs_review(resolve(s, "found_location", by_attr["found_location"]))
 
 
 def test_lead_routed_rows_are_not_in_the_review_queue():

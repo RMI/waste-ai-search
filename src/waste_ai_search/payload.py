@@ -17,7 +17,8 @@ An attribute-first response is converted like this:
   keeps its evidence id and its place in the response's order;
 - facility_name_in_source is the response's found_facility_name, for the sources cited for it;
 - stated_location is the found latitude and longitude as "lat, lon", kind "coordinates", for the
-  sources cited for both.
+  sources cited for both. They are no longer values: a found location comes from what each source
+  states (locate.py), and half a location is none.
 """
 from __future__ import annotations
 
@@ -192,6 +193,8 @@ def _from_attributes(attributes: Any, problems: list[str]) -> list[dict[str, Any
                 if field in citation and (field not in source or normalize_scalar(source[field]) == ""):
                     source[field] = citation[field]
             cited_for[key].setdefault(name, attribute.get("value"))
+            if name in COORDINATE_ATTRIBUTES:
+                continue  # a location now comes from what each source states, below
             value = dict(shared)
             if "quoted_evidence_short" in citation:
                 value["quoted_evidence_short"] = citation["quoted_evidence_short"]
