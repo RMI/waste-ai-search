@@ -7,14 +7,16 @@ a location in the text, and compares that with what the agent stated for the pag
 
 | Kind | What counts |
 |---|---|
-| coordinates | A latitude and longitude, decimal or degrees-minutes-seconds, within MAX_KM of a site whose search cited the page |
+| coordinates | A latitude and longitude, decimal or degrees-minutes-seconds, within NEAR_KM of a site whose search cited the page |
 | grid reference | A UK or Irish grid reference, the same way, for a UK or Irish site |
-| street address | A civic number and up to four words before a word for a road ("12 Otaihanga Road"), or an Ontario lot and concession |
+| street address | A civic number and one to four capitalised words before a word for a road ("12 Otaihanga Road"), a road's name before its number ("Calle Mayor 12", "Hauptstraße 5"), or an Ontario lot and concession |
+| another facility's point | Coordinates or a grid reference NEAR_KM to MAX_KM from every site that cited the page: usually another row of a regional register |
 | postcode | Only a postcode of the site's country: UK, Canada, Australia (state and four digits) or Ireland's Eircode |
 
-It is a heuristic and counts an upper bound: an address may be the operator's office, and a pair of
-numbers in a table may not be coordinates, though the distance filter rules most such pairs out.
-Spot-check the pages it lists before deciding on anything.
+A page is counted under the strongest kind it states, in that order, and is missed when it states
+coordinates, a grid reference or a street address and the agent stated no location for it. It is a
+heuristic and counts an upper bound: an address may be the operator's office. Spot-check the pages
+it lists before deciding on anything.
 """
 from __future__ import annotations
 
@@ -33,12 +35,16 @@ from .schema import normalize_scalar
 
 
 STREET_ADDRESS = "street address"
+FAR_POINT = "another facility's point"
 POSTCODE = "postcode"
 # Strongest first: a page is counted under the strongest kind it states.
-KINDS = [COORDINATES, GRID_REFERENCE, STREET_ADDRESS, POSTCODE]
+KINDS = [COORDINATES, GRID_REFERENCE, STREET_ADDRESS, FAR_POINT, POSTCODE]
+# What a page-reading pass could take as this facility's location.
+MISSED_KINDS = (COORDINATES, GRID_REFERENCE, STREET_ADDRESS)
 
-# Coordinates on a page count only within this distance of a site whose search cited it, so a pair
-# of figures in a table, or another country's facility, isn't counted.
+# A point on a page is this facility's within NEAR_KM of a site whose search cited it: our points can
+# be a few km off. Beyond MAX_KM it is no landfill near here, or not coordinates at all.
+NEAR_KM = 5.0
 MAX_KM = 300.0
 # How many candidate numbers are tried on one page: a register can hold thousands of rows.
 MAX_CANDIDATES = 5000
@@ -52,9 +58,16 @@ _STREET_WORDS = (
     "road|rd|street|st|avenue|ave|highway|hwy|drive|dr|lane|ln|way|boulevard|blvd|crescent|cres|"
     "court|ct|place|pl|parkway|pkwy|terrace|tce|close|line|sideroad|trail|route|rte|chemin|rue|rang"
 )
+# A civic number, then one to four words written with a capital, then a word for a road: "12 Otaihanga
+# Road", "4800 Old Highway 99". The capitals rule out "200 tonnes a day by road".
 _STREET = re.compile(
-    rf"(?<![\w.,])\d{{1,5}}[A-Za-z]?(?:-\d{{1,5}})?\s+(?:[^\W\d_][\w'’.-]*\s+){{0,4}}(?:{_STREET_WORDS})\.?(?!\w)",
-    re.IGNORECASE,
+    rf"(?<![\w.,])\d{{1,5}}[A-Za-z]?(?:-\d{{1,5}})?\s+(?:[A-Z][\w'’.-]*\s+){{1,4}}(?i:{_STREET_WORDS})\.?(?!\w)"
+)
+# A road's name before its number, as much of Europe and Latin America write it.
+_STREET_FIRST = re.compile(
+    r"\b(?:(?i:calle|avenida|av\.|rua|rodovia|estrada|carretera|via|viale|rue|chemin|route|ulica|ul\.)\s+"
+    r"(?:[A-Z0-9][\w'’.-]*\s+){0,3}[A-Z0-9][\w'’.-]*,?\s+(?:n[º°o.]?\s*|km\s*)?\d{1,5}\b|"
+    r"[A-ZÄÖÜ][\wäöüß]*(?:straße|strasse|weg|gasse|allee|platz|laan|straat|vej|gata|gatan)\s+\d{1,4}[a-z]?\b)"
 )
 _LOT_CONCESSION = re.compile(r"\blot\s+\d+[A-Za-z]?\s*,?\s*(?:of\s+)?concession\s+\d+", re.IGNORECASE)
 POSTCODES = {
@@ -98,8 +111,9 @@ class PageReport:
 
     @property
     def missed(self) -> bool:
-        """The page states coordinates, a grid reference or an address, and the agent stated none."""
-        return not self.agent_stated and self.finding is not None and self.finding.kind != POSTCODE
+        """The page states coordinates, a grid reference or an address for this facility, and the
+        agent stated none."""
+        return not self.agent_stated and self.finding is not None and self.finding.kind in MISSED_KINDS
 
 
 @dataclass
@@ -121,16 +135,22 @@ def _nearest_km(point: tuple[float, float], sites: list[Site]) -> float | None:
 
 
 def find_point(text: str, sites: list[Site], pattern: re.Pattern, kind: str) -> Finding | None:
-    """The first point on the page, read the way the locate step reads one, near a site that cited
-    it."""
+    """The point on the page nearest a site that cited it, read the way the locate step reads one,
+    within MAX_KM; the first within NEAR_KM ends the search."""
     iso3 = next((site.iso3 for site in sites if site.iso3), "")
+    nearest = None
     for index, match in enumerate(pattern.finditer(text)):
         if index >= MAX_CANDIDATES:
             break
-        # Coordinates are read from around the number, where their labels and hemispheres are; a
-        # grid reference from itself, since its parser takes a stated location, not a sentence.
-        window = match.group(0) if kind == GRID_REFERENCE else text[max(0, match.start() - 40):match.end() + 80]
-        located = parse_point(window, iso3)
+        # A grid reference is read from itself, since its parser takes a stated location, not a
+        # sentence. Coordinates from the number on, so the end of the point before isn't paired with
+        # this one; failing that, from a little before, where a "Latitude:" label would be.
+        if kind == GRID_REFERENCE:
+            located = parse_point(match.group(0), iso3)
+        else:
+            located = parse_point(text[match.start():match.end() + 80], iso3) or parse_point(
+                text[max(0, match.start() - 40):match.end() + 80], iso3
+            )
         if located is None or located.point is None:
             continue
         # Only what the locate step would use: a coarse pair is a hint, and a grid reference is
@@ -138,25 +158,30 @@ def find_point(text: str, sites: list[Site], pattern: re.Pattern, kind: str) -> 
         if located.basis != kind:
             continue
         km = _nearest_km(located.point, sites)
-        if km is not None and km <= MAX_KM:
-            return Finding(kind, _snippet(text, match.start(), match.end()), located.point, km)
-    return None
+        if km is None or km > MAX_KM or (nearest and nearest.km <= km):
+            continue
+        nearest = Finding(kind, _snippet(text, match.start(), match.end()), located.point, km)
+        if km <= NEAR_KM:
+            break
+    return nearest
 
 
 def find_location(text: str, sites: list[Site]) -> Finding | None:
     """The strongest kind of location the page states, if any."""
-    finding = find_point(text, sites, _NUMBER, COORDINATES)
-    if finding:
-        return finding
     countries = {site.iso3 for site in sites}
+    points = [find_point(text, sites, _NUMBER, COORDINATES)]
     if countries & {"GBR", "IRL"}:
-        finding = find_point(text, sites, _OS_GRID if "GBR" in countries else _IRISH_GRID, GRID_REFERENCE)
-        if finding:
-            return finding
-    for pattern in (_STREET, _LOT_CONCESSION):
+        points.append(find_point(text, sites, _OS_GRID if "GBR" in countries else _IRISH_GRID, GRID_REFERENCE))
+    points = sorted((point for point in points if point), key=lambda point: point.km)
+    if points and points[0].km <= NEAR_KM:
+        return points[0]
+    for pattern in (_STREET, _STREET_FIRST, _LOT_CONCESSION):
         match = pattern.search(text)
         if match:
             return Finding(STREET_ADDRESS, _snippet(text, match.start(), match.end()))
+    if points:
+        far = points[0]
+        return Finding(FAR_POINT, far.text, far.point, far.km)
     for iso3 in sorted(countries):
         pattern = POSTCODES.get(iso3)
         match = pattern.search(text) if pattern else None
@@ -193,7 +218,8 @@ def measure(run_dir: Path) -> Measurement:
     measurement.verdicts.update(record.get("verdict", "") for record in checked.values())
     text_files = {}
     for record in checked.values():
-        if record.get("text_file"):
+        # Counted by file: two spellings of one URL share one.
+        if record.get("text_file") and record["text_file"] not in text_files.values():
             text_files[record["text_file"].removesuffix(".txt.gz")] = record["text_file"]
             measurement.text_kinds[record.get("text_kind") or "other"] += 1
 
@@ -243,8 +269,8 @@ def summary(measurement: Measurement) -> str:
         lines.append(f"  The page states {kind} (strongest kind): {len(stating):,}; the agent stated nothing for {silent:,}")
     missed = [r for r in reports if r.missed]
     lines.append(
-        f"Missed: the page states coordinates, a grid reference or an address, and the agent stated "
-        f"no location: {_share(len(missed), len(reports))}"
+        f"Missed: the page states coordinates or a grid reference within {NEAR_KM:g} km of the site, or a street "
+        f"address, and the agent stated no location: {_share(len(missed), len(reports))}"
     )
     by_type = Counter(r.source_type or "unknown" for r in missed)
     totals = Counter(r.source_type or "unknown" for r in reports)

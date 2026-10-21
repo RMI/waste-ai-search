@@ -11,6 +11,7 @@ from waste_ai_search.input_loader import write_csv_records
 from waste_ai_search.link_check import LINK_CHECK_FILE
 from waste_ai_search.missed_locations import (
     COORDINATES,
+    FAR_POINT,
     GRID_REFERENCE,
     POSTCODE,
     STREET_ADDRESS,
@@ -50,6 +51,30 @@ def test_a_grid_reference_counts_for_a_uk_site():
 def test_a_street_address_and_a_lot_and_concession_count():
     assert find_location("The landfill is at 4800 Old Highway 99, Abbotsford.", [OTAIHANGA]).kind == STREET_ADDRESS
     assert find_location("Located on Lot 12, Concession 4, Township of Osgoode.", [OTTAWA]).kind == STREET_ADDRESS
+
+
+@pytest.mark.parametrize("text", [
+    "It takes 200 tonnes a day by road.",
+    "The site lies 3 km from the highway.",
+    "In 1998 close to the river.",
+    "A fence 2 m above the property line.",
+])
+def test_figures_beside_a_road_word_are_no_street_address(text):
+    assert find_location(text, [OTAIHANGA]) is None
+
+
+@pytest.mark.parametrize("text", ["Vertedero en Calle Mayor 12, Madrid.", "Deponie Hauptstraße 5, Berlin.", "Aterro na Rodovia BR-101, km 25."])
+def test_a_road_named_before_its_number_is_a_street_address(text):
+    assert find_location(text, [OTAIHANGA]).kind == STREET_ADDRESS
+
+
+def test_a_registers_other_facility_is_counted_apart_and_not_missed(tmp_path):
+    """Brookhurst Wood, 50 km from a London site, was counted as the London site's location."""
+    finding = find_location("Brookhurst Wood landfill, 51.0921, -0.3225.", [LONDON])
+    assert finding.kind == FAR_POINT and 40 < finding.km < 60
+    # The nearest point is the one taken, and one within 5 km is this facility's.
+    finding = find_location("Brookhurst Wood 51.0921, -0.3225. This site: 51.5140, -0.1030.", [LONDON])
+    assert finding.kind == COORDINATES and finding.km < 1
 
 
 def test_only_a_postcode_counts_as_a_postcode_for_the_sites_country():

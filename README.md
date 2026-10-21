@@ -182,25 +182,39 @@ it costs no extra request. Up to 25 MB and 60 seconds of each page are read.
 |---|---|
 | HTML | Its visible text, without scripts and styles. A page with little text is noted: it may be built by JavaScript, which the check can't run. |
 | PDF | Its text layer, up to 300 pages. A scanned PDF has none, and says so. |
-| Spreadsheet (`.xlsx`, `.xls`, `.csv`) | Every cell, up to 500,000. |
-| Word `.docx`, plain text | All of it. |
-| Anything else | Nothing; `link_check.json` says why. |
+| Spreadsheet (`.xlsx`, `.xls`, `.csv`) | Every cell, up to 500,000 across the workbook. |
+| Word `.docx`, plain text | All of it, up to 8 MB of a document's markup. |
+| Anything else, or binary content served as a web page | Nothing; `link_check.json` says why. |
 
 `link_check.json` records, beside each verdict, the text file and what kind of page it was, or why
-no text was kept. A page checked before text was kept, or whose text file has gone, is read again by
-the next `check-links`; nothing else is fetched twice. `--no-page-text` on `search`, `run` and
-`check-links` keeps verdicts only.
+no text was kept, or why it was cut short (its size, the 60 seconds, or a broken connection). The
+next `check-links` reads a page again where it was checked before text was kept, its text file has
+gone, or its read was interrupted, and keeps its verdict as it was, since a run may already have been
+reviewed on it. Nothing else is fetched twice. `--no-page-text` on `search`, `run` and `check-links`
+keeps verdicts only.
 
 **Arbitration checks each source against its page, offline** (`on_page.py`). The agent quotes each
-source and copies where it puts the facility, but both are its own report. Both sides are compared
-in plain form: lower case, no accents, and punctuation and line breaks as spaces.
+source and copies where it puts the facility, but both are its own report; the prompt asks for each
+quote word for word, in the source's own language. Both sides are compared in plain form:
+- lower case, no accents or invisible characters;
+- punctuation and line breaks as spaces;
+- a word a PDF hyphenated across a line read whole.
+
+They are compared again with numbers whole ("45,000" is "45000") and units apart ("10ha" is "10
+ha"), "%" read as "percent", and road abbreviations written out ("Rd" is "road"). Scripts written
+without spaces, such as Chinese, Japanese and Thai, are matched anywhere in the text.
 
 | Result | Means |
 |---|---|
-| `found` | Every part of the quote, split at an ellipsis, is on the page as written. A stated coordinate counts where the page gives it to as many decimals or more, trailing zeros aside; a grid reference is compared without its spaces. |
-| `partly found` | Not as written, but 80% of its words, or one of its two coordinates, are on the page. |
+| `found` | Every part of the quote, split at an ellipsis, is on the page as written. A stated coordinate counts where the page gives it to as many decimals or more, trailing zeros aside, or puts a point within 250 m of it in any form; a grid reference is compared without its spaces. |
+| `partly found` | Not as written, but 80% of its words and every number in it are on the page, or one of its two coordinates is. A quote with a figure the page doesn't have is `not found`, however many of its words are there. |
 | `not found` | Neither. |
-| `no page text` | No text was kept: the page didn't load, refuses automated reading, is a scan, or wasn't checked. Never a flag. |
+| `not in the part read` | Not found, but only part of the page was read (a long PDF or spreadsheet, a cut body), so it may be in the rest. Not flagged. |
+| `no page text` | No text was kept: the page didn't load, refuses automated reading, is a scan, is built by JavaScript, or wasn't checked. Not flagged. |
+
+A quote of fewer than three words ("Open", "Status Operational") is not checked: finding it would
+say nothing. Where a source states both coordinates and an address, the one its point was read from
+is checked, since an address on the page says nothing of coordinates beside it that aren't.
 
 `evidence.csv` records both results for every row, in `quote_on_page` and `location_on_page`. In the
 review queue, a winning source whose quote is not on its page, or only partly, gets a **CHECK** note
@@ -219,10 +233,12 @@ is something to recover:
 uv run python scripts/measure_missed_locations.py --run-id <run id> --out missed.csv
 ```
 
-It looks in each kept page for coordinates or a grid reference within 300 km of a site whose search
-cited the page, a street address, or a postcode, and counts the pages where the agent stated no
-location although the page has one. The count is an upper bound, since an address may be an office's,
-so spot-check `missed.csv` before deciding.
+It looks in each kept page for coordinates or a grid reference within 5 km of a site whose search
+cited the page, or a street address (a civic number before capitalised words and a road word, or a
+road's name before its number). It counts the pages where the agent stated no location although the
+page has one. A point 5 to 300 km away is counted apart, as another facility's, since a regional
+register lists many, and so is a page with only a postcode. The count is an upper bound, since an
+address may be an office's, so spot-check `missed.csv` before deciding.
 
 ## Locating each source
 
