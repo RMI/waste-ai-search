@@ -1,8 +1,8 @@
 """Every source filed under a site is reviewed together (build step 5 of the source-matching plan).
 
 After matching, arbitration groups the evidence by the site each source is filed under, from any
-search, and makes one decision per (site, attribute): the key ingestion #261 loads by, which stops
-on two values for one facility, attribute and year. Every site
+search, and makes one decision per (site, attribute), and per year for a yearly attribute: the key
+ingestion #261 loads by, which stops on two values for one facility, attribute and year. Every site
 column of a review row describes the site the value is filed under; searched_site_id is the search
 that found it. These run end to end through run_arbitration, on hand-built source-first responses.
 """
@@ -11,18 +11,23 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import shutil
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 import pytest
 from openpyxl import load_workbook
 
-from waste_ai_search.arbitrate import run_arbitration
+from waste_ai_search.arbitrate import resolve_site, run_arbitration
+from waste_ai_search.arbitration import site_for_year, value_year
 from waste_ai_search.input_loader import write_csv_records
 from waste_ai_search.run_context import PipelineConfig
-from waste_ai_search.schema import LOCATION_ATTRIBUTE, NOT_A_WASTE_FACILITY
+from waste_ai_search.schema import LOCATION_ATTRIBUTE, NOT_A_WASTE_FACILITY, TIME_VARYING_ATTRIBUTES
 from waste_ai_search.seed_source import seed_headers
+
+RUN_YEAR = date.today().year
 
 
 def seed(site_id, name, lat, lon, iso3="CAN", **extra):
@@ -65,8 +70,11 @@ def rows(run_dir, name):
 
 
 def queue_key(row):
-    """(site, attribute), as ingestion files a validated value."""
-    return row["site_id"], row["attribute_name"]
+    """(site, attribute, year), as ingestion files a validated value."""
+    year = ""
+    if row["attribute_name"] in TIME_VARYING_ATTRIBUTES:
+        year = value_year(row["value_date"], RUN_YEAR)
+    return row["site_id"], row["attribute_name"], year
 
 
 BRADY = seed("13413", "Brady Road Resource Management Facility", 49.7583, -97.2004)
@@ -106,7 +114,58 @@ def test_every_source_filed_under_a_site_is_decided_together(tmp_path):
     }
 
 
-def test_values_from_many_searches_never_make_two_rows_for_one_site_and_attribute(tmp_path):
+def test_a_yearly_attribute_has_a_row_for_each_year_a_source_reports(tmp_path):
+    sources = [
+        source("https://a.example", values=[value("facility_status", "Active", "2024-05"), value("operator", "Ops Ltd")]),
+        source("https://b.example", values=[value("facility_status", "Inactive", "2019")]),
+        source("https://c.example", values=[value("facility_status", "Active", ""), value("operator", "Ops Ltd")]),
+        # A value_date before 1950 is no year a value applies to: it counts as undated.
+        source("https://d.example", values=[value("facility_status", "Active", "1890")]),
+    ]
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": sources})
+    queue = rows(run_dir, "review_queue.csv")
+    status = [(value_year(row["value_date"], RUN_YEAR), row["resolved_value"]) for row in queue if row["attribute_name"] == "facility_status"]
+    assert status == [(RUN_YEAR, "Active"), (2024, "Active"), (2019, "Inactive")]  # newest first
+    # Every other attribute has one row per site, its sources pooled.
+    assert [row["agreeing_source_count"] for row in queue if row["attribute_name"] == "operator"] == ["2"]
+    assert len({queue_key(row) for row in queue}) == len(queue)
+
+
+def test_a_yearly_baseline_is_ours_for_its_own_year_and_else_our_latest():
+    """The seed holds one row per facility, at its reference year, with a yearly field backfilled
+    from the newest earlier year that had one."""
+    site = seed("1", "Alpha Landfill", 50.0, -100.0, waste_in_place_metric_tonnes="1000000",
+                backfilled_fields="waste_in_place_metric_tonnes@2016",
+                attribute_sources="waste_in_place_metric_tonnes@canada_ghgrp_2021")
+    attribute = "waste_in_place_metric_tonnes"
+
+    # Its own year: compared as it stands, and not demoted as stale.
+    same, note = site_for_year(site, attribute, 2016)
+    assert (same[attribute], note) == ("1000000", "")
+    # The reference year, which our value was only carried into: we hold nothing for it.
+    latest, note = site_for_year(site, attribute, 2022)
+    assert latest[attribute] == "" and "waste_in_place_metric_tonnes" not in latest["backfilled_fields"]
+    assert note == "We hold no waste_in_place_metric_tonnes for 2022; our value, 1000000, is from 2016."
+    # Any other year: the seed holds no row for it, so our value stands in, and the note says so.
+    other, note = site_for_year(site, attribute, 2010)
+    assert other is site and note.startswith("Our value is for 2016;")
+
+    def item(found, year, url):
+        return {"value": found, "value_date": year, "tier": 1, "order": 1, "url": url, "source_id": url,
+                "evidence_id": url, "unit": "metric tonnes"}
+
+    pool = {attribute: [item("1000000", "2016", "u1"), item("1200000", "2022", "u2"), item("700000", "2010", "u3")]}
+    resolved = {row["year"]: row for row in resolve_site(site, pool, searched=False, run_year=RUN_YEAR)}
+    assert resolved[2016]["resolution"] == "Confirmed baseline"
+    assert "stale" not in resolved[2016]["baseline_staleness_note"]
+    assert (resolved[2022]["resolution"], resolved[2022]["baseline_value"]) == ("Filled empty baseline", "")
+    assert resolved[2022]["resolution_rule"].endswith("our value, 1000000, is from 2016.")
+    # Our 2016 value, carried six years to 2022, is demoted a tier as stale, so a Tier 1 source beats it.
+    assert (resolved[2010]["resolution"], resolved[2010]["baseline_value"]) == ("Overrides baseline", "1000000")
+    assert "Our value is for 2016" in resolved[2010]["resolution_rule"]
+
+
+def test_values_from_many_searches_never_make_two_rows_for_one_site_attribute_and_year(tmp_path):
     """A site's own search, a search whose source places it there, and one moved there by name."""
     named = seed("20", "Prairie Green IWMF", 50.0047, -97.1307)
     searched = [seed(sid, "domestic landfill", 50.0 + n / 10, -97.6) for n, sid in enumerate(("21", "22", "23"))]
@@ -277,12 +336,23 @@ def test_the_follow_up_unlocks_the_matched_site_only_within_the_runs_selection(t
         assert "Second Landfill" in client.prompts[1] and "gccs_ch4_flared_metric_tonnes" in client.prompts[1]
 
 
+def test_a_refresh_keeps_the_newest_year_of_a_yearly_attribute(tmp_path):
+    from waste_ai_search.cli import read_arbitrated_rows
+
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://a.example", values=[value("facility_status", "Inactive", "2019")]),
+        source("https://b.example", values=[value("facility_status", "Active", "2024")]),
+    ]})
+    [status] = [row for row in read_arbitrated_rows(run_dir) if row["attribute_name"] == "facility_status"]
+    assert status["resolved_value"] == "Active"
+
+
 # --- batch 1, replayed --------------------------------------------------------------------------
 REPLAY_RUN = os.environ.get("WASTE_AI_SEARCH_REPLAY_RUN", "")
 
 
 @pytest.mark.skipif(not REPLAY_RUN, reason="set WASTE_AI_SEARCH_REPLAY_RUN to a batch-1 run folder to replay it")
-def test_a_batch_1_replay_never_has_two_rows_for_one_site_and_attribute(tmp_path):
+def test_a_batch_1_replay_never_has_two_rows_for_one_site_attribute_and_year(tmp_path):
     """Batch 1's cached responses, re-arbitrated offline: a plumbing check. The run folder holds
     seed.csv and raw_foundry_responses/, and link_check.json if it was checked. It is copied, so
     the folder itself is left as it is."""
@@ -297,6 +367,11 @@ def test_a_batch_1_replay_never_has_two_rows_for_one_site_and_attribute(tmp_path
 
     queue = rows(run_dir, "review_queue.csv")
     assert queue
-    keys = Counter(queue_key(row) for row in queue)
+    run_year = int(re.match(r"\d{4}", date.today().isoformat()).group(0))
+    keys = Counter(
+        (row["site_id"], row["attribute_name"],
+         value_year(row["value_date"], run_year) if row["attribute_name"] in TIME_VARYING_ATTRIBUTES else "")
+        for row in queue
+    )
     assert [key for key, count in keys.items() if count > 1] == []
     assert all(row["searched_site_id"] and row["match"] for row in queue)

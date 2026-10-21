@@ -11,7 +11,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from .arbitration import needs_review, resolve, routed_to_leads
+from .arbitration import needs_review, resolve, routed_to_leads, site_for_year, value_year
 from .credibility import (
     assign_source_tier,
     dropped_source_site,
@@ -88,6 +88,7 @@ from .schema import (
     REVIEW_QUEUE_HEADERS,
     SOURCES_HEADERS,
     SUPPLEMENTARY_LEADS_HEADERS,
+    TIME_VARYING_ATTRIBUTES,
     VALUE_ATTRIBUTES,
     bucket_waste_depth,
     is_blank,
@@ -565,12 +566,12 @@ def cover_consistency_warnings(resolved: list[dict[str, Any]]) -> list[str]:
 
     They are searched independently and describe the same physical cover, so a disagreement means
     one of the two is wrong. Surfaced rather than auto-corrected: which one is wrong depends on
-    the sources, and the reviewer has both rows in front of them.
+    the sources, and the reviewer has both rows in front of them. cover_types is yearly, with its
+    newest year first, and that is the one compared.
     """
-    values = {
-        normalize_scalar(row.get("attribute_name")): normalize_scalar(row.get("resolved_value"))
-        for row in resolved
-    }
+    values: dict[str, str] = {}
+    for row in resolved:
+        values.setdefault(normalize_scalar(row.get("attribute_name")), normalize_scalar(row.get("resolved_value")))
     biocover = values.get("has_biocover", "")
     cover_types = values.get("cover_types", "")
     if not biocover or not cover_types:
@@ -716,15 +717,36 @@ def file_evidence(
     return pools
 
 
-def resolve_site(site: dict[str, Any], pool: dict[str, list[dict[str, Any]]], searched: bool) -> list[dict[str, Any]]:
-    """Every source filed under one site, from any search, pooled into one decision per attribute.
+def resolve_site(
+    site: dict[str, Any], pool: dict[str, list[dict[str, Any]]], searched: bool, run_year: int
+) -> list[dict[str, Any]]:
+    """Every source filed under one site, from any search, pooled into one decision per attribute,
+    and for a yearly attribute one per year.
 
     A site that was searched is resolved on everything it was asked, so what nothing answered says
-    "Not found"; a site that only had sources filed under it, on what they give.
+    "Not found"; a site that only had sources filed under it, on what they give. A yearly value's
+    year is its value_date's, or the run's where it has none, as ingestion reads it; its baseline
+    is ours for that year (site_for_year), and the newest year comes first.
     """
     names = list(requested_attributes(site)) if searched else []
     names += [name for name in pool if name not in names]
-    return [resolve(site, name, pool.get(name, [])) for name in names]
+    rows: list[dict[str, Any]] = []
+    for name in names:
+        items = pool.get(name, [])
+        if name not in TIME_VARYING_ATTRIBUTES or not items:
+            rows.append(resolve(site, name, items))
+            continue
+        by_year: dict[int, list[dict[str, Any]]] = {}
+        for item in items:
+            by_year.setdefault(value_year(item.get("value_date"), run_year), []).append(item)
+        for year in sorted(by_year, reverse=True):
+            site_then, note = site_for_year(site, name, year)
+            row = resolve(site_then, name, by_year[year])
+            if note:
+                row["resolution_rule"] = f"{row['resolution_rule']} {note}".strip()
+            row["year"] = year
+            rows.append(row)
+    return rows
 
 
 def describe_winner(row: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]], matching: Matching) -> None:
@@ -946,17 +968,18 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
 
     # Each source is filed under the site of ours it is about (match.py), and only the sites this
     # run selected get values. Everything filed under one site, from any search, is decided
-    # together: one review row per site and attribute.
+    # together: one review row per site and attribute, and per year for a yearly attribute.
     selection = run_selection(sites, set(found))
     matching = match_sources(citations_for(found), sites, selection)
     pools = file_evidence(found, matching, sites_by_id)
     evidence_by_id = {
         row["evidence_id"]: row for _by_attribute, rows in found.values() for row in rows
     }
+    run_year = access_date.year
     resolved_by_site: dict[str, list[dict[str, Any]]] = {}
     for site_id in sorted(set(found) | set(pools)):
         site = sites_by_id[site_id]
-        site_resolved = resolve_site(site, pools.get(site_id, {}), site_id in found)
+        site_resolved = resolve_site(site, pools.get(site_id, {}), site_id in found, run_year)
         for row in site_resolved:
             describe_winner(row, evidence_by_id, matching)
         for warning in cover_consistency_warnings(site_resolved):

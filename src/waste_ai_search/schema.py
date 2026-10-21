@@ -72,6 +72,26 @@ GAP_FILL_ATTRIBUTES = [
     "gccs_collection_efficiency",
 ]
 
+# Attributes that hold a value for each year, as consolidation keeps them: its
+# TIME_VARYING_ATTRIBUTE_COLUMNS, in RMI/waste_data_ingestion_pipeline's
+# facility_etl/consolidation/consolidation_techniques.py, less the columns this repository never
+# reads (gccs_lfg_collected_cubic_meters, mcf, ch4_emissions_metric_tonnes). Keep the two aligned.
+# Each year a source reports one of these for is reviewed on its own row (build step 5 of the
+# source-matching plan); every other attribute has one row per site.
+TIME_VARYING_ATTRIBUTES = [
+    "facility_status",
+    "waste_depth",
+    "annual_incoming_waste_metric_tonnes",
+    "waste_in_place_metric_tonnes",
+    "cover_types",
+    "gccs_ch4_flared_metric_tonnes",
+    "gccs_ch4_generated_metric_tonnes",
+    "gccs_ch4_collected_metric_tonnes",
+    "gccs_energy_project_type",
+    "gccs_current_project_status",
+    "gccs_ch4_flow_to_project_metric_tonnes",
+]
+
 # Kept above so the seed, older cached responses and re-arbitrated runs still read them, but no
 # longer asked of the agent (F31).
 UNSEARCHED_ATTRIBUTES = {
@@ -547,8 +567,8 @@ SOURCES_HEADERS = [
     "first_seen_run_id", "times_cited", "cited_site_count",
 ]
 
-# The filtered queue an SME actually works through (Q31). One row per (site, attribute), the key
-# ingestion loads by.
+# The filtered queue an SME actually works through (Q31). One row per (site, attribute), and for
+# a yearly attribute (TIME_VARYING_ATTRIBUTES) per (site, attribute, year): ingestion's key.
 REVIEW_QUEUE_HEADERS = [
     # translation_note sits beside the names it is about: the SME compares the two spellings and
     # records a translation problem there, separately from researcher_notes.

@@ -223,7 +223,8 @@ def read_arbitrated_rows(run_dir: Path) -> list[dict[str, str]]:
     found in pass 1 still unlocks the pass-2 follow-up. resolved.csv is still read for runs
     arbitrated before (batch 1), which wrote the values they accepted there.
 
-    Rows are keyed by the site a value is filed under, which may not be the site searched.
+    Rows are keyed by the site a value is filed under, which may not be the site searched. A yearly
+    attribute has a row per year, newest first, so the newest is the one kept.
     """
     import csv
 
