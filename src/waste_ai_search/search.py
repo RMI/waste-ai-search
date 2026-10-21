@@ -39,6 +39,12 @@ from .schema import (
     in_batch,
     normalize_scalar,
 )
+from .searchable_names import (
+    SKIPPED_SITES_FILE,
+    SKIPPED_SITES_HEADERS,
+    class_breakdown,
+    skip_unsearchable_names,
+)
 
 
 def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[dict[str, Any]]:
@@ -46,12 +52,22 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
 
     `--limit` takes the first N in seed order, which is facility-id order and therefore clusters
     by country and data source. `--pilot-size` instead draws a deterministic spread across
-    priority countries, high-volume countries and deliberately hard generic-named sites.
+    priority countries, high-volume countries and, with --include-unsearchable-names,
+    deliberately hard generic-named sites.
 
     Countries in DEFAULT_EXCLUDED_ISO3 are dropped unless the caller asked for them explicitly -
     by naming the country in --iso3, by listing site ids, or with
-    --include-excluded-countries. An explicit request beats a default.
+    --include-excluded-countries. Sites whose name gives a search nothing to look for
+    (searchable_names.py) are dropped unless their ids are listed or
+    --include-unsearchable-names is passed. An explicit request beats a default.
     """
+    return choose_sites(sites, config)[0]
+
+
+def choose_sites(
+    sites: list[dict[str, Any]], config: PipelineConfig
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """select_sites, plus a skipped_sites.csv row for each site the name rule dropped."""
     selected = sites
     explicit = bool(config.site_ids)
     if config.site_ids:
@@ -87,6 +103,18 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
     nothing_to_ask = before - len(selected)
     if nothing_to_ask:
         print(f"Skipped {nothing_to_ask:,} site(s) with no attributes left to search.")
+    # Names that give a search nothing to look for. After the check above, so the count is of
+    # sites that would otherwise have been searched. Listing site ids names each site, so it wins;
+    # naming a country with --iso3 does not name its unnamed sites, so it doesn't.
+    skipped: list[dict[str, Any]] = []
+    if not config.site_ids and not config.include_unsearchable_names:
+        selected, skipped = skip_unsearchable_names(selected)
+        if skipped:
+            print(
+                f"Skipped {len(skipped):,} site(s) whose name gives a search nothing to look for "
+                f"({class_breakdown([row['name_class'] for row in skipped])}; "
+                "pass --include-unsearchable-names to search them)."
+            )
     if config.batch:
         # Counted after the default exclusions, so batch 6 reports what it will search rather
         # than the ~9,600 USA and Brazil sites it is about to drop.
@@ -94,10 +122,10 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
         print(f"Batch {config.batch}: {len(selected):,} site(s) in {len(countries)} country(ies).")
 
     if config.pilot_size > 0:
-        return select_mixed_pilot(selected, size=config.pilot_size)
+        return select_mixed_pilot(selected, size=config.pilot_size), skipped
     if config.limit > 0:
         selected = selected[: config.limit]
-    return selected
+    return selected, skipped
 
 
 def add_searches(total: int | None, client: Any) -> int | None:
@@ -140,7 +168,7 @@ def run_search(
         verb = "Reusing this run's seed snapshot" if reusing else "Seeded from the database, snapshot"
         print(f"{verb}: {run_seed_path(config)} ({len(sites)} facilities)")
 
-    selected = select_sites(sites, config)
+    selected, skipped = choose_sites(sites, config)
     if not selected:
         hint = (
             f" This run is pinned to {run_seed_path(config)}; use a new --run-id to seed afresh."
@@ -148,6 +176,12 @@ def run_search(
             else ""
         )
         raise ValueError(f"No sites matched the selection filters.{hint}")
+    # The run's list of sites skipped by name, for review and for Run_Config. A search of listed
+    # ids (a retry, or the gas follow-up) leaves the run's list as it is. With
+    # --include-unsearchable-names the list is empty, so an earlier list doesn't outlive the run
+    # that searched those sites after all.
+    if not config.site_ids:
+        write_csv_records(config.run_dir / SKIPPED_SITES_FILE, skipped, SKIPPED_SITES_HEADERS)
 
     # The prompt asks the agent to search using municipality and admin names, so those fields
     # have to be populated or that instruction is asking for context we never supplied.

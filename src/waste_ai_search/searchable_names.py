@@ -12,12 +12,16 @@ another map tag, or only a kind of site gives it nothing to search for. Five cla
   about it as one;
 - named: everything else.
 
-Used by scripts/measure_name_yield.py to see what searching each class found, so the measurement
-and any rule that later skips a class sort names the same way.
+Site selection skips the first four classes (`select_sites` in search.py), and
+scripts/measure_name_yield.py measures what searching each class found, so the rule and the
+measurement sort names the same way.
 """
 from __future__ import annotations
 
+import csv
 import re
+from collections import Counter
+from pathlib import Path
 from typing import Any
 
 from .pilot_selector import GENERIC_EXACT_NAMES, is_generic_site_name
@@ -30,6 +34,14 @@ GENERIC = "generic label"
 MINING = "mining feature"
 NAMED = "named"
 NAME_CLASSES = [NO_NAME, NOT_A_NAME, GENERIC, MINING, NAMED]
+# Not searched by default (Hugh, 20 October 2026): none of them gives a search anything to look
+# for. --site-ids and --include-unsearchable-names search them anyway.
+SKIPPED_NAME_CLASSES = [NO_NAME, NOT_A_NAME, GENERIC, MINING]
+
+# Written to the run folder by every search that doesn't list its site ids, so arbitration can
+# record in Run_Config what the run skipped.
+SKIPPED_SITES_FILE = "skipped_sites.csv"
+SKIPPED_SITES_HEADERS = ["site_id", "site_name", "original_site_name", "country_iso3", "name_class", "reason"]
 
 PLACEHOLDER_NAMES = {"openstreetmap landfill"}
 # Text from OSM's fixme-style tags, e.g. "update the tag landuse after survey".
@@ -81,3 +93,47 @@ def name_reason(name: Any, original_name: Any = "") -> tuple[str, str]:
 def name_class(name: Any, original_name: Any = "") -> str:
     """Which of NAME_CLASSES a site's name falls in."""
     return name_reason(name, original_name)[0]
+
+
+def site_name_class(site: dict[str, Any]) -> str:
+    """Which of NAME_CLASSES a seed row's name falls in."""
+    return name_class(site.get("site_name"), site.get("original_site_name"))
+
+
+def skip_unsearchable_names(sites: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(the sites to search, a skipped_sites.csv row for each site whose name is not searched)."""
+    kept, skipped = [], []
+    for site in sites:
+        cls, reason = name_reason(site.get("site_name"), site.get("original_site_name"))
+        if cls not in SKIPPED_NAME_CLASSES:
+            kept.append(site)
+            continue
+        skipped.append({
+            **{
+                key: normalize_scalar(site.get(key))
+                for key in ("site_id", "site_name", "original_site_name", "country_iso3")
+            },
+            "name_class": cls,
+            "reason": reason,
+        })
+    return kept, skipped
+
+
+def class_breakdown(classes: list[str]) -> str:
+    """How many of each class, in NAME_CLASSES order: "no name 300, generic label 112"."""
+    counts = Counter(classes)
+    return ", ".join(f"{cls} {counts[cls]:,}" for cls in NAME_CLASSES if counts[cls])
+
+
+def describe_counts(classes: list[str]) -> str:
+    """A count with its classes, for Run_Config: "412 (no name 300, generic label 112)", or "0"."""
+    return f"{len(classes):,} ({class_breakdown(classes)})" if classes else "0"
+
+
+def recorded_skips(run_dir: Path) -> str:
+    """What the run's searches skipped by name, for Run_Config."""
+    path = run_dir / SKIPPED_SITES_FILE
+    if not path.exists():
+        return "not recorded (the run predates the rule, or searched only --site-ids)"
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return describe_counts([normalize_scalar(row.get("name_class")) for row in csv.DictReader(handle)])

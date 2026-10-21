@@ -137,7 +137,7 @@ def list_sites(out_dir: Path) -> None:
     sites = load_seed_sites()  # one consolidation run, which it names
     selections = ny.batch_selections(sites)
     rows = ny.skip_candidates(selections)
-    print("\nSites each batch would search, and how many have a name that could be skipped:")
+    print("\nSites each batch would search without the name rule, and how many it skips:")
     print(ny.format_skip_candidates(selections, rows))
     ny.write_csv(out_dir / "would_skip.csv", rows, ny.SKIP_HEADERS)
     print(f"\nEvery one, with the rule it tripped and a map link: {out_dir / 'would_skip.csv'}")
@@ -146,7 +146,7 @@ def list_sites(out_dir: Path) -> None:
 def forecast(every_site, args, out_dir: Path) -> None:
     from waste_ai_search import name_yield as ny
 
-    print("\nForecast: what each batch would search today, by class of name.")
+    print("\nForecast: what each batch would search without the name rule, by class of name.")
     try:
         from waste_ai_search.seed_source import load_seed_sites
 

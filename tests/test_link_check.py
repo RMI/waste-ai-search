@@ -232,7 +232,7 @@ def test_the_search_phase_checks_links_and_can_be_told_not_to(tmp_path, monkeypa
     from waste_ai_search import search as pl
 
     seed = tmp_path / "seed.csv"
-    seed.write_text("site_id,site_name,country_iso3,latitude,longitude\n1,Landfill,PHL,14.5,121.0\n")
+    seed.write_text("site_id,site_name,country_iso3,latitude,longitude\n1,Payatas Landfill,PHL,14.5,121.0\n")
 
     class _Client:
         def search_site(self, site, prompt):

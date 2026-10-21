@@ -1,7 +1,8 @@
 # Stop web-searching sites whose names can't be searched
 
-**Status:** step 1 (the measurement) built on branch `seed-reads-one-consolidation-run`, waiting
-for the numbers. Steps 2 and 3 not started.
+**Status:** built on branch `skip-unsearchable-names`. Hugh decided on 20 October 2026 to skip all
+four classes, in place of step 2's bar, and step 3 is the rule as built. Step 1 (the measurement)
+was built first, on branch `seed-reads-one-consolidation-run`.
 **Date:** 15 October 2026
 
 ## Short answers

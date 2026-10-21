@@ -64,13 +64,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--pilot-size",
         type=non_negative_int,
         default=0,
-        help="Sample N sites spread across countries and hard cases, instead of the first N.",
+        help="Sample N sites spread across countries (and generic-named hard cases, with "
+        "--include-unsearchable-names), instead of the first N.",
     )
     search.add_argument("--iso3", nargs="*", default=[], help="Restrict to these country codes.")
     search.add_argument(
         "--include-excluded-countries",
         action="store_true",
         help="Also search countries excluded by default (currently USA).",
+    )
+    search.add_argument(
+        "--include-unsearchable-names",
+        action="store_true",
+        help="Also search sites whose name gives a search nothing to look for: no name, not a name, "
+        "a generic label or a mining feature.",
     )
     search.add_argument("--site-ids", nargs="*", default=[], help="Search only these site_ids.")
     search.add_argument(
@@ -146,6 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--site-ids", nargs="*", default=[], help="Search only these site_ids.")
     full.add_argument("--batch", type=int, choices=range(1, LAST_BATCH + 1), help="One country batch.")
     full.add_argument("--include-excluded-countries", action="store_true")
+    full.add_argument("--include-unsearchable-names", action="store_true")
     full.add_argument("--force", action="store_true")
     full.add_argument("--site-delay-seconds", type=float, default=3.0)
     full.add_argument("--hard-site-timeout-seconds", type=int, default=240)
@@ -263,6 +271,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         limit=getattr(args, "limit", 0),
         pilot_size=getattr(args, "pilot_size", 0),
         include_excluded_countries=getattr(args, "include_excluded_countries", False),
+        include_unsearchable_names=getattr(args, "include_unsearchable_names", False),
         iso3=list(getattr(args, "iso3", []) or []),
         batch=getattr(args, "batch", None) or 0,
         site_ids=list(getattr(args, "site_ids", []) or []),
