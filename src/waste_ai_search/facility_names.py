@@ -36,6 +36,15 @@ GENERIC_NAME_WORDS = {
     # technique" (LET), with the elided d' and l' of French names, which would otherwise count as
     # words. Without them, batch 1's seven "Rubbish Tip" sites each matched 68 others.
     "tip", "refuse", "depot", "grounds", "nuisance", "lieu", "enfouissement", "technique", "let", "d", "l",
+    # Also not yet in #225: the words of other kinds of site and their small words. Australia's
+    # "Resource Recovery Centre", which moved Noosa's page 20 km to Nambour's; France's
+    # "Installation de Stockage de Déchets Non Dangereux", in English "Landfill for Non-Hazardous
+    # Waste", which 187 pairs of French sites share; Mexico's "tiradero a cielo abierto del
+    # municipio" ("open-air dump"); Catalonia's "dipòsit controlat"; Brazil's "aterro em valas"
+    # ("landfill in ditches"); and the French "à", "des" and "du".
+    "resource", "recovery", "installation", "stockage", "dechets", "non", "dangereux", "hazardous",
+    "open", "air", "tiradero", "cielo", "abierto", "municipio", "diposit", "controlat", "controlled",
+    "ditches", "trenches", "for", "in", "a", "des", "du",
 }
 # Company suffixes, written as distinctive_words sees them: lowercase, with the dots of a
 # dotted form like "d.o.o." or "S.p.A." removed. A company form names the operator's legal

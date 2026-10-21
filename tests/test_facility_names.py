@@ -37,6 +37,25 @@ def test_the_added_words_leave_the_place_name():
     assert distinctive_words("LET de Lachute") == {"lachute"}
 
 
+@pytest.mark.parametrize("name, words", [
+    ("Noosa Resource Recovery Centre", {"noosa"}),
+    ("Nambour Landfill & Resource Recovery Centre", {"nambour"}),
+    ("Installation de stockage de déchets non dangereux de Hendaye", {"hendaye"}),
+    ("Installation de Stockage des Déchets Non Dangereux (ISDND)", {"isdnd"}),
+    ("Landfill for Non-Hazardous Waste, Gien", {"gien"}),
+    ("Tiradero a cielo abierto del municipio de Ensenada", {"ensenada"}),
+    ("Open Air Dump of Tecate", {"tecate"}),
+    ("Dipòsit controlat de Tivissa", {"tivissa"}),
+    ("Sanitary landfill in ditches of Itapipoca", {"itapipoca"}),
+    ("Dépôt à neige du Ruisseau", {"neige", "ruisseau"}),
+])
+def test_the_words_of_other_kinds_of_site_are_generic_too(name, words):
+    """Without them, a source with no location naming Noosa's Resource Recovery Centre moved 20 km
+    to Nambour's, and 187 pairs of French sites matched each other strongly on 'Installation de
+    Stockage de Déchets Non Dangereux' alone."""
+    assert distinctive_words(name) == words
+
+
 def test_case_accents_suffixes_and_permit_codes_are_ignored():
     assert distinctive_words("Viridor Waste Management Limited, Foxhall Landfill Site EPR/BW2943IG") == {
         "viridor", "foxhall",

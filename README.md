@@ -307,17 +307,24 @@ as none.
 **Names** are scored by CJ's `facility_names.py` from #225, kept here as
 [`facility_names.py`](src/waste_ai_search/facility_names.py), which must stay aligned with it. Case,
 accents, punctuation, company suffixes and permit codes are ignored, and generic words are dropped
-("landfill", "sanitary", "waste management", and nine more this corpus needs, to be agreed with CJ:
-tip, refuse, depot, grounds, nuisance, lieu, enfouissement, technique and LET). The score, from 0 to
-1, is the higher of the share of the shorter name's words found in the longer one and how alike the
+("landfill", "sanitary", "waste management", and more this corpus needs, to be agreed with CJ:
+tip, refuse, depot, grounds, nuisance, lieu, enfouissement, technique and LET; the words of other
+kinds of site, such as Australia's "Resource Recovery Centre", France's "Installation de Stockage de
+Déchets Non Dangereux" and Mexico's "tiradero a cielo abierto"; and small words such as "for", "in"
+and the French "à"). The score, from 0 to 1, is the higher of the share of the shorter name's words found in the longer one and how alike the
 two read as strings, so "Seaton Meadows Landfil" still matches "Seaton Meadows". Conflicting
 qualifiers (North and South, Cell I and Cell II) score 0.
 
-- A **strong** match scores 0.8 or more and shares at least two distinctive words. One shared word
-  is never strong: "Eastview Landfill" is both a Brandon and a Guelph site, 1,716 km apart. So a
-  source naming a one-word landfill, such as Merrick, is filed by its location or not moved at all.
+- A **strong** match scores 0.8 or more and shares at least two distinctive words, counting a
+  qualifier both names have: in "North Bay" it is part of the place's name. One shared word is never
+  strong: "Eastview Landfill" is both a Brandon and a Guelph site, 1,716 km apart. So the SME's
+  "Merrick Landfill - North Bay" moves to our North Bay Landfill, while a source naming only
+  "Merrick Landfill" shares no word with it and stays with the site searched.
 - A name with no distinctive words left, and our placeholders and generic labels ("OpenStreetMap
-  Landfill", "domestic landfill"), can't be judged.
+  Landfill", "domestic landfill"), can't be judged. Nor can our names from Global Plastic Watch,
+  which are addresses looked up from its point ("Emu Mountain Road, Doonan, Noosa Shire,
+  Queensland"), as #225 treats them: 662 of batch 2's 856 sites are named so, and two in one
+  district share every word.
 - A source's `facility_name_english` is compared with our `site_name`, and its
   `facility_name_in_source` with our `original_site_name` where we have one. The higher score
   counts. A response cached before build step 4 has no English name, so its name is compared as

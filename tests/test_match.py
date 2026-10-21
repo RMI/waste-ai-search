@@ -1,12 +1,13 @@
 """Each source is filed under the site of ours it is about (build step 5 of the source-matching plan).
 
 Matching is by where the source places the facility, with its name as a check (match.py). A name
-is a strong match at a score of 0.8 or more on at least two shared distinctive words, as #225's
-strong-name link needs. The fixtures are the plan's known cases, with hand-entered names and locations per source, since batch
-1's cached responses give a location for few sources: Brandon and Guelph's two Eastview landfills,
-West Perth's page cited by many Mitchell-area searches, the SME's Prairie Green, Moose Jaw and
-Merrick, the E-PRTR duplicates at Cowpen Bewley and Foxhall, and namesakes near the site searched.
-Thunder Bay's copied point is end to end, in test_pooled_review.py. Coordinates are the seed's.
+is a strong match at a score of 0.8 or more on at least two shared distinctive words, counting a
+qualifier both names have. The fixtures are the plan's known cases, with hand-entered names and
+locations per source, since batch 1's cached responses give a location for few sources: Brandon and
+Guelph's two Eastview landfills, West Perth's page cited by many Mitchell-area searches, the SME's
+Prairie Green, Moose Jaw and Merrick, the E-PRTR duplicates at Cowpen Bewley and Foxhall, Noosa's
+Resource Recovery Centre, and namesakes near the site searched. Thunder Bay's copied point is end
+to end, in test_pooled_review.py. Coordinates are the seed's.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from waste_ai_search.match import (
     OUTSIDE_RUN,
     TIE,
     Citation,
+    Site,
     compare_names,
     judged_name,
     match_sources,
@@ -46,9 +48,40 @@ def test_one_shared_word_is_never_strong():
     assert fit.score == pytest.approx(0.8) and not fit.strong
 
 
+def test_a_qualifier_both_names_have_counts_as_a_shared_word():
+    """In "North Bay" or "North Peace" the qualifier is part of the place's name."""
+    fit = compare_names("Merrick Landfill - North Bay", "North Bay Landfill")
+    assert (fit.score, fit.strong) == (1.0, True)
+    assert compare_names("PRRD - North Peace Regional Landfill", "North Peace Regional Landfill").strong
+    # Alone it is still one word, and qualifiers that conflict still score nothing.
+    assert not compare_names("North Landfill", "North Landfill").strong
+    assert compare_names("North Bay Landfill", "South Bay Landfill").score == 0.0
+
+
+def test_a_generic_kind_of_site_shared_is_no_match():
+    """187 pairs of our French sites matched each other strongly on "Installation de Stockage de
+    Déchets Non Dangereux" alone, so a source naming one Hendaye's would have moved 97 km."""
+    fit = compare_names("Installation de stockage de déchets non dangereux de Hendaye", "Installation de Stockage des Déchets Non Dangereux (ISDND)")
+    assert not fit.fits
+    assert compare_names("Installation de stockage de déchets non dangereux de Hendaye", "Hendaye landfill").score == 1.0
+
+
 def test_a_name_with_no_distinctive_words_cant_be_judged():
     fit = compare_names("Landfill Site", "Brady Road Landfill")
     assert (fit.score, fit.strong, fit.fits) == (None, False, False)
+
+
+@pytest.mark.parametrize("provenance", [
+    {"attribute_sources": "found_facility_name@gpw_2021; found_latitude@gpw_2021"},
+    # With no per-attribute provenance, a site drawn from Global Plastic Watch alone has its name.
+    {"attribute_sources": "", "contributing_data_sources": "gpw_2021"},
+])
+def test_our_name_that_is_an_address_looked_up_from_our_point_cant_be_judged(provenance):
+    """662 of batch 2's 856 sites are named so, and two in one district share every word."""
+    site = Site.from_seed(seed("16433", "NH27, Jetpur Taluka, Rajkot, Gujarat, India", 21.75, 70.62, "IND", **provenance))
+    assert (site.english, site.original, site.name) == ("", "", "NH27, Jetpur Taluka, Rajkot, Gujarat, India")
+    named = Site.from_seed(seed("2880", "Nambour Landfill", -26.6, 152.98, "AUS", contributing_data_sources="osm_2022 + gpw_2021"))
+    assert named.english == "Nambour Landfill"
 
 
 @pytest.mark.parametrize("ours, judged", [
@@ -290,17 +323,51 @@ def test_a_name_strongly_matching_one_other_site_within_200_km_moves_the_source(
     assert filing.choices == [ours["site_id"], "100"]
 
 
-def test_merrick_a_one_word_name_is_never_moved():
-    """Merrick Landfill: one distinctive word, so it can't move a source without a location."""
-    merrick = seed("14303", "Merrick Landfill Site", 45.97394, -79.63267)
-    searched = seed("14272", "domestic landfill", 45.49261, -79.44276)
-    filing = match([cite("14272", "https://data.ontario.ca/merrick", "Merrick Landfill")], [merrick, searched]).filings[("14272", 1)]
-    assert (filing.site_id, filing.outcome) == ("14272", NO_LOCATION)
-    assert "Merrick Landfill Site (14303, 56 km)" in filing.match
+# Batch 1's searches of unnamed sites near North Bay that cited Ontario's landfill list for the
+# Merrick Landfill, and our North Bay Landfill, which it is: the City of North Bay's landfill.
+NORTH_BAY = seed("14312", "North Bay Landfill", 46.51482, -79.49169, area_square_meters="418700.56")
+MERRICK_SEARCHES = [
+    seed("14272", "domestic landfill", 45.49261, -79.44276), seed("14283", "domestic landfill", 46.23946, -80.44142),
+    seed("14292", "Municipal Dump", 46.40463, -80.31042), seed("14300", "domestic landfill", 45.77757, -79.39066),
+]
+
+
+def test_merrick_its_towns_name_moves_the_source_to_the_landfill_named_after_the_town():
+    """The SME's Merrick example. "Merrick Landfill - North Bay" scores 1.0 against our North Bay
+    Landfill, 64-114 km from the sites searched, and shares two words with it, "North" among them."""
+    page = "https://data.ontario.ca/dataset/ontario-landfills"
+    matching = match([cite(site["site_id"], page, "Merrick Landfill - North Bay") for site in MERRICK_SEARCHES], [NORTH_BAY, *MERRICK_SEARCHES])
+    assert {key[0]: (filing.site_id, filing.outcome) for key, filing in matching.filings.items()} == {
+        site["site_id"]: ("14312", MOVED_BY_NAME) for site in MERRICK_SEARCHES
+    }
+    assert "114 km from the site searched (14272)" in matching.filings[("14272", 1)].match
+    assert matching.counts[MOVED_BY_NAME] == 4
+
+
+def test_merrick_alone_shares_no_word_with_north_bay_and_stays_with_the_site_searched():
+    searched = seed("14281", "domestic landfill", 46.11473, -80.40934)
+    filing = match([cite("14281", "https://northbay.ca/landfill-operations", "Merrick Landfill")], [NORTH_BAY, searched]).filings[("14281", 1)]
+    assert (filing.site_id, filing.outcome) == ("14281", NO_LOCATION)
+    assert "North Bay" not in filing.match
     # With a location it is matched by where it is.
-    filing = match([cite("14272", "https://data.ontario.ca/merrick", "Merrick Landfill", (45.9740, -79.6327))],
-                   [merrick, searched]).filings[("14272", 1)]
-    assert (filing.site_id, filing.outcome) == ("14303", LOCATED)
+    filing = match([cite("14281", "https://northbay.ca/landfill-operations", "Merrick Landfill", (46.5150, -79.4920))],
+                   [NORTH_BAY, searched]).filings[("14281", 1)]
+    assert (filing.site_id, filing.outcome) == ("14312", LOCATED)
+
+
+def test_noosa_a_generic_kind_of_site_never_moves_a_source_to_another_of_that_kind():
+    """Batch 1: Noosa's page for its Resource Recovery Centre, the site searched, gave no location.
+    "Resource Recovery Centre" is generic, so the name doesn't fit Nambour's Landfill & Resource
+    Recovery Centre, 20 km away. Our name for the site searched is Global Plastic Watch's address
+    for its point, which can't be judged either."""
+    noosa = seed("2881", "Emu Mountain Road, Doonan, Noosa Shire, Queensland, 4566, Australia", -26.43825, 153.02924, "AUS",
+                 attribute_sources="found_facility_name@gpw_2021; found_latitude@gpw_2021")
+    nambour = seed("2880", "Nambour Landfill & Resource Recovery Centre", -26.61253, 152.98284, "AUS",
+                   area_square_meters="638846.2", attribute_sources="found_facility_name@osm_2022")
+    page = "https://www.noosa.qld.gov.au/Environment-and-Waste/Waste-and-Recycling/Waste-and-resource-recovery-centres"
+    filing = match([cite("2881", page, "Noosa Resource Recovery Centre")], [noosa, nambour]).filings[("2881", 1)]
+    assert (filing.site_id, filing.outcome) == ("2881", NO_LOCATION)
+    assert "Nambour" not in filing.match
 
 
 def test_two_namesakes_within_200_km_leave_the_source_with_the_site_searched():

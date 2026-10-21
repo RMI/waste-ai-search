@@ -39,7 +39,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
-from .facility_names import distinctive_words, name_similarity, qualifiers
+from .credibility import attribute_sources
+from .facility_names import distinctive_words, name_similarity
 from .locate import MATCHING_BASES, ROOFTOP, STREET, haversine_km, seed_point
 from .payload import normalize_url
 from .prompt_builder import location_is_inexact
@@ -64,9 +65,12 @@ INEXACT_NAME_RESCUE_KM = 25.0
 NAMESAKE_KM = 200.0
 
 # A strong name match scores at least this (#225's strong_name), and the two names share at least
-# two distinctive words, qualifiers aside (#225's shared_words), so the shorter has two or more:
-# one shared word is never strong. "Eastview Landfill" is a Brandon and a Guelph site, 1,716 km
-# apart, and "Hallam Road Landfill" reads 0.8 like "Ball Road Landfill".
+# two distinctive words, so the shorter has two or more: one shared word is never strong.
+# "Eastview Landfill" is a Brandon and a Guelph site, 1,716 km apart, and "Hallam Road Landfill"
+# reads 0.8 like "Ball Road Landfill". A qualifier both names have counts as a shared word, as the
+# plan states the rule: in "North Bay", "West Coast" or "Highway 48" it is part of the place's name,
+# and the Merrick Landfill's source, "Merrick Landfill - North Bay", is about our "North Bay
+# Landfill". #225's shared_words sets qualifiers aside, since it also links on one shared word.
 STRONG_NAME_SCORE = 0.8
 STRONG_NAME_WORDS = 2
 
@@ -135,10 +139,9 @@ NO_FIT = NameFit()
 
 
 def shared_words(theirs: str, ours: str) -> int:
-    """How many distinctive words, qualifiers aside, two names have in common (#225's
-    shared_words)."""
-    words_a, words_b = distinctive_words(theirs), distinctive_words(ours)
-    return len((words_a - qualifiers(words_a)) & (words_b - qualifiers(words_b)))
+    """How many distinctive words two names have in common, a qualifier both have included. Names
+    whose qualifiers conflict (North and South) already score 0."""
+    return len(distinctive_words(theirs) & distinctive_words(ours))
 
 
 @lru_cache(maxsize=None)
@@ -157,6 +160,23 @@ def judged_name(name: Any) -> str:
     judged, and is ""."""
     text = normalize_scalar(name)
     return text if text and name_class(text) == NAMED and distinctive_words(text) else ""
+
+
+# Datasets whose names are addresses looked up from the site's point (Global Plastic Watch's "Emu
+# Mountain Road, Doonan, Noosa Shire, Queensland, 4566, Australia"): they say where a site is, not
+# which one, and two sites in one district share every word. #225 judges them the same way
+# (UNNAMED_SOURCES). 662 of batch 2's 856 sites are named so.
+UNNAMED_SOURCES = ("gpw",)
+
+
+def name_is_an_address(row: dict[str, Any]) -> bool:
+    """Whether our name for a site came from a dataset that names a site by its address."""
+    source = attribute_sources(row.get("attribute_sources")).get("found_facility_name", "")
+    if not source:
+        # No per-attribute provenance: a site drawn from that dataset alone has its name.
+        contributing = [part.strip() for part in re.split(r"[+;,]", normalize_scalar(row.get("contributing_data_sources")))]
+        source = contributing[0] if len(contributing) == 1 else ""
+    return source.lower().startswith(UNNAMED_SOURCES)
 
 
 # --- our sites ---------------------------------------------------------------------------------
@@ -180,6 +200,7 @@ class Site:
         radius = math.sqrt(area / math.pi) / 1000 if area and area > 0 else 0.0
         # Our English name is site_name, which the seed copies from facility_name.
         english = normalize_scalar(row.get("site_name")) or normalize_scalar(row.get("facility_name"))
+        unnamed = name_is_an_address(row)
         return cls(
             site_id=normalize_scalar(row.get("site_id")),
             name=english,
@@ -187,8 +208,8 @@ class Site:
             point=seed_point(row),
             radius_km=min(radius, MAX_AREA_RADIUS_KM),
             inexact=location_is_inexact(row),
-            english=judged_name(english),
-            original=judged_name(row.get("original_site_name")),
+            english="" if unnamed else judged_name(english),
+            original="" if unnamed else judged_name(row.get("original_site_name")),
         )
 
     def edge_km(self, point: tuple[float, float]) -> float | None:
