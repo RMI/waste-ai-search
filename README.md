@@ -615,7 +615,9 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 
 **Nothing is loaded from this repository.** It used to write a standardized table and a `.load.sql`
 beside it, built before review. Ingestion now builds the AI search's table itself, from the values
-SMEs validate (`waste_data_ingestion_pipeline` #261).
+SMEs validate (`waste_data_ingestion_pipeline` #261). Arbitrating a run again deletes the
+`std_facility_tbl_ai_search_<run_id>.csv` and `.load.sql` an earlier arbitration left in its folder,
+and says so. A copy already pushed to blob is kept there, as the record of that arbitration.
 
 **One source per exact URL.** The query string is part of the URL, so documents that one script
 serves by id stay separate sources: dropping it once merged 103 different Natural Resources Wales

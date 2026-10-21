@@ -783,6 +783,34 @@ def payload_leads(
     return out
 
 
+# What arbitration wrote until build step 3 of the source-matching plan: a standardized table, and
+# the .load.sql beside it, both built from values accepted before review. Ingestion #261 now builds
+# the AI search's table from reviewed values instead.
+RETIRED_OUTPUTS = ("std_facility_tbl_ai_search_*.csv", "std_facility_tbl_ai_search_*.load.sql")
+
+
+def remove_retired_outputs(run_dir: Path) -> list[Path]:
+    """Delete the standardized table and .load.sql an earlier arbitration left in the run folder.
+
+    Arbitrating again replaces that arbitration's outputs, resolved.csv among them, and these two
+    would otherwise sit beside a header-only resolved.csv looking ready to load. Only the local
+    copies go: a copy pushed to blob stays there as the record of that arbitration, and comes back
+    down on the next pull, so this runs on every arbitration.
+    """
+    removed = []
+    for pattern in RETIRED_OUTPUTS:
+        for path in sorted(run_dir.glob(pattern)):
+            path.unlink()
+            removed.append(path)
+    if removed:
+        names = ", ".join(path.name for path in removed)
+        print(
+            f"Removed {names}: an earlier arbitration built them before review, and nothing is loaded "
+            "from this repository now. Any copy in blob is kept."
+        )
+    return removed
+
+
 def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     access_date = date.today()
     # Checked before the seed, so a mistyped --run-id says so rather than reaching for a database.
@@ -1047,6 +1075,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     ])
 
     out = config.run_dir
+    remove_retired_outputs(out)
     paths = {
         "evidence": out / "evidence.csv",
         "resolved": out / "resolved.csv",

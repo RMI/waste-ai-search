@@ -50,8 +50,10 @@ def found(name, value, source):
     }
 
 
-def arbitrate(tmp_path, *attributes):
-    """Arbitrate one OSM site, whose facility_type we already hold, against `attributes`."""
+def arbitrate(tmp_path, *attributes, leftovers=()):
+    """Arbitrate one OSM site, whose facility_type we already hold, against `attributes`.
+
+    `leftovers` names files an earlier arbitration left in the run folder."""
     from waste_ai_search.seed_source import seed_headers
 
     run_dir = tmp_path / "run"
@@ -65,6 +67,8 @@ def arbitrate(tmp_path, *attributes):
     raw = run_dir / "raw_foundry_responses"
     raw.mkdir(parents=True)
     (raw / "site_7.json").write_text(json.dumps({"site_id": "7", "attributes": list(attributes)}))
+    for name in leftovers:
+        (run_dir / name).write_text("left by an earlier arbitration")
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
     return run_dir
 
@@ -104,6 +108,18 @@ def test_no_standardized_table_or_load_statement_is_written(tmp_path):
     assert not list(run_dir.glob("*.load.sql"))
     settings = [row[0] for row in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].iter_rows(values_only=True)]
     assert "standardized_records" not in settings
+
+
+def test_arbitrating_again_removes_the_standardized_table_an_earlier_arbitration_left(tmp_path, capsys):
+    """Batch 1 was arbitrated when both were still written, and its blob copy brings them back
+    down. Left beside a header-only resolved.csv, they would look like values ready to load."""
+    leftovers = ["std_facility_tbl_ai_search_run.csv", "std_facility_tbl_ai_search_run.load.sql"]
+    run_dir = arbitrate(tmp_path, found("facility_status", "Active", REGULATOR), leftovers=leftovers)
+
+    assert not list(run_dir.glob("std_facility_tbl_*"))
+    assert not list(run_dir.glob("*.load.sql"))
+    assert "Removed std_facility_tbl_ai_search_run.csv, std_facility_tbl_ai_search_run.load.sql" in capsys.readouterr().out
+    assert [r["attribute_name"] for r in read(run_dir / "review_queue.csv")] == ["facility_status"]
 
 
 def test_the_workbook_never_tells_smes_anything_was_accepted_for_them():
