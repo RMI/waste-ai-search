@@ -390,6 +390,8 @@ MATCH_FILLS = {
     "no location": "BDD7EE",
     "tie": "FFD966",
 }
+# An evidence_summary flagging that the winning source's own page doesn't bear it out.
+NOT_ON_PAGE_FILL = "F8CBAD"
 
 
 def add_conditionals(ws) -> None:
@@ -412,6 +414,15 @@ def add_conditionals(ws) -> None:
             ws.conditional_formatting.add(
                 cells, FormulaRule(formula=[formula], fill=PatternFill("solid", fgColor=MATCH_FILLS[name]))
             )
+    if "evidence_summary" in headers:
+        summary = get_column_letter(headers["evidence_summary"])
+        ws.conditional_formatting.add(
+            f"{summary}2:{summary}{last}",
+            FormulaRule(
+                formula=[f'ISNUMBER(SEARCH("on the source\'s page",${summary}2))+ISNUMBER(SEARCH("on its page",${summary}2))'],
+                fill=PatternFill("solid", fgColor=NOT_ON_PAGE_FILL),
+            ),
+        )
     if "resolution" not in headers:
         return
     letter = get_column_letter(headers["resolution"])
