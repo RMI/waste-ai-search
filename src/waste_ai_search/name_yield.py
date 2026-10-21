@@ -17,7 +17,7 @@ import io
 import json
 from collections import Counter, defaultdict
 from contextlib import redirect_stdout
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -33,7 +33,6 @@ SEED = "seed.csv"
 RUN_LOG = "foundry_run_log.csv"
 RESOLVED = "resolved.csv"
 REVIEW_QUEUE = "review_queue.csv"
-PARSE_WARNINGS = "parse_warnings.csv"
 MANIFEST = f"{SNAPSHOT_DIR_NAME}/{MANIFEST_NAME}"
 REVIEW_SHEET = "Review_Queue"
 
@@ -48,11 +47,10 @@ SOURCE_GROUPS = [MAP_ONLY, OTHER_SOURCES]
 # batch 1 queued only for a failed identity check and later runs never queue.
 CONFIRMED = "Confirmed baseline"
 NEW_VALUE_RESOLUTIONS = {"Filled empty baseline", "Overrides baseline"}
-# A site whose found coordinates, or a dropped map page's, lie beyond the 5 km identity gate. The
-# gate notes each of the site's values, and every run also lists the site in parse_warnings.csv.
-# Since nothing is accepted automatically a confirmation is never queued, so a site whose values
-# only confirmed ours carries the note on no row: the warning is what still flags it.
-IDENTITY_NOTE = "Identity not confirmed"
+# An SME's rejection of a value as about another facility. Since build step 5 of the
+# source-matching plan it says which kind ("Wrong facility - another site in our database"), so
+# reasons are counted by how they start.
+WRONG_FACILITY = "Wrong facility"
 NAME_ATTRIBUTE = "found_facility_name"
 # Run-log statuses for a site the agent actually answered; "Failed" and a failed search tool did not.
 ANSWERED_STATUSES = ("Succeeded", "Skipped existing response")
@@ -114,8 +112,6 @@ class RunFiles:
     manifest: Optional[dict[str, Any]]
     # Review_Queue rows from the reviewed workbook; None when there is no workbook to read.
     sme: Optional[list[dict[str, str]]] = None
-    # parse_warnings.csv, which a run may lack: it is read only for the identity gate's warning.
-    warnings: list[dict[str, str]] = field(default_factory=list)
 
 
 def load_run(run_id: str, read: Reader) -> RunFiles:
@@ -134,7 +130,6 @@ def load_run(run_id: str, read: Reader) -> RunFiles:
         resolved=csv_rows(data[RESOLVED]),
         review=csv_rows(data[REVIEW_QUEUE]),
         manifest=json.loads(manifest) if manifest is not None else None,
-        warnings=csv_rows(read(PARSE_WARNINGS)),
     )
 
 
@@ -172,6 +167,12 @@ def _site_id(row: dict[str, Any]) -> str:
     return normalize_scalar(row.get("site_id"))
 
 
+def _searched_id(row: dict[str, Any]) -> str:
+    """The site whose search found a value. Since build step 5 a value may be filed under another
+    site, and searched_site_id says which search found it; earlier runs file it where it was found."""
+    return normalize_scalar(row.get("searched_site_id")) or _site_id(row)
+
+
 def _as_int(value: Any) -> int:
     text = normalize_scalar(value)
     return int(text) if text.isdigit() else 0
@@ -180,38 +181,37 @@ def _as_int(value: Any) -> int:
 SITE_HEADERS = [
     "run_id", "site_id", "country_iso3", "site_name", "original_site_name", "name_class",
     "source_group", "status", "answered", "web_searches", "new_values_accepted",
-    "new_values_to_review", "found_attributes", "found_name", "identity_not_confirmed",
+    "new_values_to_review", "found_attributes", "found_name", "filed_under_another_site",
     "not_a_waste_facility", "sme_validated", "sme_rejected", "sme_wrong_facility",
 ]
 
 
 def site_rows(run: RunFiles) -> list[dict[str, Any]]:
-    """One row per site the run searched, saying what its search found."""
+    """One row per site the run searched, saying what its search found.
+
+    A value is credited to the search that found it (searched_site_id), wherever it is filed, and
+    filed_under_another_site counts how many of them were filed under another of our sites: the
+    search looked at another place.
+    """
     seed = {_site_id(row): row for row in run.seed}
     accepted: dict[str, list[dict[str, str]]] = defaultdict(list)
     to_review: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in run.resolved:
         if normalize_scalar(row.get("resolution")) in NEW_VALUE_RESOLUTIONS:
-            accepted[_site_id(row)].append(row)
+            accepted[_searched_id(row)].append(row)
     for row in run.review:
         if normalize_scalar(row.get("resolution")) != CONFIRMED:
-            to_review[_site_id(row)].append(row)
-    identity = {
-        _site_id(row)
-        for row in [*run.resolved, *run.review]
-        if IDENTITY_NOTE in normalize_scalar(row.get("researcher_notes"))
-    } | {
-        _site_id(row)
-        for row in run.warnings
-        if normalize_scalar(row.get("warning")).startswith(IDENTITY_NOTE)
-    }
+            to_review[_searched_id(row)].append(row)
+    elsewhere = Counter(
+        _searched_id(row) for row in [*run.resolved, *run.review] if _searched_id(row) != _site_id(row)
+    )
     decisions: dict[str, Counter] = defaultdict(Counter)
     for row in run.sme or []:
         status = normalize_scalar(row.get("validation_status"))
         if status in ("Validated", "Rejected"):
-            decisions[_site_id(row)][status] += 1
-            if status == "Rejected" and normalize_scalar(row.get("rejection_reason")) == "Wrong facility":
-                decisions[_site_id(row)]["Wrong facility"] += 1
+            decisions[_searched_id(row)][status] += 1
+            if status == "Rejected" and normalize_scalar(row.get("rejection_reason")).startswith(WRONG_FACILITY):
+                decisions[_searched_id(row)][WRONG_FACILITY] += 1
 
     rows = []
     for log in run.run_log:
@@ -236,7 +236,7 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
             "new_values_to_review": len(to_review[site_id]),
             "found_attributes": "; ".join(attributes),
             "found_name": NAME_ATTRIBUTE in attributes,
-            "identity_not_confirmed": site_id in identity,
+            "filed_under_another_site": elsewhere[site_id],
             "not_a_waste_facility": any(
                 normalize_scalar(row.get("attribute_name")) == "facility_type"
                 and normalize_scalar(row.get("resolved_value")) == NOT_A_WASTE_FACILITY
@@ -244,7 +244,7 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
             ),
             "sme_validated": decisions[site_id]["Validated"],
             "sme_rejected": decisions[site_id]["Rejected"],
-            "sme_wrong_facility": decisions[site_id]["Wrong facility"],
+            "sme_wrong_facility": decisions[site_id][WRONG_FACILITY],
         })
     return rows
 
@@ -252,7 +252,7 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
 SUMMARY_HEADERS = [
     "source_group", "name_class", "sites_searched", "sites_answered", "bing_queries",
     "queries_per_site", "sites_with_new_value", "new_value_rate", "new_values",
-    "queries_per_new_value", "sites_with_found_name", "found_name_rate", "identity_not_confirmed",
+    "queries_per_new_value", "sites_with_found_name", "found_name_rate", "filed_under_another_site",
     "not_a_waste_facility", "sme_validated", "sme_rejected", "sme_wrong_facility", "rate_vs_named",
     "verdict",
 ]
@@ -279,7 +279,7 @@ def _stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "queries_per_new_value": _ratio(queries, new_values),
         "sites_with_found_name": with_name,
         "found_name_rate": _ratio(with_name, len(answered)),
-        "identity_not_confirmed": sum(1 for row in rows if row["identity_not_confirmed"]),
+        "filed_under_another_site": sum(row["filed_under_another_site"] for row in rows),
         "not_a_waste_facility": sum(1 for row in rows if row["not_a_waste_facility"]),
         "sme_validated": sum(row["sme_validated"] for row in rows),
         "sme_rejected": sum(row["sme_rejected"] for row in rows),
@@ -457,7 +457,7 @@ def format_summary(summary: list[dict[str, Any]]) -> str:
         ("queries/site", lambda r: _show(r["queries_per_site"]), 13),
         ("new value", lambda r: _show(r["new_value_rate"], percent=True), 10),
         ("found name", lambda r: _show(r["found_name_rate"], percent=True), 11),
-        ("wrong place?", lambda r: _show(r["identity_not_confirmed"]), 13),
+        ("filed elsewhere", lambda r: _show(r["filed_under_another_site"]), 16),
         ("SME ok/rej/wrong", lambda r: f"{r['sme_validated']}/{r['sme_rejected']}/{r['sme_wrong_facility']}", 17),
         ("vs named", lambda r: _show(r["rate_vs_named"]), 9),
         ("verdict", lambda r: r["verdict"], 0),

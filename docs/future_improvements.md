@@ -36,3 +36,18 @@ candidate and per outside-the-run match. It would show:
 The SME confirms each one as new, as one of our sites (by ID), or as not a landfill. Only confirmed
 candidates go to the ingestion team. A match outside the run is then handed to the run that covers
 that country, or loaded once ingestion decides how one facility can take values from two runs.
+
+## Brazil's coordinates-only search files its finds as new landfills
+
+**Added:** 21 October 2026. Parked by Hugh until Brazil is searched again; it is excluded by default.
+
+Brazil's SINIR sites carry the centre of their municipality, not the dump, and most are named
+generically ("Lixão", "Aterro Controlado"). A source that does locate the dump is therefore usually
+more than 2 km from our point, and its name rarely matches strongly enough for the 25 km name
+rescue. So under the matching rules most of Brazil's found coordinates become new-landfill
+candidates rather than corrections to our coordinates.
+
+**What to do.** For a site whose location is flagged inexact, file a located source within 25 km
+under the site searched, unless its name strongly fits another site of ours. The name would then
+be a veto, not a requirement. Brazil's generic names are also skipped by the unsearchable-names
+rule unless `--include-unsearchable-names` is passed, so both need deciding together.
