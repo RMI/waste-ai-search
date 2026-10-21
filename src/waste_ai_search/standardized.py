@@ -33,6 +33,7 @@ from .schema import (
     ATTRIBUTE_TO_STANDARD_COLUMN,
     BOOLEAN_TARGET_ATTRIBUTES,
     INTEGER_TARGET_ATTRIBUTES,
+    LOCATION_ATTRIBUTE,
     NUMERIC_ARRAY_TARGET_ATTRIBUTES,
     NUMERIC_TARGET_ATTRIBUTES,
     STANDARDIZED_FACILITY_COLUMNS,
@@ -98,6 +99,16 @@ def format_standard_value(attribute_name: str, value: Any) -> tuple[Any, str]:
     return text, ""
 
 
+def parse_location(value: Any) -> tuple[float | None, float | None]:
+    """A found_location value, "lat, lon", as two numbers; (None, None) if it isn't one."""
+    parts = [part.strip() for part in normalize_scalar(value).split(",")]
+    try:
+        latitude, longitude = (float(part) for part in parts)
+    except ValueError:
+        return None, None
+    return latitude, longitude
+
+
 def build_standard_record(
     site: dict[str, Any],
     resolved_rows: list[dict[str, Any]],
@@ -119,6 +130,13 @@ def build_standard_record(
 
     for row in promoted:
         attribute = normalize_scalar(row.get("attribute_name"))
+        if attribute == LOCATION_ATTRIBUTE:
+            latitude, longitude = parse_location(row.get("resolved_value"))
+            if latitude is None:
+                notes.append(f"{attribute}: could not read {row.get('resolved_value')!r} as 'lat, lon'.")
+            else:
+                record["latitude"], record["longitude"] = latitude, longitude
+            continue
         column = ATTRIBUTE_TO_STANDARD_COLUMN.get(attribute)
         if not column:
             continue

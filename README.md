@@ -437,6 +437,14 @@ never as a value.
 | `found_latitude` | numeric | `decimal degrees` | `latitude` |
 | `found_longitude` | numeric | `decimal degrees` | `longitude` |
 
+The two coordinates are asked for and checked separately, then combined into one value,
+`found_location`, written `lat, lon`. A location is one fact, so it is accepted, reviewed and
+loaded as a pair or not at all: it takes the less settled verdict of its two halves, and goes to
+review if they came from different sources. A coordinate found without its other half is listed
+under Leads. On batch 1, the halves had split at 55 of the 157 sites with a found coordinate.
+A coordinate within 0.5 km of the seed's is the same place, so it confirms the seed's, and a
+location that confirms the seed's keeps the seed's point: nothing moves.
+
 **Newer sources win.** The agent is told to prefer the most recent source when sources disagree, and to base `facility_status` on the latest evidence it can find (a closure notice, current opening hours, recent news) rather than an older permit or directory listing. Arbitration follows the same rule: within a tier the newer `value_date` wins, and for `facility_status` only, a lower-tier source down to Tier 3 may win when it is at least 3 years newer than the source or baseline it replaces. Such a win always goes to review, and `resolution_rule` states the dates.
 
 `found_facility_name` must be **specific**: a name that identifies the site on its own ("Wonthaggi Transfer Station"), not a generic label ("Waste Management Facility"). If a source gives only a generic name, the agent adds the municipality, town or operator that the same source names ("Bass Coast Shire Waste Management Facility"), never a place the source doesn't mention.
@@ -709,7 +717,7 @@ The five columns that decide your judgement:
 
 Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab.
 
-**Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and compare it with what the source describes.
+**Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and compare it with what the source describes. A `found_location` row is the location the source gives, in the same form: accept or reject it as one point.
 
 **Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `resolved.csv` and `evidence.csv`; they are blank where the source was never translated.
 
@@ -741,12 +749,13 @@ Edit only these columns; everything else is read-only:
 |---|---|
 | `validation_status` | `Validated` or `Rejected` (dropdown) |
 | `rejection_reason` | For a rejection: `Wrong facility`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Counted by cause to find where the AI errs and where auto-validation is safe |
-| `corrected_value` | If you know the right value: enter it here. For categorical fields (site type, status, waste type, depth, yes/no fields, cover and gas-project types) it is a dropdown of the allowed values for that row's attribute; multi-value fields also accept a typed combination. Never edit `resolved_value` — it keeps the AI's own answer, which is how its error rate is measured |
+| `corrected_value` | If you know the right value: enter it here. For categorical fields (site type, status, waste type, depth, yes/no fields, cover and gas-project types) it is a dropdown of the allowed values for that row's attribute; multi-value fields also accept a typed combination. A location is `lat, lon`. Never edit `resolved_value` — it keeps the AI's own answer, which is how its error rate is measured |
+| `corrected_value_date` | Only if your corrected value is for a different date than `value_date`, such as a current figure replacing one you rejected as `Outdated`: that date, as `YYYY`, `YYYY-MM` or `YYYY-MM-DD` |
 | `reviewer` | Your name |
 | `reviewed_date` | The date |
 | `researcher_notes` | Why, especially for a rejection |
 
-`Validated` means the value is correct and may be merged. `Rejected` means it must not be.
+`Validated` means the value is correct and may be merged. `Rejected` means the search's value must not be; a `corrected_value` you give is merged instead.
 
 ### 5. Optional tabs
 
