@@ -23,6 +23,11 @@ address between the check and the connect. A refused URL is Unverified and is ne
 One difference from RDP-63: the fetching happens in the SEARCH phase, which needs the network
 anyway, and the verdicts are kept in `link_check.json` in the run directory. Arbitration only reads
 that file, so `arbitrate` stays offline as the CLI promises.
+
+A page that loads is also read, and its text kept in page_text/ (page_text.py), so arbitration can
+check that a source's quote and stated location are really on it. The text costs no extra request:
+it is the same response the verdict comes from. A page read before text was kept, or whose text file
+has gone, is read again by the next check; nothing else is fetched twice.
 """
 from __future__ import annotations
 
@@ -36,6 +41,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
+
+from .page_text import MAX_PAGE_BYTES, extract_text, save_page_text
 
 
 OK = "OK"
@@ -54,12 +61,33 @@ USER_AGENT = (
 )
 
 
+# The longest a page's body may take to read, whatever the server's pace: a slow drip of bytes
+# would otherwise hold a worker past the per-request timeout.
+READ_SECONDS = 60
+
+
 @dataclass
 class LinkResult:
     url: str
     verdict: str
     status: str
     resolved_url: str
+    # The page's text, where the check read it: the file in page_text/ it is kept in, what kind of
+    # page it was, how many characters it gave, and why it gave few or none.
+    text_file: str = ""
+    text_kind: str = ""
+    text_chars: int = 0
+    text_note: str = ""
+
+
+@dataclass
+class Fetched:
+    """A page that was read, not just its status: what keeping its text needs."""
+
+    status: Any
+    body: bytes
+    content_type: str = ""
+    truncated: bool = False
 
 
 class _HostThrottle:
@@ -168,7 +196,25 @@ def _pinned_adapter_class():
     return PinnedAdapter
 
 
-def _fetch(session: Any, url: str, throttle: _HostThrottle) -> Any:
+def _read_body(response: Any) -> tuple[bytes, bool]:
+    """A response's body, up to MAX_PAGE_BYTES and READ_SECONDS. True if it was cut short."""
+    import requests
+
+    chunks, size, started = [], 0, time.monotonic()
+    try:
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            chunks.append(chunk)
+            size += len(chunk)
+            if size >= MAX_PAGE_BYTES or time.monotonic() - started > READ_SECONDS:
+                return b"".join(chunks)[:MAX_PAGE_BYTES], True
+    except requests.RequestException:
+        # The page loaded, so its verdict stands; whatever arrived before the break is kept.
+        return b"".join(chunks), True
+    return b"".join(chunks), False
+
+
+def _fetch(session: Any, url: str, throttle: _HostThrottle, keep_text: bool = False) -> Any:
+    """The status of one GET, or, with keep_text and a page that loaded, the page as Fetched."""
     import requests
 
     try:
@@ -180,8 +226,13 @@ def _fetch(session: Any, url: str, throttle: _HostThrottle) -> Any:
     try:
         response = session.get(url, timeout=TIMEOUT_SECONDS, allow_redirects=True, stream=True)
         status = response.status_code
-        response.close()
-        return status
+        try:
+            if keep_text and classify(status) == OK:
+                body, truncated = _read_body(response)
+                return Fetched(status, body, response.headers.get("Content-Type", ""), truncated)
+            return status
+        finally:
+            response.close()
     except requests.TooManyRedirects:
         return "TooManyRedirects"
     except BlockedDestination:
@@ -195,18 +246,56 @@ def _fetch(session: Any, url: str, throttle: _HostThrottle) -> Any:
         return "InvalidURL"
 
 
-def check_url(session: Any, url: str, throttle: _HostThrottle, fetch=None) -> LinkResult:
+# The real fetch can read a page as well as check it; a stand-in a test supplies may only check.
+_fetch.keeps_text = True
+
+
+def _with_text(result: LinkResult, page: Fetched | None, text_dir: Path) -> LinkResult:
+    """Keep the text of a page that loaded. Reading it never changes the verdict."""
+    if page is None:
+        result.text_note = "not read"
+        return result
+    try:
+        read = extract_text(page.body, page.content_type, result.resolved_url, page.truncated)
+        result.text_file = save_page_text(text_dir, result.url, read.text)
+        result.text_kind, result.text_chars, result.text_note = read.kind, len(read.text), read.note
+    except Exception as exc:  # noqa: BLE001 - a page that can't be kept is noted, never fatal
+        result.text_note = f"could not be kept ({type(exc).__name__})"
+    return result
+
+
+def check_url(session: Any, url: str, throttle: _HostThrottle, fetch=None, text_dir: Path | None = None) -> LinkResult:
     fetch = fetch or _fetch
-    status = fetch(session, url, throttle)
+    reads = text_dir is not None and getattr(fetch, "keeps_text", False)
+
+    def get(target: str) -> tuple[Any, Fetched | None]:
+        fetched = fetch(session, target, throttle, keep_text=True) if reads else fetch(session, target, throttle)
+        return (fetched.status, fetched) if isinstance(fetched, Fetched) else (fetched, None)
+
+    status, page = get(url)
     verdict = classify(status)
+    if verdict == OK:
+        result = LinkResult(url=url, verdict=OK, status=str(status), resolved_url=url)
+        return _with_text(result, page, text_dir) if text_dir is not None else result
     if verdict != BROKEN:
-        # OK needs no repair, and Unverified is left strictly alone.
+        # Unverified is left strictly alone.
         return LinkResult(url=url, verdict=verdict, status=str(status), resolved_url=url)
     for candidate in url_variants(url)[1:]:
-        candidate_status = fetch(session, candidate, throttle)
+        candidate_status, candidate_page = get(candidate)
         if classify(candidate_status) == OK:
-            return LinkResult(url=url, verdict=OK, status=str(candidate_status), resolved_url=candidate)
+            result = LinkResult(url=url, verdict=OK, status=str(candidate_status), resolved_url=candidate)
+            return _with_text(result, candidate_page, text_dir) if text_dir is not None else result
     return LinkResult(url=url, verdict=BROKEN, status=str(status), resolved_url=url)
+
+
+def wants_text(result: LinkResult, text_dir: Path) -> bool:
+    """A page that loaded but whose text was never kept: checked before text was kept, or its file
+    has gone since. One whose reading gave a reason for no text is not read again."""
+    if result.verdict != OK:
+        return False
+    if result.text_file:
+        return not (text_dir / result.text_file).exists()
+    return not result.text_note or result.text_note == "not read"
 
 
 def load_results(path: Path) -> dict[str, LinkResult]:
@@ -217,7 +306,8 @@ def load_results(path: Path) -> dict[str, LinkResult]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
-    return {url: LinkResult(**record) for url, record in payload.items()}
+    known = set(LinkResult.__dataclass_fields__)
+    return {url: LinkResult(**{key: value for key, value in record.items() if key in known}) for url, record in payload.items()}
 
 
 def save_results(path: Path, results: dict[str, LinkResult]) -> None:
@@ -232,14 +322,19 @@ def check_urls(
     cache_path: Path | None = None,
     max_workers: int = MAX_WORKERS,
     fetch=None,
+    text_dir: Path | None = None,
 ) -> dict[str, LinkResult]:
-    """Check each distinct URL once, reusing anything already in the sidecar.
+    """Check each distinct URL once, reusing anything already in the sidecar. With `text_dir`, a
+    page that loads also has its text kept there, and one checked before without it is read again.
 
     `fetch` defaults to the real HTTP fetch, looked up at call time so tests can replace it.
     """
     fetch = fetch or _fetch
     results = load_results(cache_path) if cache_path else {}
-    pending = [url for url in dict.fromkeys(urls) if url and url not in results]
+    pending = [
+        url for url in dict.fromkeys(urls)
+        if url and (url not in results or (text_dir is not None and wants_text(results[url], text_dir)))
+    ]
     if pending:
         import requests
 
@@ -254,7 +349,7 @@ def check_urls(
         print(f"Checking {len(pending)} source URL(s)")
         try:
             with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="link-check") as executor:
-                for result in executor.map(lambda url: check_url(session, url, throttle, fetch), pending):
+                for result in executor.map(lambda url: check_url(session, url, throttle, fetch, text_dir), pending):
                     results[result.url] = result
         finally:
             session.close()
