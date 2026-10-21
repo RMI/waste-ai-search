@@ -409,10 +409,17 @@ is still filed under the site searched, and the 5 km identity check is what flag
 about somewhere else.
 
 **The prompt gives our coordinates rounded to 2 decimals (about 1 km),** with the municipality
-and admin names: enough to search with, and nothing worth copying. With the full point in the
-prompt, the agent once credited our own OSM centroid to a registry. The reverse-geocoded
-`formatted_address` is left out for the same reason. The search cap (`--max-web-searches`) is
-unchanged.
+and admin names where the seed has them: enough to search with, and nothing worth copying. With
+the full point in the prompt, the agent once credited our own OSM centroid to a registry. The
+reverse-geocoded `formatted_address` is left out for the same reason. The search cap
+(`--max-web-searches`) is unchanged.
+
+Only Brazil's seed has place names (SINIR's municipality and state). Every other country's come
+only from a reverse-geocode cache passed with `--use-geocode-cache` (see
+[Reverse Geocoding](#reverse-geocoding)), and no such cache exists yet. So outside Brazil the
+prompt names the site, its country and the rounded point, and no town. Batch 1's prompts had the
+full point and no town either, so a comparison with batch 1's yield measures the rounding, not the
+loss of place names.
 
 **Runs cached before this still arbitrate.** One reader,
 [`payload.py`](src/waste_ai_search/payload.py), turns any cached response into this shape, and
@@ -1006,7 +1013,9 @@ Example cache row:
 ```
 
 Pass the cache to the search phase so the prompt can use municipality and admin names, which
-matters most for local-language searching:
+matters most for local-language searching. Outside Brazil this cache is the only source of them,
+and since the prompt's point is rounded to about 1 km, the town is the most precise place it can
+name:
 
 ```bash
 uv run waste-ai-search search --run-id pilot10 --use-geocode-cache \
