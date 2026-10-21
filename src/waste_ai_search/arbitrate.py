@@ -139,8 +139,9 @@ def extract_evidence(
     unless keep_broken_links is set. Unverified links are never touched.
 
     A citation of a dropped map site (DROPPED_SOURCE_SITES) is skipped before anything else, and
-    counted in the warnings, one line per map site. An attribute whose every source was one is
-    left with none, so, like a value given with no source, it is not promoted.
+    counted in the warnings, one line per map site, with any of the agent's unverified_leads that
+    point at one. An attribute whose every source was one is left with none, so, like a value
+    given with no source, it is not promoted.
     """
     link_results = link_results or {}
     site_id = normalize_scalar(site.get("site_id"))
@@ -317,6 +318,13 @@ def extract_evidence(
             )
         if sources and not kept:
             warnings.append(f"{name}: every source was a dropped map site; not promoted.")
+
+    # The agent's own leads go to the Leads sheet (payload_leads), which skips the same map sites,
+    # so they are counted with the rest.
+    for lead in payload.get("unverified_leads", []) or []:
+        mirror = dropped_source_site(lead.get("url")) if isinstance(lead, dict) else ""
+        if mirror:
+            dropped[mirror] = dropped.get(mirror, 0) + 1
 
     for mirror, count in sorted(dropped.items()):
         warnings.append(
@@ -585,7 +593,11 @@ def payload_leads(
     sites_by_id: dict[str, dict[str, Any]],
     run_id: str,
 ) -> list[dict[str, Any]]:
-    """Carry the agent's own unverified_leads through to the leads sheet."""
+    """Carry the agent's own unverified_leads through to the leads sheet.
+
+    A lead pointing at a dropped map site is skipped, like a citation of one; extract_evidence
+    counts it in the site's parse warnings.
+    """
     out: list[dict[str, Any]] = []
     for path in cached:
         site_id = site_id_from_path(path)
@@ -598,6 +610,8 @@ def payload_leads(
             if isinstance(lead, dict):
                 summary = normalize_scalar(lead.get("lead_summary") or lead.get("summary") or lead.get("note"))
                 url = normalize_scalar(lead.get("url"))
+                if dropped_source_site(url):
+                    continue
                 attribute = normalize_scalar(lead.get("attribute_name"))
                 value = normalize_scalar(lead.get("value"))
             else:

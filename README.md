@@ -574,14 +574,15 @@ Corroboration counts sources, not citations. A page cited twice for one attribut
 "N source(s) found" a weaker finding carries to Leads.
 
 **Two map sites are dropped.** Citations of `mapcarta.com` and `maptons.com`, any subdomain
-included (`ca.maptons.com`), are dropped before arbitration. Mapcarta's landfill pages copy
-OpenStreetMap, where most of our sites came from: all 319 batch-1 citations traced to the OSM way
-in the URL. Maptons is an unattributed scrape of business listings, and 27 of its 36 batch-1
-coordinate pairs were more than 2 km from the site searched. They are recognised by website, never
-by the agent's `source_type`, which it applies unreliably. Each drop is counted in
-`parse_warnings.csv`, per site and website, and the URLs are not link-checked. A value whose only
-sources were these two is not promoted, like a value given with no source. Wikimapia, an
-independent crowd-sourced map, stays as a weak source.
+included (`ca.maptons.com`), are dropped before arbitration, and so are the agent's own leads that
+point at them. Mapcarta's landfill pages copy OpenStreetMap, where most of our sites came from: all
+319 batch-1 citations traced to the OSM way in the URL. Maptons is an unattributed scrape of
+business listings, and 27 of its 36 batch-1 coordinate pairs were more than 2 km from the site
+searched. They are recognised by website, never by the agent's `source_type`, which it applies
+unreliably. Each drop is counted in `parse_warnings.csv`, per site and website, and the URLs are
+not link-checked. A value whose only sources were these two is not promoted, like a value given
+with no source, and neither appears in Leads. Wikimapia, an independent crowd-sourced map, stays as
+a weak source.
 
 The prompt tells the agent not to cite the two, and to cite the government source where a
 directory republishes one: `wastebook.co.uk` copies the Environment Agency register (its

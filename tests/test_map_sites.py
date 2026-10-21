@@ -3,8 +3,8 @@
 Mapcarta's landfill pages copy OpenStreetMap, where most of our sites came from, and Maptons is an
 unattributed scrape of business listings. A citation of either is dropped when evidence is
 extracted, whatever source_type the agent gave it, and counted in parse_warnings.csv per site and
-website. The agent is also told not to cite them, and to cite the government source where a
-directory republishes one.
+website; so is a lead of the agent's that points at one. The agent is also told not to cite them,
+and to cite the government source where a directory republishes one.
 """
 from __future__ import annotations
 
@@ -123,8 +123,22 @@ def test_a_kept_source_still_carries_the_value():
     assert not any("every source was a dropped map site" in warning for warning in warnings)
 
 
+def test_a_lead_pointing_at_a_map_site_is_counted_with_the_citations():
+    payload = {"site_id": "1", "attributes": [], "unverified_leads": [
+        {"lead_summary": "Mapcarta lists a landfill here.", "url": "https://mapcarta.com/W2"},
+        {"lead_summary": "A news story mentions it.", "url": "https://news.example.com/landfill"},
+        "A lead given as text only.",
+    ]}
+    _by, _evidence, _sources, warnings = extract_evidence(site(), payload, "r", "v", date(2026, 1, 1))
+    assert [warning.split(":")[0] for warning in warnings] == ["Dropped 1 citation(s) of mapcarta.com"]
+
+
 # --- the link check and a whole run -----------------------------------------------------------
-def build_run(tmp_path):
+NEWS_LEAD = {"lead_summary": "A news story says the landfill is closing.",
+             "url": "https://news.example.com/landfill"}
+
+
+def build_run(tmp_path, attributes=None, leads=None):
     from waste_ai_search.input_loader import write_csv_records
     from waste_ai_search.seed_source import seed_headers
 
@@ -133,12 +147,23 @@ def build_run(tmp_path):
                                                   iso3c_plus="CAN")], seed_headers())
     raw = run_dir / "raw_foundry_responses"
     raw.mkdir(parents=True)
-    response = {"site_id": "1", "attributes": [
-        attribute("facility_status", "active", cite("https://mapcarta.com/W1"), REGULATOR),
-        attribute("found_latitude", "49.85", cite("https://ca.maptons.com/p/1"), unit="decimal degrees"),
-    ], "unverified_leads": []}
+    if attributes is None:
+        attributes = [
+            attribute("facility_status", "active", cite("https://mapcarta.com/W1"), REGULATOR),
+            attribute("found_latitude", "49.85", cite("https://ca.maptons.com/p/1"), unit="decimal degrees"),
+        ]
+    if leads is None:
+        leads = [{"lead_summary": "Mapcarta lists a landfill nearby.", "url": "https://mapcarta.com/W2"},
+                 NEWS_LEAD]
+    response = {"site_id": "1", "attributes": attributes, "unverified_leads": leads}
     (raw / "site_1.json").write_text(json.dumps(response))
     return run_dir
+
+
+def arbitrate(run_dir):
+    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
+    return {name: list(csv.DictReader((run_dir / f"{name}.csv").open()))
+            for name in ("resolved", "review_queue", "parse_warnings", "supplementary_leads")}
 
 
 def test_dropped_urls_are_not_link_checked(tmp_path):
@@ -146,18 +171,19 @@ def test_dropped_urls_are_not_link_checked(tmp_path):
 
 
 def test_a_run_counts_its_drops_in_parse_warnings_and_cites_none_of_them(tmp_path):
+    """The agent's own leads included: one pointing at a map site is dropped and counted too."""
     run_dir = build_run(tmp_path)
-    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
+    out = arbitrate(run_dir)
 
-    warnings = list(csv.DictReader((run_dir / "parse_warnings.csv").open()))
-    dropped = [row for row in warnings if row["warning"].startswith("Dropped")]
+    dropped = [row for row in out["parse_warnings"] if row["warning"].startswith("Dropped")]
     assert [(row["site_id"], row["warning"].split(":")[0]) for row in dropped] == [
-        ("1", "Dropped 1 citation(s) of mapcarta.com"),
+        ("1", "Dropped 2 citation(s) of mapcarta.com"),
         ("1", "Dropped 1 citation(s) of maptons.com"),
     ]
     for name in ("evidence.csv", "sources.csv", "supplementary_leads.csv", "resolved.csv"):
         text = (run_dir / name).read_text()
         assert "mapcarta" not in text and "maptons" not in text, name
+    assert [lead["url"] for lead in out["supplementary_leads"]] == [NEWS_LEAD["url"]]
 
 
 # --- the prompt -------------------------------------------------------------------------------
