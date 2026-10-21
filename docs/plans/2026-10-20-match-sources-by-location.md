@@ -129,7 +129,8 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 | A location | Two or more within 2 km | The one whose name fits. If neither fits, the site searched, flagged, and the pair goes on `possible_duplicates.csv`. |
 | A location | None within 2 km, but its name strongly matches the site searched (see names, below) within 5 km, or 25 km where our location is flagged inexact | The site searched. Its location goes to review as a coordinate correction. |
 | A location | Nothing of ours that close | No site. Listed in `new_facility_candidates.csv`. |
-| No location | — | The site searched, flagged **no location**. The flag also says if the source's name fits the site searched, fits another of our sites in the same country within 200 km (named, ties included), or the same page was cited for other searches. |
+| No location | Its name strongly matches exactly one other site of ours within 200 km of the site searched, and does not strongly match the site searched | That other site, flagged **moved by name**. Still reviewed. |
+| No location | Anything else | The site searched, flagged **no location**. The flag also says if the source's name fits another of our sites within 200 km (named, ties included), or if the same page was cited for other searches. |
 
 - **Sources are matched one at a time, not grouped first.** Two sources about one landfill
   match the same site anyway. Sources are combined in only two places:
@@ -252,6 +253,11 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
    can be off.
 4. **Mapcarta and Maptons are dropped.** Checked against OpenStreetMap, Mapcarta added nothing in
    batch 1.
+5. **A source with no location moves by name.** It is filed under another site of ours when its
+   name strongly matches exactly one such site within 200 km and doesn't match the site
+   searched. It is still reviewed. This came from an SME's list of Canadian sites that got
+   another landfill's data: Prairie Green, Moose Jaw, Thunder Bay and Merrick. Their sources gave
+   no location, but the names scored 1.0 against the right site.
 
 ## Risks
 
@@ -270,8 +276,9 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 ## Testing
 
 1. **Hand-built fixtures** for the known cases, with per-source names and locations: Brandon and
-   Guelph Eastview, West Perth/Mitchell, Thunder Bay (the copied coordinates), and Cowpen Bewley and
-   Foxhall (UK duplicates).
+   Guelph Eastview, West Perth/Mitchell, Thunder Bay (the copied coordinates), Cowpen Bewley and
+   Foxhall (UK duplicates), and the SME's Prairie Green, Moose Jaw and Merrick examples. One
+   fixture has two namesakes within 200 km, which must stay with the site searched.
 2. **A geocoder accuracy test, offline and free of Bing costs.** Geocode the addresses of
    landfills whose true location we already hold from a register that gives both. Measure how
    often a usable point comes back, and how far it lands from the true one. This decides whether
