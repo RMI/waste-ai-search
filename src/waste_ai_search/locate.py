@@ -849,6 +849,74 @@ def address_to_send(text: str, names: list[str]) -> str:
     return address
 
 
+# Sources write an address as part of a sentence, and a geocoder finds nothing in it: "765 33rd
+# Street East in Brandon, Manitoba", "Reynolds Bach Drive, accessed from Eastern Hutt Road in
+# Silverstream". When the words as written place nothing, the address is sent again without them.
+#
+# A Canadian legal land description names a quarter section, which no geocoder reads: "on NW 1/4
+# 17-10-18 WPM", "on NW1/4 Sec. 17, Twp. 10, and Rge. 18 W.", "SW-02-17-26-W2M".
+_LEGAL_LAND_DESCRIPTION = re.compile(
+    r"(?:\b(?:on|at|in)\s+(?:the\s+)?)?"
+    r"\b(?-i:[NS][EW])\s*(?:1/4|quarter)?(?:\s+of)?\s*[-,]?\s*"
+    r"(?:sec(?:tion)?\.?\s*)?\d{1,2}\s*[-,]\s*(?:(?:twp|township)\.?\s*)?\d{1,3}\s*[-,]\s*"
+    r"(?:and\s+)?(?:(?:rge|range)\.?\s*)?\d{1,2}"
+    r"(?:\s*[-,]?\s*(?:W\.?\s*P\.?\s*M\.?|E\.?\s*P\.?\s*M\.?|W\s*\d\s*M|[WE]\.?)(?!\w))?",
+    re.IGNORECASE,
+)
+# Words joining a street to its place: "in the southeast part of Guelph", "in Brandon", "at 3000
+# Victoria Avenue East".
+_JOINING_WORDS = (
+    re.compile(
+        r"\s+in\s+(?:the\s+)?(?:[\w-]+\s+){0,3}?(?:part|area|section|corner|end|outskirts|vicinity)\s+of\s+",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\s+(?:in|at)\s+", re.IGNORECASE),
+)
+# A part that gives directions rather than an address: "approximately 21 kilometers from downtown",
+# "accessed from Eastern Hutt Road", "off Highway 11", "the end of Sand Dam Road".
+_DIRECTIONS = re.compile(
+    r"^(?:approx(?:imately|\.)?|about|around|roughly|some|accessed|access|entrance|entered|off|via|near|"
+    r"adjacent|next\s+to|behind|opposite|beside|located|situated|"
+    r"(?:the\s+)?(?:end|corner|junction|intersection|top|bottom)\s+of|"
+    r"\d+(?:\.\d+)?\s*(?:km|kilomet(?:re|er)s?|mi(?:les?)?|m|metres|meters)\b)",
+    re.IGNORECASE,
+)
+# A part naming only a lot or unit, which a geocoder takes for a street: "Lots 1 & 2".
+_LOT = re.compile(r"^(?:lots?|units?|suites?|parcels?|plots?|blocks?)\s+\S", re.IGNORECASE)
+# "City of Thunder Bay" is Thunder Bay to a geocoder.
+_LOCAL_GOVERNMENT = re.compile(r"^(?:city|town|village|township|municipality|borough)\s+of\s+", re.IGNORECASE)
+
+
+def plainer_address(text: str, names: list[str]) -> str:
+    """The address without the words around it that keep a geocoder from finding it, or "" when
+    there are none, or taking them out leaves no street with its place.
+
+    "3610 Victoria Avenue East on NW 1/4 17-10-18 WPM in Brandon, Manitoba" is sent again as
+    "3610 Victoria Avenue East, Brandon, Manitoba". A street left without its place ("3610 Victoria
+    Avenue East") is not sent: a geocoder could find a street of that name in another town.
+    `names` are the facility's, as for address_to_send.
+    """
+    original = normalize_scalar(text)
+    address = original.replace("⁄", "/").replace("¼", "1/4")
+    address = re.sub(r"\([^)]*\)", " ", address)
+    address = _LEGAL_LAND_DESCRIPTION.sub(" ", address)
+    for words in _JOINING_WORDS:
+        address = words.sub(", ", address)
+    parts: list[str] = []
+    for part in re.split(r"[,;]", address):
+        part = _LOCAL_GOVERNMENT.sub("", part.strip(" .:-–—"))
+        if not part or _DIRECTIONS.match(part) or (_LOT.match(part) and not STREET_OR_NUMBER.search(part)):
+            continue
+        if parts and part.casefold() == parts[-1].casefold():
+            continue
+        parts.append(part)
+    plainer = address_to_send(", ".join(parts), names)
+    with_place = len([part for part in plainer.split(",") if part.strip()]) >= 2
+    if plainer == original or not with_place or not STREET_OR_NUMBER.search(plainer):
+        return ""
+    return plainer
+
+
 # --- the cache ---------------------------------------------------------------------------------
 def cache_key(text: str, iso3: Any) -> str:
     """Located text is keyed by itself and its country, never by site, so one answer serves all."""
@@ -1069,6 +1137,11 @@ def locate_source(
             tried = Located(reason="the stated location is the facility's name, which is never geocoded")
         else:
             tried = geocode_address(sent, iso3, cache, geocoder, live)
+            plainer = plainer_address(sent, names) if tried.basis not in MATCHING_BASES else ""
+            if plainer:
+                retried = geocode_address(plainer, iso3, cache, geocoder, live)
+                if retried.basis in MATCHING_BASES:
+                    tried = retried
         # A later address takes over from one that placed nothing, such as a mailing address.
         if address is None or (address.point is None and tried.point is not None):
             address = tried

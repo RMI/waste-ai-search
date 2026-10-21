@@ -114,6 +114,25 @@ def test_every_source_filed_under_a_site_is_decided_together(tmp_path):
     }
 
 
+def test_source_coordinates_is_where_the_winning_source_places_the_facility(tmp_path):
+    """Beside stated_location, the point read from it, to paste into Google Maps next to
+    baseline_coordinates. Blank where the source states no location that could be placed."""
+    permit = source("https://manitoba.example/permit/brady", "Brady Road Landfill", "49.7590, -97.2010",
+                    values=[value("operator", "City of Winnipeg")])
+    # Its address was never geocoded, so it places nothing.
+    news = source("https://news.example/brady", "Brady Road", "1777 Brady Road, Winnipeg",
+                  values=[value("opening_year", "1973")])
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [permit, news]})
+
+    by_attribute = {row["attribute_name"]: row for row in rows(run_dir, "review_queue.csv")}
+    assert by_attribute["operator"]["source_coordinates"] == "49.759, -97.201"
+    assert by_attribute[LOCATION_ATTRIBUTE]["source_coordinates"] == "49.759, -97.201"
+    opening = by_attribute["opening_year"]
+    assert (opening["stated_location"], opening["source_coordinates"]) == ("1777 Brady Road, Winnipeg", "")
+    assert opening["match"].startswith("No location: the source's location can't be used")
+    header = [cell.value for cell in load_workbook(run_dir / "run_review.xlsx")["Review_Queue"][1]]
+    assert header.index("source_coordinates") == header.index("stated_location") + 1
+
 def test_a_yearly_attribute_has_a_row_for_each_year_a_source_reports(tmp_path):
     sources = [
         source("https://a.example", values=[value("facility_status", "Active", "2024-05"), value("operator", "Ops Ltd")]),

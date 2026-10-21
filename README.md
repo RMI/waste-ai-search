@@ -309,6 +309,20 @@ sent only if it still has a civic number or names a road: "29786 Rte. 2 PO Box 2
 is sent as "29786 Rte. 2, Wellington PE", while "PO Box 1234, Thunder Bay, ON" is not sent. Where a
 source gives two addresses, the second is tried when the first placed nothing.
 
+**An address written as a sentence is sent again, plainly.** Sources write "765 33rd Street East in
+Brandon, Manitoba" or "Reynolds Bach Drive, accessed from Eastern Hutt Road in Silverstream", and a
+geocoder finds nothing. Where the words as written place nothing at street level, the address is
+sent again without the words around it: "in" and "at" become commas, and directions ("accessed
+from", "off Highway 11", "approximately 21 kilometers from"), a lot or unit on its own ("Lots 1 &
+2"), "City of" and a Canadian legal land description ("on NW 1/4 17-10-18 WPM") are taken out. So
+"3610 Victoria Avenue East on NW 1/4 17-10-18 WPM in Brandon, Manitoba" is sent again as "3610
+Victoria Avenue East, Brandon, Manitoba". What is left is sent only if it is still a street with its
+place: "3610 Victoria Avenue East" alone is not, since another town may have one. In the 10-site
+test runs, it gave a point to 5 more of gpt-5.4's 42 sources stating a location (11 to 16), and 12
+more of mini's 39 (6 to 18). Both answers are kept, so a re-run asks neither again. Most of these
+points are on the street, not the building: where a geocoder has no house numbers for a road, it
+returns a point somewhere along it, which can be a kilometre or more from the address.
+
 ### Geocoder
 
 No geocoder is configured by default: addresses stay unlocated, with the reason "no geocoder
@@ -1128,18 +1142,20 @@ The five columns that decide your judgement:
 | `winning_source_url` | The actual source. **Open it.** |
 | `evidence_summary` | The pipeline's one-line explanation of the decision. A shaded **CHECK** note says the winning source's quote, or the location it states, isn't on its page, as the link check read it: open the page and look |
 | `match` | Why the value is filed under this site: where its source places the facility, and how far from the site searched |
+| `source_coordinates` | Where the source places the facility, as `lat, lon`, read from `stated_location`. Paste it into Google Maps beside `baseline_coordinates`. Where `match` says "placed on its street", it is a point on that street, not the building. Blank where the source's location couldn't be placed; `match` says why |
 
 Every site column (`site_id`, the names, `country_iso3`, `baseline_coordinates` and the `baseline_`
 columns) describes the site the value is filed under. `searched_site_id` is the one column about the
 search that found it. `facility_name_in_source` and `stated_location` are the facility as the
-winning source writes it, and `location_basis`, on a `found_location` row, how its point was read.
+winning source writes it, `source_coordinates` the point read from that location, and
+`location_basis`, on a `found_location` row, how its point was read.
 
 Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab. The `match`
 cell has a colour of its own where the value needs a second look at its site: orange where it is
 filed under a site other than the one searched, blue where its source gives no location, and
 yellow where several of our sites tied.
 
-**Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and compare it with what the source describes. A `found_location` row is where its source says the site is — coordinates, a grid reference, or an address placed on its building — in the same form: accept or reject it as one point. `evidence.csv` shows what the source wrote, in `stated_location`.
+**Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and `source_coordinates`, where the source places the facility it describes, beside it. A `found_location` row is where its source says the site is — coordinates, a grid reference, or an address placed on its building — in the same form: accept or reject it as one point. `evidence.csv` shows what the source wrote, in `stated_location`.
 
 **Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `evidence.csv`; they are blank where the source was never translated.
 

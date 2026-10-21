@@ -583,9 +583,11 @@ REVIEW_QUEUE_HEADERS = [
     "attribute_name", "resolution",
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
     "winning_source_tier", "winning_source_url", "winning_link_status",
-    # The facility the winning source describes, as it writes it. location_basis says how a
+    # The facility the winning source describes, as it writes it. source_coordinates is where that
+    # places it, "lat, lon" like baseline_coordinates, so an SME can paste both into Google Maps;
+    # blank where its location placed nothing match could use. location_basis says how a
     # found_location was read: coordinates, a grid reference or a rooftop address.
-    "facility_name_in_source", "stated_location", "location_basis",
+    "facility_name_in_source", "stated_location", "source_coordinates", "location_basis",
     "value_date", "agreeing_source_count",
     # corrected_value is the right value when the found one is wrong. resolved_value is never
     # edited, so the AI's own answer survives for measuring its error rate. corrected_value_date

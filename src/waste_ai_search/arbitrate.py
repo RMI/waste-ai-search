@@ -810,6 +810,12 @@ def describe_winner(row: dict[str, Any], evidence_by_id: dict[str, dict[str, Any
     row["match"] = winner["match"]
     row["facility_name_in_source"] = winner.get("facility_name_in_source", "")
     row["stated_location"] = winner.get("stated_location", "")
+    # Only a point matching could use: never a town's, nor one the guards set aside.
+    placed = winner.get("location_basis", "") in MATCHING_BASES
+    row["source_coordinates"] = (
+        f"{winner['located_latitude']}, {winner['located_longitude']}"
+        if placed and winner.get("located_latitude") and winner.get("located_longitude") else ""
+    )
     row["location_basis"] = winner.get("location_basis", "") if row["attribute_name"] == LOCATION_ATTRIBUTE else ""
     # Whether its quote, and the location it states, are on its page, for the queue's CHECK notes.
     row["_quote_on_page"] = winner.get("quote_on_page", "")
