@@ -200,6 +200,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Let a source with a dead link stay promotable instead of routing it to leads.",
     )
 
+    collect = subparsers.add_parser(
+        "collect-new-facilities",
+        help="Add the values SMEs rejected as 'New facility - not in our database' to the run's "
+        "new_facility_candidates.csv (no agent calls).",
+    )
+    add_common(collect)
+    collect.add_argument(
+        "--workbook",
+        default="",
+        help="The reviewed workbook. Default: <run_id>/<run_id>_review.xlsx in WASTE_AI_SEARCH_REVIEW_DIR, "
+        "else the run folder's copy.",
+    )
+
     refresh = subparsers.add_parser(
         "refresh-seed",
         help="Merge a run's promoted values into the seed so a second pass sees them.",
@@ -511,6 +524,21 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
         finally:
             sync.up()
         return code
+
+    if args.command == "collect-new-facilities":
+        from .new_facilities import collect_new_facilities, reviewed_workbook
+        from .publish import review_dir
+
+        sync = RunSync(config, local=args.local)
+        sync.down()  # the run's list as arbitration last left it
+        workbook = (
+            Path(args.workbook).expanduser()
+            if args.workbook
+            else reviewed_workbook(config.run_dir, config.run_id, review_dir())
+        )
+        collect_new_facilities(config.run_dir, workbook)
+        sync.up()
+        return 0
 
     if args.command == "refresh-seed":
         output = (

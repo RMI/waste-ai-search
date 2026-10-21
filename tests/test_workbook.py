@@ -70,7 +70,11 @@ def test_readme_tab_documents_every_tab_and_the_csv_sidecars(tmp_path):
 
 
 def test_a_rejection_reason_is_picked_from_a_fixed_list(tmp_path):
-    """Rejections are counted by cause to find where the AI errs, so the reason is a dropdown."""
+    """Rejections are counted by cause to find where the AI errs, so the reason is a dropdown.
+
+    Changed on purpose for build step 5: a wrong facility is either another site of ours or one we
+    don't hold, with plain hyphens, since ingestion matches the text as typed. Plain "Wrong
+    facility" stays for batch 1's workbook."""
     wb = build(tmp_path)
     ws = wb["Review_Queue"]
     defs = wb["Definitions"]
@@ -79,9 +83,13 @@ def test_a_rejection_reason_is_picked_from_a_fixed_list(tmp_path):
 
     dv = next(d for d in ws.data_validations.dataValidation if str(d.sqref).startswith(queue["rejection_reason"]))
     letter = get_column_letter(columns["rejection_reason"])
-    assert f"${letter}$2:${letter}$6" in dv.formula1
-    offered = [defs.cell(r, columns["rejection_reason"]).value for r in range(2, 7)]
-    assert offered == ["Wrong facility", "Not in source", "Wrong value", "Outdated", "Other"]
+    assert f"${letter}$2:${letter}$8" in dv.formula1
+    offered = [defs.cell(r, columns["rejection_reason"]).value for r in range(2, 9)]
+    assert offered == [
+        "Wrong facility - another site in our database", "New facility - not in our database", "Wrong facility",
+        "Not in source", "Wrong value", "Outdated", "Other",
+    ]
+    assert all(value.isascii() for value in offered)
     assert REVIEW_QUEUE_HEADERS.index("rejection_reason") == REVIEW_QUEUE_HEADERS.index("validation_status") + 1
 
 

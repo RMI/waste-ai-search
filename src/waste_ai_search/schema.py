@@ -645,6 +645,9 @@ RESOLUTION_VALUES = [
 # Resolutions whose rows belong in the leads sheet and must NOT appear in the review queue.
 LEAD_ROUTED_RESOLUTIONS = {"Conflict - lower credibility"}
 
+WRONG_FACILITY_OURS = "Wrong facility - another site in our database"
+NEW_FACILITY_REASON = "New facility - not in our database"
+
 DEFINITION_VALUES = {
     "attribute_name": REQUESTABLE_ATTRIBUTES,
     "facility_status": FACILITY_STATUS_VALUES,
@@ -663,8 +666,14 @@ DEFINITION_VALUES = {
     # What a reviewer may choose. The other statuses are set by the pipeline, not by hand.
     "review_decision": ["Validated", "Rejected"],
     # Why a reviewer rejected a value. A fixed list, so rejections can be counted by cause to find
-    # where the AI goes wrong; detail goes in researcher_notes.
-    "rejection_reason": ["Wrong facility", "Not in source", "Wrong value", "Outdated", "Other"],
+    # where the AI goes wrong; detail goes in researcher_notes. The two kinds of wrong facility
+    # say whether the site is one of ours (re-file it with corrected_site_id) or new to us
+    # (collect-new-facilities lists it). Plain "Wrong facility" stays for batch 1's workbook, and
+    # the hyphens are plain ones, since ingestion matches the text as typed.
+    "rejection_reason": [
+        WRONG_FACILITY_OURS, NEW_FACILITY_REASON, "Wrong facility", "Not in source", "Wrong value",
+        "Outdated", "Other",
+    ],
     # Booleans as resolved_value shows them, so a correction reads like the value it replaces.
     "true_false": ["TRUE", "FALSE"],
 }
