@@ -29,6 +29,7 @@ from .run_context import (
     raw_response_path,
     save_json,
     search_tool_failed,
+    site_id_from_path,
     agent_identity,
 )
 from .schema import (
@@ -41,8 +42,8 @@ from .schema import (
 )
 from .searchable_names import (
     SKIPPED_SITES_FILE,
-    SKIPPED_SITES_HEADERS,
     class_breakdown,
+    record_skips,
     skip_unsearchable_names,
 )
 
@@ -103,9 +104,11 @@ def choose_sites(
     nothing_to_ask = before - len(selected)
     if nothing_to_ask:
         print(f"Skipped {nothing_to_ask:,} site(s) with no attributes left to search.")
-    # Names that give a search nothing to look for. After the check above, so the count is of
-    # sites that would otherwise have been searched. Listing site ids names each site, so it wins;
-    # naming a country with --iso3 does not name its unnamed sites, so it doesn't.
+    # Names that give a search nothing to look for. After the check above, so it counts only sites
+    # with something to ask, and before --limit and --pilot-size, so those take searchable sites.
+    # The count is therefore of the whole selection, including sites a limit or sample would not
+    # have searched. Listing site ids names each site, so it wins; naming a country with --iso3
+    # does not name its unnamed sites, so it doesn't.
     skipped: list[dict[str, Any]] = []
     if not config.site_ids and not config.include_unsearchable_names:
         selected, skipped = skip_unsearchable_names(selected)
@@ -176,12 +179,15 @@ def run_search(
             else ""
         )
         raise ValueError(f"No sites matched the selection filters.{hint}")
-    # The run's list of sites skipped by name, for review and for Run_Config. A search of listed
-    # ids (a retry, or the gas follow-up) leaves the run's list as it is. With
-    # --include-unsearchable-names the list is empty, so an earlier list doesn't outlive the run
-    # that searched those sites after all.
-    if not config.site_ids:
-        write_csv_records(config.run_dir / SKIPPED_SITES_FILE, skipped, SKIPPED_SITES_HEADERS)
+    # The run's list of sites skipped by name, for review and for Run_Config. Each search adds its
+    # skips to the list and takes off the sites it selects or the run has already searched, so a
+    # narrower search under the same run id doesn't shrink it and a site searched after all isn't
+    # also counted as skipped. A search of listed ids (a retry, or the gas follow-up) only takes
+    # its sites off a list that exists.
+    if not config.site_ids or (config.run_dir / SKIPPED_SITES_FILE).exists():
+        searched = {site_id_from_path(path) for path in raw_dir(config.run_dir).glob("site_*.json")}
+        searched |= {normalize_scalar(site.get("site_id")) for site in selected}
+        record_skips(config.run_dir, skipped, searched)
 
     # The prompt asks the agent to search using municipality and admin names, so those fields
     # have to be populated or that instruction is asking for context we never supplied.

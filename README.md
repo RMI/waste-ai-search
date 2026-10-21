@@ -381,13 +381,18 @@ uv run waste-ai-search search --run-id r --site-ids 499                         
 
 Naming a country with `--iso3` does not lift it, and `--pilot-size` draws its generic-named hard
 cases only with `--include-unsearchable-names`. The rule runs after the country rules and the
-nothing-to-ask check, so it counts only sites that would otherwise have been searched. It only
+nothing-to-ask check, and before `--limit` and `--pilot-size`, so a limit or a sample takes sites
+worth searching. Its count is therefore of the whole selection: a 10-site pilot of a batch lists
+every site in the batch the rule skips, not only those the pilot would have reached. It only
 removes sites from a batch and never moves one to another.
 
 Every skipped site is listed in `skipped_sites.csv` in the run folder, with its class and the
-rule it tripped. Run_Config records `unsearchable_names_skipped`, the count by class, and
-`unsearchable_names_searched`, the sites in those classes that were searched anyway (listed by id
-or with the flag). Runs from before the rule say "not recorded".
+rule it tripped. The list is the run's, not the last search's: each search under the run id adds
+its skips, so resuming one country keeps the others on record, and a site the run searches later
+(by id, or with the flag) comes off it. Run_Config records `unsearchable_names_skipped`, the
+sites skipped and never searched, by class, and `unsearchable_names_searched`, the sites in those
+classes that were searched anyway (listed by id or with the flag). A site is counted in one or the
+other, never both. Runs from before the rule say "not recorded".
 
 This read-only script measures what searching each class found in finished runs, against named
 sites from the same kind of source, and forecasts what each batch would spend on each class
@@ -580,7 +585,7 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 | `std_facility_tbl_ai_search_<run_id>.load.sql` | Load statement naming every column, so table column order is irrelevant. |
 | `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
-| `skipped_sites.csv` | Sites the search skipped because their name gives it nothing to look for, with the class and rule. Written by the search. |
+| `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
 
 **One source per exact URL.** The query string is part of the URL, so documents that one script
 serves by id stay separate sources: dropping it once merged 103 different Natural Resources Wales

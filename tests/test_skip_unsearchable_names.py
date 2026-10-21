@@ -217,16 +217,24 @@ def test_run_config_records_what_was_skipped(tmp_path, monkeypatch):
     assert settings["unsearchable_names_searched"] == "0"
 
 
-def test_a_search_of_listed_ids_keeps_the_runs_list(tmp_path, monkeypatch):
-    """A retry or the gas follow-up names its sites; it must not wipe the run's own list."""
+def test_a_search_of_listed_ids_keeps_the_runs_list_but_takes_its_sites_off(tmp_path, monkeypatch):
+    """A retry or the gas follow-up names its sites; it must not wipe the run's own list. A site it
+    searches is no longer skipped, so it is counted once, as searched."""
     config = base_config(tmp_path)
     search(config, monkeypatch)
     assert search(replace(config, site_ids=["2"]), monkeypatch) == ["2"]
 
-    assert len(skipped_rows(config.run_dir)) == 6
+    assert [row["site_id"] for row in skipped_rows(config.run_dir)] == ["3", "4", "5", "6", "7"]
     settings = run_config(config)
-    assert settings["unsearchable_names_skipped"].startswith("6 ")
+    assert settings["unsearchable_names_skipped"] == "5 (no name 1, not a name 1, generic label 1, mining feature 2)"
     assert settings["unsearchable_names_searched"] == "1 (no name 1)"
+
+
+def test_a_listed_search_with_no_list_yet_starts_none(tmp_path, monkeypatch):
+    config = base_config(tmp_path)
+    search(replace(config, site_ids=["1"]), monkeypatch)
+
+    assert not (config.run_dir / SKIPPED_SITES_FILE).exists()
 
 
 def test_with_the_flag_nothing_is_skipped_and_run_config_says_what_was_searched(tmp_path, monkeypatch):
@@ -238,6 +246,71 @@ def test_with_the_flag_nothing_is_skipped_and_run_config_says_what_was_searched(
     settings = run_config(config)
     assert settings["unsearchable_names_skipped"] == "0"
     assert settings["unsearchable_names_searched"] == "6 (no name 2, not a name 1, generic label 1, mining feature 2)"
+
+
+# Two countries, each with one named site and two the rule skips.
+TWO_COUNTRIES = [
+    ("1", "Hartland Landfill", "CAN"),
+    ("2", "OpenStreetMap Landfill", "CAN"),
+    ("3", "domestic landfill", "CAN"),
+    ("4", "Olusosun Dumpsite", "NGA"),
+    ("5", "Dump", "NGA"),
+    ("6", "OpenStreetMap Landfill", "NGA"),
+]
+
+
+def two_country_config(tmp_path):
+    path = tmp_path / "seed.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["site_id", "site_name", "country_iso3", "latitude", "longitude"])
+        for site_id, name, country in TWO_COUNTRIES:
+            writer.writerow([site_id, name, country, "1.0", "2.0"])
+    return PipelineConfig(
+        input_csv=path, run_dir=tmp_path / "run", run_id="run", site_delay_seconds=0, check_links=False
+    )
+
+
+def test_a_narrower_search_under_the_same_run_id_adds_to_the_list(tmp_path, monkeypatch):
+    """Resuming one country must not drop the other country's skipped sites from the record."""
+    config = two_country_config(tmp_path)
+    search(config, monkeypatch)
+    search(replace(config, iso3=["CAN"]), monkeypatch)
+
+    assert [row["site_id"] for row in skipped_rows(config.run_dir)] == ["2", "3", "5", "6"]
+    assert run_config(config)["unsearchable_names_skipped"] == "4 (no name 2, generic label 2)"
+
+
+def test_the_flag_on_one_country_leaves_the_others_skips_on_record(tmp_path, monkeypatch):
+    config = two_country_config(tmp_path)
+    search(config, monkeypatch)
+    assert sorted(search(replace(config, iso3=["NGA"], include_unsearchable_names=True), monkeypatch)) == ["5", "6"]
+
+    assert [row["site_id"] for row in skipped_rows(config.run_dir)] == ["2", "3"]
+    settings = run_config(config)
+    assert settings["unsearchable_names_skipped"] == "2 (no name 1, generic label 1)"
+    assert settings["unsearchable_names_searched"] == "2 (no name 1, generic label 1)"
+
+
+def test_a_resume_after_the_flag_does_not_list_sites_already_searched(tmp_path, monkeypatch):
+    """The resume would skip them by name, but the run has already searched them."""
+    config = two_country_config(tmp_path)
+    search(replace(config, include_unsearchable_names=True), monkeypatch)
+    assert search(config, monkeypatch) == []  # everything is cached
+
+    assert skipped_rows(config.run_dir) == []
+    settings = run_config(config)
+    assert settings["unsearchable_names_skipped"] == "0"
+    assert settings["unsearchable_names_searched"] == "4 (no name 2, generic label 2)"
+
+
+def test_a_limit_counts_every_site_the_rule_dropped_from_the_selection(tmp_path, monkeypatch):
+    """The rule runs before --limit, so the limit takes searchable sites; the list covers the
+    whole selection, not only the sites the limit would have reached."""
+    config = two_country_config(tmp_path)
+    assert search(replace(config, limit=1), monkeypatch) == ["1"]
+
+    assert len(skipped_rows(config.run_dir)) == 4
 
 
 def test_a_run_from_before_the_rule_says_it_was_not_recorded(tmp_path, monkeypatch):
