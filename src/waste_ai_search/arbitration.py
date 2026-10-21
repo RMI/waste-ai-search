@@ -83,6 +83,20 @@ def date_key(value: Any) -> tuple[int, int, int]:
     return tuple(int(part) if part else 0 for part in match.groups())
 
 
+def source_counts(evidence: list[dict[str, Any]], attribute_name: str) -> Counter:
+    """How many distinct sources give each value.
+
+    A source is its exact URL (`source_id`), so one page cited twice for the same value - listed
+    twice, or under two entries for the attribute - counts once. Evidence without a source_id
+    counts once per item.
+    """
+    cited = {
+        (comparable(item.get("value"), attribute_name), normalize_scalar(item.get("source_id")) or f"#{index}")
+        for index, item in enumerate(evidence)
+    }
+    return Counter(value for value, _source in cited)
+
+
 def resolve(
     site: dict[str, Any],
     attribute_name: str,
@@ -198,7 +212,7 @@ def resolve(
 
     # Winner: best tier, then newest (undated counts as oldest), then most corroborated, then
     # first seen (WP-558: within a tier, a newer source beats an older one).
-    counts = Counter(comparable(item.get("value"), attribute_name) for item in candidates)
+    counts = source_counts(candidates, attribute_name)
     candidates.sort(
         key=lambda item: (
             int(item.get("tier", TIER_5)),

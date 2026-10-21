@@ -191,7 +191,10 @@ REVIEW_INSTRUCTIONS = [
     },
     {
         "tab_name": "Parse_Warnings",
-        "purpose": "Values the pipeline dropped or could not map, including unit and enum problems.",
+        "purpose": (
+            "Values the pipeline dropped or could not map, including unit and enum problems, and "
+            "citations of the two map sites that are never used as sources."
+        ),
         "sme_action": "Scan for systematic problems worth fixing upstream.",
         "editable": "nothing",
     },

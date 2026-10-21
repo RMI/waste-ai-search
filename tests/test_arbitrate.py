@@ -24,12 +24,14 @@ NEWS = {
 }
 
 
+# A map site that is kept (Wikimapia). Mapcarta and Maptons are dropped by website before
+# arbitration sees them; see test_map_sites.py.
 GAZETTEER = {
     "source_title": "Site listing",
-    "publisher": "Mapcarta",
+    "publisher": "Wikimapia",
     "source_type": "Map or coordinate directory",
     "publication_date": "",
-    "url": "https://mapcarta.example/x",
+    "url": "https://wikimapia.example/x",
 }
 
 
@@ -230,8 +232,13 @@ def test_sources_dedupe_by_normalized_url():
     assert deduped[0]["times_cited"] == 2
 
 
-def test_normalize_url_strips_www_scheme_case_and_trailing_slash():
-    assert normalize_url("HTTPS://WWW.Example.com/Path/") == normalize_url("https://example.com/path")
+def test_normalize_url_strips_www_scheme_and_host_case_and_trailing_slash():
+    assert normalize_url("HTTPS://WWW.Example.com/Path/") == normalize_url("https://example.com/Path")
+
+
+def test_normalize_url_keeps_the_path_case():
+    """Reversed on purpose: the path was once lower-cased, but servers may treat case as meaning."""
+    assert normalize_url("https://example.com/Path") != normalize_url("https://example.com/path")
 
 
 def test_unsupported_attribute_is_dropped_with_a_warning():

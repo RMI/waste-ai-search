@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from .schema import canonical_attribute, normalize_scalar
 
@@ -129,6 +130,32 @@ ATTRIBUTE_SOURCE_TYPE_TIERS = {
     ("found_latitude", "map or coordinate directory"): TIER_3,
     ("found_longitude", "map or coordinate directory"): TIER_3,
 }
+
+# Two map sites are dropped outright, so their citations never become evidence. Mapcarta's
+# landfill pages copy OpenStreetMap, where most of our sites came from: all 319 batch-1 citations
+# traced to the OSM way in the URL, and 30 pointed at a different landfill. Maptons is an
+# unattributed scrape of business listings, and 27 of its 36 batch-1 coordinate pairs were more
+# than 2 km from the site searched. Wikimapia is an independent crowd-sourced map and stays.
+# They are known by website, any subdomain included (ca.maptons.com), never by source_type: the
+# agent labels sources unreliably, and called asbestossafety.gov.au a map directory 38 times.
+DROPPED_SOURCE_SITES = ("mapcarta.com", "maptons.com")
+
+
+def dropped_source_site(url: Any) -> str:
+    """The dropped map site a cited URL belongs to, or "" for a URL that is kept."""
+    text = normalize_scalar(url)
+    try:
+        parts = urlsplit(text)
+        if not parts.netloc:
+            # Written without a scheme ("mapcarta.com/w123"), the host still counts.
+            parts = urlsplit("//" + text)
+        host = (parts.hostname or "").rstrip(".")
+    except ValueError:
+        return ""
+    for site in DROPPED_SOURCE_SITES:
+        if host == site or host.endswith("." + site):
+            return site
+    return ""
 
 
 # A source with no publication date cannot exceed Tier 3 whatever its publisher (Q2).

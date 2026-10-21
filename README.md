@@ -144,7 +144,9 @@ A run therefore needs database access. Without the VPN, seed a file first with
 ## Link checking
 
 At the end of the search phase, every cited URL is fetched once and given a verdict, saved to
-`link_check.json` in the run folder. Ported from refining-ai-search (RDP-63):
+`link_check.json` in the run folder. Citations of the two dropped map sites (see
+[Source credibility](#source-credibility)) are never used, so they are not fetched. Ported from
+refining-ai-search (RDP-63):
 
 | Verdict | Meaning | Effect |
 |---|---|---|
@@ -529,12 +531,20 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 |---|---|
 | `<run_id>_review.xlsx` | **The SME artifact.** Only rows needing a human decision, with dropdowns. |
 | `resolved.csv` | One row per value the agent found and the rules auto-validated: what we now believe and why. `Not found` and needs-review rows are not written. |
-| `evidence.csv` | One row per source-backed claim. The audit trail. |
-| `sources.csv` | Deduped source registry keyed by normalized URL. |
+| `evidence.csv` | One row per source-backed claim. The audit trail. Its `source_id` finds the source in `sources.csv`. |
+| `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below). |
 | `std_facility_tbl_ai_search_<run_id>.csv` | 44-column spec-conformant standardized table. |
 | `std_facility_tbl_ai_search_<run_id>.load.sql` | Load statement naming every column, so table column order is irrelevant. |
 | `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. |
-| `parse_warnings.csv` | Dropped values, unit failures, unmappable enums. |
+| `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
+
+**One source per exact URL.** The query string is part of the URL, so documents that one script
+serves by id stay separate sources: dropping it once merged 103 different Natural Resources Wales
+documents into one. Only spellings that never change the page are cleaned: the scheme and host's case,
+a leading `www.`, a trailing slash and the `#fragment`. The path and query keep their case. The
+`source_id` is derived from that URL, so it is the same in every run and for every site citing
+it, and every `evidence.csv` row's `source_id` is in `sources.csv`. `evidence_id` stays one per
+citation.
 
 ### Source credibility
 
@@ -558,6 +568,24 @@ facility also has a GHGRP filing. The dataset is shown as `baseline_source`.
 A source with no publication date is capped at Tier 3 whatever its publisher. An **empty**
 baseline is filled at any tier — a sourced value beats no value — but only Tier 1-2 fills
 auto-validate. Once a baseline value exists, only Tier 1-2 may override it.
+
+Corroboration counts sources, not citations. A page cited twice for one attribute counts once in
+`agreeing_source_count`, and once when the most-corroborated value breaks a tie.
+
+**Two map sites are dropped.** Citations of `mapcarta.com` and `maptons.com`, any subdomain
+included (`ca.maptons.com`), are dropped before arbitration. Mapcarta's landfill pages copy
+OpenStreetMap, where most of our sites came from: all 319 batch-1 citations traced to the OSM way
+in the URL. Maptons is an unattributed scrape of business listings, and 27 of its 36 batch-1
+coordinate pairs were more than 2 km from the site searched. They are recognised by website, never
+by the agent's `source_type`, which it applies unreliably. Each drop is counted in
+`parse_warnings.csv`, per site and website, and the URLs are not link-checked. A value whose only
+sources were these two is not promoted, like a value given with no source. Wikimapia, an
+independent crowd-sourced map, stays as a weak source.
+
+The prompt tells the agent not to cite the two, and to cite the government source where a
+directory republishes one: `wastebook.co.uk` copies the Environment Agency register (its
+coordinates are postcode centroids, and its "issued" date is a permit date, not a closure date),
+and `landfills.ca` copies Statistics Canada's infrastructure database.
 
 ### Regenerating the categorical enums
 
@@ -650,9 +678,10 @@ Edit only these columns; everything else is read-only:
 
 - **Leads** — findings that lost: below the credibility floor, weaker than the baseline, or
   unconvertible units. Read-only. If you judge one good enough, promote it by hand.
-- **Parse_Warnings** — values the pipeline dropped or could not map, each attributed to its
-  `site_id` and `site_name`. Worth scanning for systematic problems (a recurring unit or enum
-  failure usually means an upstream fix, not 50 individual reviews).
+- **Parse_Warnings** — values the pipeline dropped or could not map, and citations of the two
+  dropped map sites, each attributed to its `site_id` and `site_name`. Worth scanning for
+  systematic problems (a recurring unit or enum failure usually means an upstream fix, not 50
+  individual reviews).
 - **Definitions** — the allowed values, mirrored from the live database enums.
 
 ### Bing cost
@@ -697,7 +726,8 @@ uv run waste-ai-search arbitrate --run-id <run_id>
 decision are in the review queue instead, until an SME promotes them; attributes not found are not
 written anywhere. `evidence.csv` holds one row per source-backed
 claim with the tier rule applied to each source, so you can see exactly why a value won or lost.
-`sources.csv` is the deduped source registry.
+`sources.csv` holds one row per exact URL; a row's `source_id` in `evidence.csv` finds its URL,
+title and publisher there.
 
 ## Reverse Geocoding
 
