@@ -128,3 +128,54 @@ def test_corrected_value_offers_the_values_of_the_attribute_on_its_row(tmp_path)
     assert not any(f"{target}3" in str(d.sqref).split() for d in by_list.values())  # opening_year: free text
     assert "Transfer Station" in DEFINITION_VALUES["facility_type"]
     assert REVIEW_QUEUE_HEADERS.index("corrected_value") == REVIEW_QUEUE_HEADERS.index("rejection_reason") + 1
+
+
+# --- where each value is filed (build step 5 of the source-matching plan) -------------------------
+def test_the_queue_says_which_search_found_a_value_and_why_it_is_filed_here():
+    for column in ("searched_site_id", "match", "facility_name_in_source", "stated_location", "location_basis"):
+        assert column in REVIEW_QUEUE_HEADERS
+    assert REVIEW_QUEUE_HEADERS.index("match") == REVIEW_QUEUE_HEADERS.index("searched_site_id") + 1
+    assert REVIEW_QUEUE_HEADERS.index("corrected_site_id") == REVIEW_QUEUE_HEADERS.index("corrected_value_date") + 1
+
+
+def test_corrected_site_id_offers_each_rows_candidate_sites(tmp_path):
+    """Where a source fitted several of our sites, the SME picks the one it is about. A typed site
+    id is still accepted, so the list suggests rather than restricts."""
+    blank = {h: "" for h in REVIEW_QUEUE_HEADERS}
+    wb = build(tmp_path, [
+        blank | {"site_id": "2", "attribute_name": "operator", "_site_choices": ["2", "1", "3"]},  # row 2
+        blank | {"site_id": "1", "attribute_name": "operator", "_site_choices": []},                # row 3
+        blank | {"site_id": "2", "attribute_name": "opening_year", "_site_choices": ["2", "1", "3"]},  # row 4
+    ])
+    ws = wb["Review_Queue"]
+    target = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}["corrected_site_id"]
+    [dv] = [d for d in ws.data_validations.dataValidation if target in str(d.sqref)]
+    assert (dv.formula1, str(dv.sqref), dv.showErrorMessage) == ('"2,1,3"', f"{target}2 {target}4", False)
+    # The ReadMe lists the column among the few an SME edits.
+    readme = {row[0]: row for row in list(wb["ReadMe"].values)[1:]}
+    assert "corrected_site_id" in readme["Review_Queue"][3]
+
+
+def test_the_match_column_is_coloured_where_a_value_needs_a_second_look_at_its_site(tmp_path):
+    ws = build(tmp_path)["Review_Queue"]
+    letters = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
+    match = letters["match"]
+    formulas = [
+        rule.formula[0]
+        for rules in ws.conditional_formatting
+        if str(rules.sqref) == f"{match}2"
+        for rule in rules.rules
+    ]
+    assert formulas == [
+        f'AND(${letters["searched_site_id"]}2<>"",${letters["site_id"]}2<>${letters["searched_site_id"]}2)',
+        f'LEFT(${match}2,11)="No location"',
+        f'LEFT(${match}2,3)="Tie"',
+    ]
+
+
+def test_the_readme_describes_the_lists_for_ingestion(tmp_path):
+    described = {row[0]: row[1] for row in list(build(tmp_path)["ReadMe"].values)[1:]}
+    for name in ("new_facility_candidates.csv", "possible_duplicates.csv", "outside_run_matches.csv"):
+        assert f"(file) {name}" in described
+    assert "New facility - not in our database" in described["(file) new_facility_candidates.csv"]
+    assert "searched_site_id" in described["Review_Queue"]
