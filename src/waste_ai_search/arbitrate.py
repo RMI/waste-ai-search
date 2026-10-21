@@ -545,6 +545,50 @@ def single_axis_offset_km(site: dict[str, Any], resolved: list[dict[str, Any]]) 
     return max(offsets) if offsets else None
 
 
+def dropped_map_site_offset_km(site: dict[str, Any], payload: dict[str, Any]) -> tuple[float | None, str]:
+    """How far a dropped map site's own coordinates put the facility from the seed, and which site.
+
+    Dropping Mapcarta and Maptons as sources also took most of what the identity gate measures: in
+    batch 1 they gave the only found coordinates at 34 of the 46 sites it flagged, each a map page
+    more than 5 km from our site. So their coordinates are still read here, for the gate alone.
+    They are never evidence or a value. A page's latitude and longitude are paired; a lone one is
+    judged by its axis offset, as single_axis_offset_km does. The farthest page counts. Build step 3
+    of the source-matching plan replaces the gate, and this goes with it.
+    """
+    pages: dict[str, dict[str, Any]] = {}
+    for attribute in payload.get("attributes", []) or []:
+        if not isinstance(attribute, dict):
+            continue
+        name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
+        if name not in {"found_latitude", "found_longitude"}:
+            continue
+        conversion = convert_attribute_value(name, attribute.get("value"), attribute.get("unit"))
+        value = None if conversion.warning else parse_float(conversion.value)
+        if value is None:
+            continue
+        for source in attribute.get("sources") or []:
+            url = normalize_scalar(source.get("url")) if isinstance(source, dict) else ""
+            mirror = dropped_source_site(url)
+            if mirror:
+                pages.setdefault(normalize_url(url), {"site": mirror})[name] = value
+
+    base_lat = parse_float(site.get("latitude"))
+    base_lon = parse_float(site.get("longitude"))
+    farthest: float | None = None
+    farthest_site = ""
+    for page in pages.values():
+        lat, lon = page.get("found_latitude"), page.get("found_longitude")
+        if None not in (lat, lon, base_lat, base_lon):
+            km = haversine_km(base_lat, base_lon, lat, lon)
+        elif lat is not None:
+            km = axis_offset_km(site, "found_latitude", lat)
+        else:
+            km = axis_offset_km(site, "found_longitude", lon)
+        if km is not None and (farthest is None or km > farthest):
+            farthest, farthest_site = km, page["site"]
+    return farthest, farthest_site
+
+
 def settle_near_coordinates(site: dict[str, Any], resolved: list[dict[str, Any]]) -> int:
     """Stop sending sub-threshold coordinate differences to review (pilot feedback 5)."""
     settled = 0
@@ -566,16 +610,21 @@ def settle_near_coordinates(site: dict[str, Any], resolved: list[dict[str, Any]]
     return settled
 
 
-def flag_identity_mismatch(resolved: list[dict[str, Any]], km: float | None) -> bool:
+def flag_identity_mismatch(
+    resolved: list[dict[str, Any]],
+    km: float | None,
+    coordinates: str = "source-backed coordinates are",
+) -> bool:
     """Revoke auto-validation for a site whose found coordinates are too far from the seed.
 
     Tier cannot detect a credible source describing the wrong facility. Distance can, so a large
-    mismatch withdraws the identity assumption that auto-validation depends on.
+    mismatch withdraws the identity assumption that auto-validation depends on. `coordinates` says
+    in the note where the distance came from.
     """
     if km is None or km <= IDENTITY_DISTANCE_KM_THRESHOLD:
         return False
     note = (
-        f"Identity not confirmed: source-backed coordinates are {km:.1f} km from the seed "
+        f"Identity not confirmed: {coordinates} {km:.1f} km from the seed "
         f"location (threshold {IDENTITY_DISTANCE_KM_THRESHOLD:g} km). Auto-validation withdrawn."
     )
     for row in resolved:
@@ -748,13 +797,22 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         if km is None:
             km = single_axis_offset_km(site, site_resolved)
         settle_near_coordinates(site, site_resolved)
-        if flag_identity_mismatch(site_resolved, km):
+        coordinates, found = "source-backed coordinates are", "found coordinates"
+        # A dropped map site is not a source, but its page still shows the agent looking at
+        # another landfill, so its coordinates can withdraw auto-validation too.
+        map_km, map_site = dropped_map_site_offset_km(site, payload)
+        kept_far = km is not None and km > IDENTITY_DISTANCE_KM_THRESHOLD
+        if not kept_far and map_km is not None and map_km > IDENTITY_DISTANCE_KM_THRESHOLD:
+            km = map_km
+            coordinates = f"coordinates on a {map_site} page the agent cited (dropped as a source) are"
+            found = f"{map_site} page's coordinates"
+        if flag_identity_mismatch(site_resolved, km, coordinates):
             parse_warnings.append(
                 {
                     "run_id": config.run_id,
                     "site_id": site_id,
                     "site_name": normalize_scalar(site.get("site_name")),
-                    "warning": f"Identity not confirmed: found coordinates {km:.1f} km from seed location.",
+                    "warning": f"Identity not confirmed: {found} {km:.1f} km from seed location.",
                 }
             )
         resolved_rows.extend(site_resolved)

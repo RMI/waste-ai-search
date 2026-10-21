@@ -375,7 +375,9 @@ still read from the seed and from older cached responses (see below).
 
 **Identity — requested unless a Tier 1–2 source already supplied it.** These are the evidence that
 the agent researched the *right* facility. Found coordinates drive the distance check and the 5 km
-identity gate; where they are not searched (F29), that check does not run.
+identity gate; where they are not searched (F29), that check does not run. Coordinates from a
+dropped map site (see [Source credibility](#source-credibility)) still count for the gate, though
+never as a value.
 
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
@@ -584,6 +586,14 @@ not link-checked. A value whose only sources were these two is not promoted, lik
 with no source, and neither appears in Leads. Wikimapia, an independent crowd-sourced map, stays as
 a weak source.
 
+One thing is still read from a dropped page: its coordinates, for the
+[identity check](#3-decide) alone. A map page far from our site shows the agent was looking at
+another landfill, and in batch 1 these pages gave the only found coordinates at 34 of the 46 sites
+the check flagged. So until the check is replaced (build step 3 of
+[the source-matching plan](docs/plans/2026-10-20-match-sources-by-location.md)), a dropped page
+placing the facility more than 5 km away still withdraws auto-validation for the whole site, even
+when another source's coordinates are close. Its coordinates never become a value.
+
 The prompt tells the agent not to cite the two, and to cite the government source where a
 directory republishes one: `wastebook.co.uk` copies the Environment Agency register (its
 coordinates are postcode centroids, and its "issued" date is a permit date, not a closure date),
@@ -659,7 +669,10 @@ Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions
 describes the *wrong landfill*. If `researcher_notes` says
 *"Identity not confirmed: source-backed coordinates are N km from the seed location"*, treat every
 row for that site as suspect regardless of tier — the pipeline has already withdrawn its own
-sign-off. In the pilot this caught a site whose findings were 238 km from the facility.
+sign-off. In the pilot this caught a site whose findings were 238 km from the facility. The note
+may instead say *"coordinates on a mapcarta.com page the agent cited (dropped as a source) are N km
+from the seed location"*: the agent read a map page of a landfill N km away, which is not a source,
+but the values beside it may well describe that landfill too.
 
 ### 4. Record the decision
 
