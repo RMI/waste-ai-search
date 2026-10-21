@@ -1,7 +1,8 @@
 # AI search: file each source under the site it is about, and review everything
 
-**Status:** agreed 20 October 2026, with the decisions listed below. Nothing built yet. To be
-built before batch 2.
+**Status:** agreed 20 October 2026, with the decisions listed below. Steps 1-4 of the build order
+are built on branches (drop-map-mirrors, skip-unsearchable-names, review-everything,
+source-first-output), not yet merged. The step 4 live test has not run. To be built before batch 2.
 **Date:** 20 October 2026
 
 ## The problem
@@ -56,7 +57,9 @@ checks that a source is actually about that site. Batch 1 (1,931 sites):
   sources' names, with the municipality or operator added where the source gives only a generic
   name.
 - **The prompt gets our coordinates rounded to 2 decimals (about 1 km),** plus the municipality.
-  That is enough to search with, and nothing worth copying. As a backstop, a stated location equal
+  That is enough to search with, and nothing worth copying. (Built note: only Brazil's seed has a
+  municipality. Elsewhere it needs a reverse-geocode cache, which doesn't exist yet, so those
+  prompts carry the rounded point and no town.) As a backstop, a stated location equal
   to the prompt's coordinates counts as no location. In batch 1 the agent copied our exact OSM
   point six times and credited it to an Ontario registry.
 - **Map sites:**
@@ -290,7 +293,9 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
    measures:
    - the share of sources that give a location;
    - review rows per site;
-   - attribute yield against batch 1 under the same 6-search cap;
+   - attribute yield against batch 1 under the same 6-search cap (batch 1's prompts had our full
+     point and, outside Brazil, no town; the test's have the rounded point and no town, unless a
+     reverse-geocode cache is built first);
    - response size, token use and timeouts.
 5. **The existing tests** for the identity gate, the near-coordinate rule, trusted names and
    coordinates, Brazil, WP-525 promotion and the follow-up are rewritten on purpose. So are the 15

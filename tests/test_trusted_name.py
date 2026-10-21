@@ -81,28 +81,30 @@ def test_provenance_written_before_the_rename_still_counts():
     assert trusted_baseline_name(site(attribute_sources="found_site_name@lmop_2024"))
 
 
-def test_coordinates_are_still_requested_when_the_name_is_skipped():
+def test_a_location_is_still_requested_when_the_name_is_skipped():
     attributes = requested_attributes(site(attribute_sources="found_facility_name@lmop_2024"))
-    assert "found_latitude" in attributes
-    assert "found_longitude" in attributes
+    assert "found_location" in attributes
 
 
 def test_a_trusted_name_prompt_does_not_ask_for_a_name():
+    """Changed on purpose for build step 4: the identity rule built from the found_* attributes is
+    gone. Each source still gives its own name for the facility, for code to compare."""
     s = site(attribute_sources="found_facility_name@lmop_2024")
     prompt = build_site_prompt(s, attributes=requested_attributes(s))
 
     assert "Return found_facility_name" not in prompt
-    assert "found_facility_name, found_latitude" not in prompt
-    assert "found_latitude and found_longitude establish that you found the RIGHT facility" in prompt
-    assert "The name is already confirmed." in prompt
+    assert '"attribute_name": "found_facility_name"' not in prompt
+    assert "site_name is already confirmed by an authoritative source. Use it to search; do not" in prompt
+    assert "facility_name_in_source" in prompt
+    assert "Where this facility is matters too" in prompt
 
 
-def test_an_untrusted_name_prompt_is_unchanged():
+def test_an_untrusted_name_prompt_asks_for_it():
     s = site(attribute_sources="found_facility_name@osm_2022")
     prompt = build_site_prompt(s, attributes=requested_attributes(s))
 
     assert "Return found_facility_name exactly as your source spells it" in prompt
-    assert "found_facility_name, found_latitude and found_longitude establish" in prompt
+    assert '"attribute_name": "found_facility_name"' in prompt
 
 
 def test_arbitration_records_no_name_row_for_a_skipped_name():

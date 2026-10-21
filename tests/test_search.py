@@ -227,8 +227,9 @@ def test_known_closed_sites_get_upfront_closing_year_emphasis():
     assert "appears to be closed" not in build_site_prompt(plain)
 
 
-def test_every_prompt_requires_closing_year_once_closure_is_discovered():
-    """Covers the case where closure is only learned during the search itself."""
+def test_a_prompt_asking_for_status_requires_closing_year_once_closure_is_discovered():
+    """Covers the case where closure is only learned during the search itself. A prompt that asks
+    for neither status nor closing year leaves this out (test_source_first_prompt.py)."""
     from waste_ai_search.prompt_builder import build_site_prompt
 
     prompt = build_site_prompt({"site_id": "3", "site_name": "Guagua Dumpsite", "country_iso3": "PHL"})
@@ -377,7 +378,8 @@ def test_brazil_searches_coordinates_only_where_the_location_is_inexact():
 
     bra = {"site_id": "1", "country_iso3": "BRA", "is_location_exact": "FALSE"}
     assert coordinates_only(bra)
-    assert requested_attributes(bra) == ["found_latitude", "found_longitude"]
+    # Changed on purpose for build step 4: a location is what its sources state, as found_location.
+    assert requested_attributes(bra) == ["found_location"]
 
 
 def test_brazil_with_an_exact_location_is_searched_for_nothing():
@@ -418,7 +420,7 @@ def test_brazilian_sites_are_scoped_to_coordinates_or_skipped():
     from pathlib import Path as _Path
 
     from waste_ai_search.prompt_builder import location_is_inexact, requested_attributes
-    from waste_ai_search.schema import COORDINATE_ATTRIBUTES
+    from waste_ai_search.schema import LOCATION_ATTRIBUTE
 
     seed = _Path(__file__).parents[1] / "inputs" / "consolidated_sites.csv"
     if not seed.exists():
@@ -430,7 +432,7 @@ def test_brazilian_sites_are_scoped_to_coordinates_or_skipped():
     for site in bra:
         requested = requested_attributes(site)
         if location_is_inexact(site):
-            assert requested == list(COORDINATE_ATTRIBUTES), (
+            assert requested == [LOCATION_ATTRIBUTE], (
                 f"BRA site {site['site_id']} should be scoped to coordinates alone, got {requested}"
             )
         else:
@@ -559,13 +561,17 @@ def test_run_command_skips_the_follow_up_when_nothing_was_unlocked(tmp_path, mon
 
 
 def test_merge_payloads_combines_passes():
+    """Each pass is read through the one reader, so a pass cached attribute-first merges with a
+    source-first one; the merge is source-first."""
     from waste_ai_search.arbitrate import merge_payloads
 
     merged = merge_payloads([
-        {"site_id": "1", "attributes": [{"attribute_name": "a"}], "search_notes": "first"},
-        {"site_id": "1", "attributes": [{"attribute_name": "b"}], "search_notes": "second"},
+        {"site_id": "1", "search_notes": "first",
+         "attributes": [{"attribute_name": "a", "sources": [{"url": "https://a.example"}]}]},
+        {"site_id": "1", "search_notes": "second",
+         "sources": [{"url": "https://b.example", "values": [{"attribute_name": "b"}]}]},
     ])
-    assert [a["attribute_name"] for a in merged["attributes"]] == ["a", "b"]
+    assert [value["attribute_name"] for source in merged["sources"] for value in source["values"]] == ["a", "b"]
     assert merged["search_notes"] == "first | second"
 
 

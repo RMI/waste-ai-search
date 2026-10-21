@@ -172,6 +172,101 @@ uv run waste-ai-search arbitrate --keep-broken-link-evidence ...  # let dead sou
 Run_Config records `links_checked`, `links_broken`, `links_repaired` and `broken_link_route`, so
 every workbook states which policy produced it.
 
+## Locating each source
+
+The agent reports where each source puts the facility, copied as the source writes it (see
+[What the agent returns](#what-the-agent-returns)). Right after the link check, the search phase
+turns each of those into a point and says how far it can be trusted, as its `location_basis`
+([the plan](docs/plans/2026-10-20-match-sources-by-location.md), step 3;
+[`locate.py`](src/waste_ai_search/locate.py)):
+
+| The source states | Becomes | Basis | Used for |
+|---|---|---|---|
+| Coordinates with 3 or more decimals (or seconds) | Parsed locally | `coordinates` | Matching, and a location value |
+| A UK OS or Irish grid reference, 100 m or finer, ITM metres labelled ITM, or an easting and northing each labelled (`E 531090 N 180600`) in the UK or Ireland | Converted locally (`pyproj`) | `grid reference` | Matching, and a location value |
+| A street address placed on its building or address point | Geocoded | `rooftop` | Matching, and a location value |
+| A street address placed only on its street | Geocoded | `street` | Matching only |
+| Coordinates with fewer decimals, or a coarser grid reference | Parsed locally | `hint` | Nothing yet: too approximate |
+| Anything else: a town or postcode match, a place description, a PO box | — | `none` | — |
+
+Coordinates are read as `lat, lon`, in decimal degrees or degrees, minutes and seconds, with
+hemisphere letters or words (`North`, `West`). `lon, lat` is read only where that is unambiguous: a
+hemisphere or a label says so, or the first number is beyond 90. A header naming both axes, such as
+`Lat/Long:` or `(lat, long)`, gives their order, and a well-known-text `POINT(lon lat)` is read
+longitude first. In prose, a number followed by a unit (km, m, ha,
+%) is a distance or an area, not a coordinate, and the first pair in range is the one used.
+
+A labelled easting and northing (`E`/`N`, `Easting`/`Northing` or `X`/`Y`, in metres) is read in
+the country's grid: the British National Grid in the UK, and in Ireland the Irish Grid or ITM,
+whose numbers never overlap. A UK source that says Irish Grid, as Northern Ireland's do, is read
+in Ireland's grids. Elsewhere the grid is unknown, so such metres are not read. The `E` is never
+taken for an Irish Grid square, and where a text holds a licence number and a grid reference, the
+reference 100 m or finer wins.
+
+"Matching" is build step 5's: until then, a usable location feeds the site's `found_location` and
+the 5 km identity check (see [Attributes searched](#attributes-searched)).
+
+Three guards throw a location out, with the reason in `evidence.csv`:
+
+- **Copied from the prompt.** Coordinates equal to the rounded point the prompt gives, or within
+  10 m of our own point. In batch 1 the agent credited our exact OSM centroid to an Ontario
+  registry six times.
+- **wastebook.co.uk.** Its coordinates are postcode centroids.
+- **A doubtful pair.** Where a source gives coordinates and an address, the coordinates win; if the
+  address lands more than 2 km from them, neither is used. Coarse coordinates (a hint) give way to
+  a located address that agrees with them: within 2 km plus the hint's own coarseness, about
+  0.8 km for 2 decimals. An address farther off, such as an operator's office, makes the pair
+  doubtful too.
+
+**A facility name is never geocoded.** Geocoders find landfills by name from OpenStreetMap, where
+most of our sites came from, so it would hand our own point back. Only text the agent labelled a
+street address is sent, with any leading facility name taken off, and text that is only a name is
+not sent at all. The names are the source's own, any `found_facility_name` it gives, and our
+site's `site_name` and `original_site_name`; `&` and `and` count as the same, and a name is taken
+off only where a comma, a dash or a number follows it, so "Hart" never shortens "Hartland Avenue".
+
+**A PO box is where post goes, not where the site is.** A PO box, `Box 219`, `C.P.`, case postale,
+private or locked bag, `PMB`, `BP` and the like is taken out of an address, and what is left is
+sent only if it still has a civic number or names a road: "29786 Rte. 2 PO Box 253 Wellington PE"
+is sent as "29786 Rte. 2, Wellington PE", while "PO Box 1234, Thunder Bay, ON" is not sent. Where a
+source gives two addresses, the second is tried when the first placed nothing.
+
+### Geocoder
+
+No geocoder is configured by default: addresses stay unlocated, with the reason "no geocoder
+configured". Choose one with `WASTE_AI_SEARCH_GEOCODER` in `.env`, or with `--geocoder` on
+`search`, `run` and `locate`. Each address is sent with its site's country.
+
+| Geocoder | Settings | How a match is read |
+|---|---|---|
+| `azure-maps` | `AZURE_MAPS_SUBSCRIPTION_KEY`, or `AZURE_MAPS_CLIENT_ID` to sign in with Entra ID (`az login`) | [Get Geocoding](https://learn.microsoft.com/en-us/rest/api/maps/search/get-geocoding?view=rest-maps-2026-01-01), api-version 2026-01-01. An address matched to its rooftop or parcel is `rooftop`; an interpolated address, a block or an intersection is `street`. A match it had to broaden (`UpHierarchy`), an ambiguous one, or Low confidence is not used. The account is IT's to create. |
+| `nominatim` | `NOMINATIM_URL` (the public instance if blank) and `NOMINATIM_USER_AGENT` (default `waste-ai-search (RMI)`, which names the application, never a person) | OpenStreetMap's geocoder, at most one request a second. An address point or building is `rooftop`; a road, or a house number Nominatim interpolated along its street (`place=house` on a way), is `street`, as with Azure Maps. A mapped feature that carries the address, such as the landfill itself, is not used: it would be OSM's own point. Enough for the live test. |
+| `none` | | Addresses stay unlocated. |
+
+### `source_locations.json`
+
+Every answer is kept in `source_locations.json` in the run folder, keyed by the stated text and its
+country, never by site. So an address is looked up once however many sources state it, and a
+resumed search or the follow-up pass looks up only what is new. An address kept as "no geocoder
+configured" is looked up once a geocoder is set; a failed lookup is not kept, and is tried again
+next time. Any other answer is kept, so to look addresses up again with another geocoder, delete
+the file first. It is saved as the step goes, so an interrupted run keeps what it paid for.
+
+Arbitration only reads it, so it stays offline. It parses coordinates and grid references itself,
+which needs no network, so a run's coordinates are read even before it is located; an address
+not yet looked up says "not located yet: run `locate --run-id`". Blob storage carries the file
+like `link_check.json`.
+
+```bash
+uv run waste-ai-search locate --run-id <run_id>       # backfill an older run, then arbitrate
+uv run waste-ai-search run --no-locate ...            # skip locating
+uv run waste-ai-search run --geocoder nominatim ...   # choose the geocoder for this run
+```
+
+Run_Config records `locations_stated` and `locations_used` (the usable ones: coordinates, grid
+reference, rooftop and street), each counted by basis, and `geocoder`: which geocoder answered,
+`none configured`, `none needed (no address stated)` or `locate step not run`.
+
 ## Storage and sharing
 
 ### Run results in Azure Blob Storage
@@ -229,7 +324,8 @@ arbitration merges both.
 run it as often as you like against a search that is still in progress:
 
 ```bash
-# Phase 1 - query Foundry, cache one raw JSON response per site. Resumable.
+# Phase 1 - query Foundry, cache one raw JSON response per site, then check the cited links and
+# locate each source's stated location. Resumable.
 uv run waste-ai-search search --run-id pilot10 --iso3 NGA PHL --limit 10
 
 # ...or sample a spread instead of the first N. --limit follows seed order, which is
@@ -267,6 +363,79 @@ Ctrl-C cancels the sites not yet started and waits for those in flight, which ar
 Each attempt at a site is cut off after `--hard-site-timeout-seconds` (240), retries included: a
 call still running then is abandoned and not retried. The HTTP timeout
 (`AZURE_FOUNDRY_TIMEOUT_SECONDS`) cannot do this - one site waited 15 minutes past it.
+
+### What the agent returns
+
+The agent answers **source first** (build step 4 of
+[the source-matching plan](docs/plans/2026-10-20-match-sources-by-location.md)): each source it
+used, with the facility that source describes and the values it gives.
+
+```json
+{
+  "site_id": "13755",
+  "sources": [
+    {
+      "url": "https://...", "source_title": "...", "publisher": "...", "source_type": "...",
+      "publication_date": "...", "language": "...", "paywall_flag": false,
+      "facility_name_in_source": "the facility's name, exactly as this source writes it",
+      "facility_name_english": "that name in English",
+      "stated_location": "the facility's location, exactly as this source writes it",
+      "stated_location_kind": "coordinates",
+      "values": [
+        {"attribute_name": "operator", "value": "...", "unit": "", "value_basis": "Direct",
+         "confidence_score": "High", "value_date": "2024", "evidence_summary": "...",
+         "search_terms_used": "...", "quoted_evidence_short": "..."}
+      ]
+    }
+  ],
+  "unverified_leads": [],
+  "search_notes": "..."
+}
+```
+
+- `facility_name_in_source` is the name as the source writes it; `facility_name_english` is the
+  agent's English rendering, since our names are in English. Either may be blank.
+- `stated_location` is the source's coordinates, grid reference or the site's street address,
+  copied as written and never worked out, and blank if the source gives none. Its kind is one of
+  `coordinates`, `grid reference`, `street address`, `place description` or `none`. A source that
+  gives coordinates and an address writes them `a | b`, kinds `coordinates | street address`.
+- Each value keeps the fields arbitration has always read.
+
+**The agent reports what each source says, and code decides.** It still researches only the site
+asked about. A source that turns out to describe a different facility is reported anyway, with that
+facility's name and location, but the agent does not go on researching it; from a registry that
+lists many sites, only the entry it used. A source that names or locates the facility but gives no
+value is reported too. Until build step 5 matches each source to the site it is about, everything
+is still filed under the site searched. The 5 km identity check flags a source that places the
+facility somewhere else, and a value whose winning source names a facility sharing no distinctive
+word with our `site_name` or `original_site_name` carries a note saying so, with or without a
+location (see [the identity check](#attributes-searched)).
+
+**The prompt gives our coordinates rounded to 2 decimals (about 1 km),** with the municipality
+and admin names where the seed has them: enough to search with, and nothing worth copying. With
+the full point in the prompt, the agent once credited our own OSM centroid to a registry. The
+reverse-geocoded `formatted_address` is left out for the same reason. The search cap
+(`--max-web-searches`) is unchanged.
+
+Only Brazil's seed has place names (SINIR's municipality and state). Every other country's come
+only from a reverse-geocode cache passed with `--use-geocode-cache` (see
+[Reverse Geocoding](#reverse-geocoding)), and no such cache exists yet. So outside Brazil the
+prompt names the site, its country and the rounded point, and no town. Batch 1's prompts had the
+full point and no town either, so a comparison with batch 1's yield measures the rounding, not the
+loss of place names.
+
+**Runs cached before this still arbitrate.** One reader,
+[`payload.py`](src/waste_ai_search/payload.py), turns any cached response into this shape, and
+everything that reads a response goes through it: the evidence, the link check, the run log's
+counts, validation, the merge of the follow-up pass, retry detection and the agent's own leads. An
+older, attribute-first response's citations become one source per exact URL, each with the values
+of the attributes that cited it. Its found name is the in-source name of the sources cited for it,
+and its found coordinates the stated location of the sources cited for both; half a location is
+none. Evidence ids and the agent's order are kept. Each value keeps how its own citation labelled
+the page (source type, date, publisher), so it is tiered as it was, even where the gas follow-up
+pass labelled the same page differently. Only a label its citation left blank comes from the
+page's other citations, so an undated citation of a dated page gets its date: on batch 1 that
+lifts 118 citations from the undated cap to their type's tier, and lowers none.
 
 ### The full run, in six country batches
 
@@ -316,8 +485,9 @@ The run prints how many sites it dropped, so this is never silent.
 **2. Brazil is excluded by default. When searched, it is coordinates only, and only where the
 location is flagged inexact — 3,913 of 4,225 sites, all from SINIR.**
 
-For a Brazilian facility, the search asks for `found_latitude` and `found_longitude` and nothing
-else — **and only when `is_location_exact` is FALSE.** Every other Brazilian attribute comes from a
+For a Brazilian facility, the search asks only where the facility is (`found_location`): it looks
+for sources that state its location, and asks for no values — **and only when `is_location_exact`
+is FALSE.** Every other Brazilian attribute comes from a
 government source, so searching it risks overwriting better data than the search can find.
 
 SINIR's coordinates are the centre of a municipality, not the dumpsite, and most of its names are
@@ -337,8 +507,8 @@ Unknown is **not** treated as inexact: only an explicit FALSE triggers a coordin
 
 **3. Everywhere else: gap-fill, plus the gas-capture gate.**
 
-- Identity (`found_facility_name`, `found_latitude`, `found_longitude`) is requested **except** where the seed's value came from a Tier 1–2 source: the name for about 10,600 facilities, and both coordinates for 4,063 of the 12,122 searchable sites (Mexico INEGI, E-PRTR, Canada GHGRP). This needs per-attribute provenance; with none, the attribute is still asked. Coordinates flagged inexact are still searched.
-- **Where both are trusted, the wrong-facility check does not run.** That check compares the found coordinates with the seed and, beyond 5 km, warns the SME on every value from that site's search; with no found coordinates there is nothing to compare. Accepted to cut cost (design doc F29): skipping coordinates saves 8,126 of 175,293 attribute-requests (4.6%).
+- Identity (`found_facility_name`, `found_location`) is requested **except** where the seed's value came from a Tier 1–2 source: the name for about 10,600 facilities, and both coordinates for 4,063 of the 12,122 searchable sites (Mexico INEGI, E-PRTR, Canada GHGRP). This needs per-attribute provenance; with none, the attribute is still asked. Coordinates flagged inexact are still searched.
+- **Where our coordinates are trusted, the sources' locations are recorded, not reviewed.** Every source still states where it puts the facility, so the wrong-facility check runs for these sites too; what is skipped is the push to find a location, and a `found_location` row for SMEs (design doc F29).
 - Metadata attributes are requested **only where that facility's baseline is empty**.
 - The seven `gccs_*` attributes are requested **only where gas collection is known present** —
   212 to 603 facilities each, not 13,000. See the two-pass note above for why this loses nothing.
@@ -423,33 +593,49 @@ rule 4, which lowers them further.
 
 ### Attributes searched
 
-**23 attributes are searched.** No site is asked for all 23 — the scoping rules above decide
+**22 attributes are searched.** No site is asked for all 22 — the scoping rules above decide
 which ones a given facility gets. Three more gas-capture volumes are no longer searched but are
 still read from the seed and from older cached responses (see below).
 
 **Identity — requested unless a Tier 1–2 source already supplied it.** These are the evidence that
-the agent researched the *right* facility. Found coordinates drive the distance check and the 5 km
-identity gate; where they are not searched (F29), that check does not run. Coordinates from a
-dropped map site (see [Source credibility](#source-credibility)) still count for the gate, though
-never as a value.
+the agent researched the *right* facility.
 
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
 | `found_facility_name` | text | — | `facility_name` |
-| `found_latitude` | numeric | `decimal degrees` | `latitude` |
-| `found_longitude` | numeric | `decimal degrees` | `longitude` |
+| `found_location` | `lat, lon`, from the sources' stated locations | — | `latitude`, `longitude` |
 
-The two coordinates are asked for and checked separately, then combined into one value,
-`found_location`, written `lat, lon`. A location is one fact, so it is reviewed and loaded as a
-pair or not at all: it takes the less settled verdict of its two halves, so it goes to review if
-either differs from ours, and `resolution_rule` says if they came from different sources. A
-coordinate found without its other half is listed under Leads. On batch 1, the halves had split at
-55 of the 157 sites with a found coordinate.
+`found_location` is not a value the agent returns. Every source states where it puts the
+facility, the locate step turns that into a point (see [Locating each source](#locating-each-source)),
+and the site's found location is resolved from its sources' usable points — coordinates, a grid
+reference or a rooftop address — by the usual rules: the most credible source, then the newest by
+publication date. It is one value, `lat, lon`, so it is reviewed and loaded as a point or not at
+all. A street-level address or a hint is never a value. A map directory is Tier 3 for a location,
+as it was for coordinates. Asking for it, where our coordinates are not trusted, means the prompt
+stresses finding a source that states the location, and its row reaches the review queue; where
+they are trusted, each source's location is still in `evidence.csv`, and nothing is queued.
 
-A location that matches the seed's to comparison precision (six significant digits) confirms it.
-It keeps the seed's point, so nothing moves, and like any confirmation it is not queued. One that
-differs by more, even by a few hundred metres, goes to review like any other value. There is no
-"same place" distance any more. The 1 km rule, and the 0.5 km rule that replaced it, counted a
+**The identity check.** Until build step 5 matches each source to the site it is about, the 5 km
+gate stays. It measures how far the farthest of a site's sources puts it from the seed — a source
+located by coordinates, a grid reference or an address placed on its building or street — and, as
+before, a dropped map page's own stated location (see [Source credibility](#source-credibility)).
+Beyond 5 km every value from that site's search carries the distance in `researcher_notes`. A hint
+and a location copied from the prompt don't count.
+
+A source with no location can't fail that check, so names are checked too. Where the source that
+won a value calls the facility by a name sharing no distinctive word with ours, the value's
+`researcher_notes` says *"The winning source names Beta Landfill; check it is about this
+facility."* Words that only say what kind of place it is (landfill, waste, transfer station, road)
+don't count, nor do numbers; a misspelling, a plural, or one word written as two still counts as
+the same. A generic or placeholder name, ours ("OpenStreetMap Landfill") or the source's, or one in
+another script with no English rendering, can't be judged and is not noted. On the batch-1 replay
+the note falls on 105 of 6,562 queue rows, at 33 sites. Build step 5's name matching replaces
+this.
+
+A location that matches the seed's to comparison precision (six significant digits) confirms it,
+and like any confirmation it is not queued, so nothing moves. One within 10 m of ours counts as
+copied from the prompt and is no location at all. One that differs by more, even by a few hundred
+metres, goes to review like any other value. There is no "same place" distance any more. The 1 km rule, and the 0.5 km rule that replaced it, counted a
 permit's coordinates near OSM's as confirming OSM's, when the permit's point is the one worth
 having.
 
@@ -513,12 +699,6 @@ discovery into the baseline and the next pass picks up that facility's GCCS attr
 **No longer searched (F31):** `gccs_ch4_generated_metric_tonnes`, `gccs_ch4_collected_metric_tonnes`
 and `gccs_ch4_flow_to_project_metric_tonnes`. They are still read from the seed, and a run cached
 before the change still re-arbitrates them for review.
-
-**Computed locally, never searched.**
-
-| Attribute | Type | Purpose |
-|---|---|---|
-| `distance_to_original_coordinates_km` | numeric, `km` | Haversine between seed and found coordinates (or, when only one was found, that axis's offset). No source, so no tier. Drives the identity gate and is not written to any output; a site beyond 5 km carries the distance in its rows' `researcher_notes`. |
 
 #### Units are converted, not demanded
 
@@ -607,7 +787,8 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 |---|---|
 | `<run_id>_review.xlsx` | **The SME artifact.** Every found value for an empty field, whatever its tier, and every disagreement with our value from a Tier 1–3 source at least as credible as ours, with dropdowns. Weaker disagreements are under Leads. Ingestion reads the SMEs' decisions from it. |
 | `resolved.csv` | A header and no rows. Nothing is accepted automatically, and ingestion accepts it empty. Runs from before (batch 1) wrote the values they accepted here. |
-| `evidence.csv` | One row per source-backed claim, confirmations of our values included. The audit trail. Its `source_id` finds the source in `sources.csv`. |
+| `evidence.csv` | One row per source-backed claim, confirmations of our values included. The audit trail. Its `source_id` finds the source in `sources.csv`. Every row also gives the facility its source describes (`facility_name_in_source`, `facility_name_english`), the location it states (`stated_location`, `stated_location_kind`) and the point read from it (`location_basis`, `located_latitude`, `located_longitude`, and `location_reason` when it is not usable). A source that states a location has a `found_location` row of its own. |
+| `source_locations.json` | Each stated location's point, keyed by its text and country (see [Locating each source](#locating-each-source)). |
 | `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below). |
 | `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
@@ -674,14 +855,14 @@ not link-checked. A value whose only sources were these two is not promoted, lik
 with no source, and neither appears in Leads. Wikimapia, an independent crowd-sourced map, stays as
 a weak source.
 
-One thing is still read from a dropped page: its coordinates, for the
+One thing is still read from a dropped page: the location it states, for the
 [identity check](#3-decide) alone. A map page far from our site shows the agent was looking at
 another landfill, and in batch 1 these pages gave the only found coordinates at 34 of the 46 sites
 the check flagged. So until the check is replaced (build step 5 of
 [the source-matching plan](docs/plans/2026-10-20-match-sources-by-location.md)), a dropped page
 placing the facility more than 5 km away still puts the identity warning on every value from the
-site's search, even when another source's coordinates are close. Its coordinates never become a
-value.
+site's search, even when another source's location is close. Its location is never located by the
+locate step, and never becomes a value.
 
 The prompt tells the agent not to cite the two, and to cite the government source where a
 directory republishes one: `wastebook.co.uk` copies the Environment Agency register (its
@@ -741,7 +922,7 @@ The five columns that decide your judgement:
 
 Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab.
 
-**Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and compare it with what the source describes. A `found_location` row is the location the source gives, in the same form: accept or reject it as one point.
+**Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and compare it with what the source describes. A `found_location` row is where its source says the site is — coordinates, a grid reference, or an address placed on its building — in the same form: accept or reject it as one point. `evidence.csv` shows what the source wrote, in `stated_location`.
 
 **Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `evidence.csv`; they are blank where the source was never translated.
 
@@ -757,12 +938,14 @@ Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions
 
 **The single highest-value check: identity.** Tier cannot detect a perfectly credible document that
 describes the *wrong landfill*. If `researcher_notes` says
-*"Identity not confirmed: source-backed coordinates are N km from the seed location"*, treat every
+*"Identity not confirmed: a source's stated location is N km from the seed location"*, treat every
 row for that site as suspect regardless of tier. In the pilot this caught a site whose findings
 were 238 km from the facility. The note may instead say *"coordinates on a mapcarta.com page the
 agent cited (dropped as a source) are N km from the seed location"*: the agent read a map page of a
 landfill N km away, which is not a source, but the values beside it may well describe that landfill
-too.
+too. A row whose note says *"The winning source names …; check it is about this facility"* was won
+by a source that calls the facility something else: a renamed site is fine, but another landfill's
+value is a rejection (`Wrong facility`).
 
 ### 4. Record the decision
 
@@ -849,7 +1032,9 @@ Example cache row:
 ```
 
 Pass the cache to the search phase so the prompt can use municipality and admin names, which
-matters most for local-language searching:
+matters most for local-language searching. Outside Brazil this cache is the only source of them,
+and since the prompt's point is rounded to about 1 km, the town is the most precise place it can
+name:
 
 ```bash
 uv run waste-ai-search search --run-id pilot10 --use-geocode-cache \
@@ -861,6 +1046,10 @@ Without `--use-geocode-cache` those fields stay empty and every site records
 
 Live Azure Maps batch reverse geocoding should be added later as a separate
 pre-processing command that writes this cache.
+
+This is separate from the locate step's geocoder, which places the addresses sources state (see
+[Locating each source](#locating-each-source)). The prompt passes the municipality and admin names
+on, but no longer `formatted_address`: a street address next to our site would leak our point.
 
 ## Standardized Facility Schema
 

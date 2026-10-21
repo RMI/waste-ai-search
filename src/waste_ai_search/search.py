@@ -15,9 +15,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .credibility import dropped_source_site
 from .geocoder import enrich_sites_from_cache
 from .input_loader import resolve_sites, run_seed_path, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, check_urls
+from .locate import (
+    MATCHING_BASES,
+    SOURCE_LOCATIONS_FILE,
+    GeocoderError,
+    Located,
+    describe_bases,
+    load_locations,
+    locate_source,
+    make_geocoder,
+    save_locations,
+    states_location,
+)
+from .payload import found_attributes, merge_payloads, read_payload
 from .pilot_selector import select_mixed_pilot
 from .prompt_builder import build_site_prompt, coordinates_only, requested_attributes
 from .run_context import (
@@ -151,6 +165,89 @@ def check_run_links(run_dir: Path) -> dict:
     return results
 
 
+# The locate step saves its answers after this many lookups, so an interrupted run keeps what it
+# paid for without rewriting the file for every source.
+LOCATE_SAVE_EVERY = 25
+
+
+class _CountingGeocoder:
+    """A geocoder that counts its lookups, so the locate step knows when it has paid for some."""
+
+    def __init__(self, geocoder: Any) -> None:
+        self.geocoder = geocoder
+        self.name = geocoder.name
+        self.calls = 0
+
+    def geocode(self, address: str, iso2: str) -> Any:
+        self.calls += 1
+        return self.geocoder.geocode(address, iso2)
+
+
+# locate_run's default: the geocoder the run's configuration names.
+_CONFIGURED = object()
+
+
+def locate_run(
+    config: PipelineConfig, sites: list[dict[str, Any]] | None = None, geocoder: Any = _CONFIGURED
+) -> list[Located]:
+    """Locate where every source in a run's cached responses says its facility is.
+
+    Coordinates and grid references are parsed; an address goes to the configured geocoder, unless
+    source_locations.json already has its answer. A dropped map site is never located. The answers
+    are kept in that file, so arbitration reads them and stays offline. Returns one result per
+    source that states a location.
+    """
+    if sites is None:
+        sites, _headers = resolve_sites(config, allow_database=False)
+    sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
+    if geocoder is _CONFIGURED:
+        geocoder = make_geocoder(config.geocoder)
+    geocoder = _CountingGeocoder(geocoder) if geocoder is not None else None
+    path = config.run_dir / SOURCE_LOCATIONS_FILE
+    cache = load_locations(path)
+    by_site: dict[str, list[Path]] = {}
+    for response in sorted(raw_dir(config.run_dir).glob("site_*.json")):
+        by_site.setdefault(site_id_from_path(response), []).append(response)
+
+    located: list[Located] = []
+    failures: list[str] = []
+    saved_at = 0
+    try:
+        for site_id, paths in sorted(by_site.items()):
+            site = sites_by_id.get(site_id)
+            if site is None:
+                continue  # arbitration reports a site missing from the seed
+            payloads = []
+            for response in paths:
+                try:
+                    payloads.append(load_json(response))
+                except (OSError, json.JSONDecodeError):
+                    continue
+            for source in merge_payloads(payloads)["sources"] if payloads else []:
+                if dropped_source_site(source.get("url")) or not states_location(source):
+                    continue
+                try:
+                    located.append(locate_source(source, site, cache, geocoder, live=True))
+                except GeocoderError as exc:
+                    failures.append(str(exc))
+                    continue
+                if geocoder is not None and geocoder.calls - saved_at >= LOCATE_SAVE_EVERY:
+                    save_locations(path, cache)
+                    saved_at = geocoder.calls
+    finally:
+        save_locations(path, cache)
+
+    used = [item for item in located if item.basis in MATCHING_BASES]
+    name = geocoder.name if geocoder is not None else "none configured"
+    print(
+        f"Locations: {len(located)} stated, {len(used)} usable ({describe_bases(located)}); "
+        f"geocoder {name} -> {SOURCE_LOCATIONS_FILE}"
+    )
+    if failures:
+        print(f"!! {len(failures)} address lookup(s) failed and are not cached; run locate again. First: {failures[0]}")
+    return located
+
+
 def run_search(
     config: PipelineConfig,
     pass_label: str = "",
@@ -199,6 +296,9 @@ def run_search(
         print(f"Geocode cache: {hits}/{len(selected)} sites enriched with admin context")
 
     raw_dir(config.run_dir).mkdir(parents=True, exist_ok=True)
+    # Built before any search is paid for, so a geocoder configured wrongly stops the run here,
+    # not after it.
+    geocoder = make_geocoder(config.geocoder) if config.locate else None
     agent = agent_identity(get_client(config))
 
     coordinate_only_sites = sum(1 for site in selected if coordinates_only(site))
@@ -271,6 +371,10 @@ def run_search(
     # pass-2 follow-up only fetches URLs not already checked.
     if config.check_links:
         check_run_links(config.run_dir)
+    # Then where each source says its facility is. Like the link check, the cache means a resumed
+    # search or the follow-up pass only looks up what is new.
+    if config.locate:
+        locate_run(config, sites, geocoder)
     if failures:
         ids = " ".join(row["site_id"] for row in failures)
         print(f"\n!! {len(failures)} site(s) still failing after retries. Try again later:")
@@ -343,12 +447,11 @@ def search_one_site(
         if config.site_delay_seconds > 0:
             time.sleep(config.site_delay_seconds)
 
-    attribute_count = len(payload.get("attributes", []) or []) if payload else 0
-    source_count = (
-        sum(len(item.get("sources", []) or []) for item in (payload.get("attributes", []) or []))
-        if payload
-        else 0
-    )
+    # Read like arbitration reads it, so a response cached in the older attribute-first shape counts
+    # the same way: attributes found, and sources (one per exact URL).
+    read = read_payload(payload) if payload else None
+    attribute_count = len({name for _source, name in found_attributes(read)}) if read else 0
+    source_count = len(read["sources"]) if read else 0
     return {
         "run_id": config.run_id,
         "site_id": site_id,

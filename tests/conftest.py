@@ -22,6 +22,24 @@ def no_real_link_checks(monkeypatch, request):
 
 
 @pytest.fixture(autouse=True)
+def no_real_geocoding(monkeypatch):
+    """No test may send an address to a real geocoder.
+
+    No geocoder is configured unless a test sets one, even where `.env` names one. A geocoder built
+    without a fake session gets one that refuses every request, so a test that forgets to pass
+    its own fails rather than reaching Azure Maps or Nominatim.
+    """
+    import waste_ai_search.locate as locate
+
+    class RefusingSession:
+        def get(self, *args, **kwargs):
+            raise AssertionError("A test tried to reach a real geocoder; pass a fake session.")
+
+    monkeypatch.setenv("WASTE_AI_SEARCH_GEOCODER", "")
+    monkeypatch.setattr(locate, "_session", lambda session: session if session is not None else RefusingSession())
+
+
+@pytest.fixture(autouse=True)
 def no_real_storage_or_publishing(monkeypatch):
     """No test may reach blob storage or write into the team's SharePoint folder (WP-534).
 

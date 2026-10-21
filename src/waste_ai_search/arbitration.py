@@ -30,6 +30,7 @@ from .schema import (
     AI_SEARCH_DATA_SOURCE,
     ARRAY_TARGET_ATTRIBUTES,
     GAP_FILL_ATTRIBUTES,
+    LOCATION_ATTRIBUTE,
     NUMERIC_ARRAY_TARGET_ATTRIBUTES,
     LEAD_ROUTED_RESOLUTIONS,
     NOTHING_TO_REVIEW,
@@ -47,7 +48,15 @@ IDENTITY_BASELINE_COLUMNS = {
 }
 
 
+# A found location is "lat, lon". Its provenance is recorded per coordinate, by the seed and by
+# refresh-seed alike, and the latitude's stands for the pair.
+PROVENANCE_ATTRIBUTES = {LOCATION_ATTRIBUTE: "found_latitude"}
+
+
 def baseline_for(site: dict[str, Any], attribute_name: str) -> str:
+    if attribute_name == LOCATION_ATTRIBUTE:
+        latitude, longitude = normalize_scalar(site.get("latitude")), normalize_scalar(site.get("longitude"))
+        return f"{latitude}, {longitude}" if latitude and longitude else ""
     if attribute_name in IDENTITY_BASELINE_COLUMNS:
         return normalize_scalar(site.get(IDENTITY_BASELINE_COLUMNS[attribute_name], ""))
     if attribute_name in GAP_FILL_ATTRIBUTES:
@@ -66,6 +75,10 @@ def comparable(value: Any, attribute_name: str = "") -> str:
         items = value if isinstance(value, (list, tuple)) else re.split(r"[;,]", normalize_scalar(value))
         keys = {comparable(item) for item in items if normalize_scalar(item)}
         return "; ".join(sorted(keys))
+    if attribute_name == LOCATION_ATTRIBUTE:
+        # Each coordinate to six significant digits, as each was compared when they were separate.
+        parts = [comparable(part) for part in normalize_scalar(value).split(",")]
+        return ", ".join(parts)
     text = normalize_for_compare(value)
     try:
         return f"{float(text):.6g}"
@@ -122,13 +135,14 @@ def resolve(
     #      the facility draws on and therefore over-credits weaker individual values
     ai_tiers = ai_filled_tiers(site.get("ai_filled_fields"))
     per_attribute = attribute_sources(site.get("attribute_sources"))
+    provenance = PROVENANCE_ATTRIBUTES.get(attribute_name, attribute_name)
     baseline_source = ""
-    if attribute_name in ai_tiers:
-        base_tier = ai_tiers[attribute_name]
+    if provenance in ai_tiers:
+        base_tier = ai_tiers[provenance]
         baseline_source = AI_SEARCH_DATA_SOURCE
         base_note = f"baseline supplied by a previous ai_search pass at {tier_label(base_tier)}"
-    elif attribute_name in per_attribute:
-        baseline_source = per_attribute[attribute_name]
+    elif provenance in per_attribute:
+        baseline_source = per_attribute[provenance]
         base_tier, base_note = attribute_baseline_tier(baseline_source)
     else:
         base_tier, base_note = baseline_tier(site.get("contributing_data_sources"))
@@ -348,46 +362,6 @@ def resolve(
     if recency_notes:
         row["resolution_rule"] = " ".join([row["resolution_rule"], *recency_notes]).strip()
     return row
-
-
-def calculated_row(
-    site: dict[str, Any],
-    attribute_name: str,
-    value: Any,
-    unit: str,
-    note: str,
-) -> dict[str, Any]:
-    """A locally computed value with no source and therefore no tier (Q12). Never queued or loaded."""
-    site_id = normalize_scalar(site.get("site_id"))
-    return {
-        "site_id": site_id,
-        "internal_facility_id": normalize_scalar(site.get("internal_facility_id") or site_id),
-        "site_name": normalize_scalar(site.get("site_name")),
-        "country_iso3": normalize_scalar(site.get("country_iso3")),
-        "attribute_name": attribute_name,
-        "baseline_value": "",
-        "baseline_source": "",
-        "baseline_tier": "",
-        "baseline_carried_from_earlier_year": "FALSE",
-        "baseline_staleness_note": "",
-        "resolved_value": normalize_scalar(value),
-        "resolved_unit": unit,
-        "resolution": "Calculated",
-        "resolution_rule": note,
-        "winning_evidence_id": "",
-        "winning_source_tier": "",
-        "winning_source_url": "",
-        "best_tier_available": "",
-        "agreeing_source_count": 0,
-        "dissenting_source_count": 0,
-        "credibility_margin": "",
-        "value_date": "",
-        "confidence_score": "",
-        "validation_status": NOTHING_TO_REVIEW,
-        "reviewer": "",
-        "reviewed_date": "",
-        "researcher_notes": note,
-    }
 
 
 def needs_review(row: dict[str, Any]) -> bool:

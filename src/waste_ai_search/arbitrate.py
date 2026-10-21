@@ -5,21 +5,49 @@ can be re-applied to a finished run for free and an interrupted search is never 
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import math
+import re
+import unicodedata
 from datetime import date, datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
-from .arbitration import calculated_row, date_key, needs_review, resolve, routed_to_leads
-from .credibility import TIER_BY_LABEL, assign_source_tier, dropped_source_site, is_promotable, tier_label
+from .arbitration import needs_review, resolve, routed_to_leads
+from .credibility import assign_source_tier, dropped_source_site, is_promotable, tier_label
 from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, LinkResult, load_results
-from .prompt_builder import needs_contradiction_check, requested_attributes
+from .locate import (
+    HINT,
+    MATCHING_BASES,
+    SOURCE_LOCATIONS_FILE,
+    STREET,
+    VALUE_BASES,
+    Located,
+    count_bases,
+    describe_geocoders,
+    format_coordinate,
+    haversine_km,
+    load_locations,
+    locate_source,
+    parse_point,
+    seed_point,
+    states_location,
+)
+from .payload import (
+    citation_ids,
+    citations,
+    cited_source,
+    is_empty,
+    merge_payloads,
+    normalize_url,
+    payload_urls,
+    read_payload,
+    source_id_for,
+)
+from .prompt_builder import asks_location, needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
-from .searchable_names import SKIPPED_NAME_CLASSES, describe_counts, recorded_skips, site_name_class
+from .searchable_names import NAMED, SKIPPED_NAME_CLASSES, describe_counts, name_class, recorded_skips, site_name_class
 from .snapshot import recorded_run
 from .schema import (
     canonical_attribute,
@@ -27,19 +55,17 @@ from .schema import (
     ARRAY_TARGET_ATTRIBUTES,
     ATTRIBUTE_RANGES,
     BOOLEAN_TARGET_ATTRIBUTES,
-    CALCULATED_ATTRIBUTES,
-    COORDINATE_ATTRIBUTES,
     ENUM_MAPS,
     EVIDENCE_HEADERS,
     LOCATION_ATTRIBUTE,
     NOTHING_TO_REVIEW,
     NUMERIC_TARGET_ATTRIBUTES,
     PARSE_WARNING_HEADERS,
-    REQUESTABLE_ATTRIBUTES,
     RESOLVED_HEADERS,
     REVIEW_QUEUE_HEADERS,
     SOURCES_HEADERS,
     SUPPLEMENTARY_LEADS_HEADERS,
+    VALUE_ATTRIBUTES,
     bucket_waste_depth,
     is_blank,
     map_enum_value,
@@ -54,21 +80,13 @@ from .workbook_io import write_review_workbook
 MAX_CONFIRMATION_EVIDENCE_ROWS = 2
 
 
-# Whether the agent found the right facility (Q34). Once coordinates resolve, distance from the
-# seed location measures that directly. Beyond this threshold the identity is not established, and
-# every value from that site's search says so to the SME who reviews it. A landfill footprint spans
-# at most a couple of km and seed coordinates are polygon centroids, so 5 km is generous. Build
-# step 5 of the source-matching plan replaces this check with matching each source by location.
+# Whether the agent found the right facility (Q34). Distance from the seed location to where the
+# sources put the facility measures that directly. Beyond this threshold the identity is not
+# established, and every value from that site's search says so to the SME who reviews it. A
+# landfill footprint spans at most a couple of km and seed coordinates are polygon centroids, so
+# 5 km is generous. Build step 5 of the source-matching plan replaces this check with matching each
+# source by location.
 IDENTITY_DISTANCE_KM_THRESHOLD = 5.0
-
-
-def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    radius = 6371.0088
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = phi2 - phi1
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * radius * math.asin(math.sqrt(a))
 
 
 def parse_float(value: Any) -> float | None:
@@ -81,42 +99,6 @@ def parse_float(value: Any) -> float | None:
         return None
 
 
-def normalize_url(url: Any) -> str:
-    """The exact URL a source is filed under: one row in sources.csv, and one source_id.
-
-    Only spellings that never change the page are cleaned: the scheme and host are lower-cased,
-    and a leading "www.", a trailing slash on the path and the fragment are dropped. The path and
-    the query string are kept as written, case included. Dropping the query string, as this once
-    did, merged 103 different Natural Resources Wales documents, which differ only in their query,
-    into one source.
-    """
-    text = normalize_scalar(url)
-    if not text:
-        return ""
-    try:
-        parts = urlsplit(text)
-        if not parts.scheme and not parts.netloc:
-            parts = urlsplit("//" + text)  # written without a scheme
-    except ValueError:
-        return text
-    netloc = parts.netloc.lower()
-    netloc = netloc[4:] if netloc.startswith("www.") else netloc
-    path = parts.path.rstrip("/")
-    return urlunsplit(((parts.scheme or "https").lower(), netloc, path, parts.query, ""))
-
-
-def source_id_for(url: Any, fallback: str) -> str:
-    """A source's id, derived from its exact URL, so it is the same wherever the URL is cited.
-
-    evidence.csv and sources.csv both carry it, so the two files join. A citation with no URL has
-    nothing to derive an id from, and keeps `fallback`, its own per-citation id.
-    """
-    exact = normalize_url(url)
-    if not exact:
-        return fallback
-    return "WAISRC-" + hashlib.sha256(exact.encode("utf-8")).hexdigest()[:12]
-
-
 # --- phase 2: arbitrate (pure, offline) -------------------------------------------------------
 def extract_evidence(
     site: dict[str, Any],
@@ -126,18 +108,26 @@ def extract_evidence(
     access_date: date,
     link_results: dict[str, LinkResult] | None = None,
     keep_broken_links: bool = False,
+    locations: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    """Turn one cached response into evidence items grouped by attribute.
+    """Turn one cached response, of either shape, into evidence items grouped by attribute.
 
-    `link_results` are the run's link-check verdicts (WP-533), keyed by the URL as the agent wrote
-    it. A repaired URL replaces the one the agent wrote; the original stays in the raw response. A
-    Broken link is treated like a missing one - the source cannot be promoted and goes to leads -
-    unless keep_broken_links is set. Unverified links are never touched.
+    The response is read as sources, each with its values (payload.read_payload). `link_results`
+    are the run's link-check verdicts (WP-533), keyed by the URL as the agent wrote it. A repaired
+    URL replaces the one the agent wrote; the original stays in the raw response. A Broken link is
+    treated like a missing one - the source cannot be promoted and goes to leads - unless
+    keep_broken_links is set. Unverified links are never touched.
 
     A citation of a dropped map site (DROPPED_SOURCE_SITES) is skipped before anything else, and
     counted in the warnings, one line per map site, with any of the agent's unverified_leads that
     point at one. An attribute whose every source was one is left with none, so, like a value
     given with no source, it is not promoted.
+
+    Each source's stated location is read into a point (locate.py), with geocoded addresses taken
+    from `locations`, the run's source_locations.json; nothing here reaches the network. Every row
+    of a source carries the facility it describes and that point. A source that states a location
+    also gets a found_location row, and where the point is coordinates, a grid reference or a
+    rooftop address, it is evidence for the site's found location.
     """
     link_results = link_results or {}
     site_id = normalize_scalar(site.get("site_id"))
@@ -146,16 +136,44 @@ def extract_evidence(
     source_entries: list[dict[str, Any]] = []
     warnings: list[str] = []
     dropped: dict[str, int] = {}
+    only_dropped: set[str] = set()
+    kept_attributes: set[str] = set()
     order = 0
+    read = read_payload(payload)
+    located: dict[int, Located] = {}
 
-    for attr_index, attribute in enumerate(payload.get("attributes", []) or [], start=1):
-        if not isinstance(attribute, dict):
-            continue
+    for source_index, source in enumerate(read["sources"], start=1):
         # A cached response from before a rename still carries the old attribute name.
+        names = {canonical_attribute(normalize_scalar(value.get("attribute_name"))) for value in source["values"]}
+        mirror = dropped_source_site(source.get("url"))
+        if mirror:
+            dropped[mirror] = dropped.get(mirror, 0) + max(1, len(source["values"]))
+            only_dropped.update(names)
+        else:
+            kept_attributes.update(names)
+            located[source_index] = locate_source(source, site, locations)
+
+    def link_for(source: dict[str, Any]) -> tuple[str, str, bool, LinkResult | None]:
+        """The URL to file a source under, its link verdict, and whether the link is dead."""
+        raw_url = normalize_scalar(source.get("url"))
+        link = link_results.get(raw_url)
+        link_status = link.verdict if link else ""
+        return (link.resolved_url if link else raw_url), link_status, link_status == BROKEN and not keep_broken_links, link
+
+    for source_index, page, value_index, attribute in citations(read):
+        if source_index not in located:
+            continue  # a dropped map site
+        # A response cached attribute-first keeps how each citation described its page.
+        source = cited_source(page, attribute)
         name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
-        if name not in REQUESTABLE_ATTRIBUTES:
+        if name not in VALUE_ATTRIBUTES:
             warnings.append(f"Unsupported attribute_name {name!r} dropped.")
             continue
+        url, link_status, dead_link, link = link_for(source)
+        # The evidence id stays per citation; the source id is the exact URL's, shared by every
+        # citation of it, so evidence.csv joins sources.csv.
+        evidence_id, fallback_source_id = citation_ids(site_id, source_index, value_index, attribute)
+        source_id = source_id_for(url, fallback=fallback_source_id)
 
         conversion = convert_attribute_value(name, attribute.get("value"), attribute.get("unit"))
         # A failed conversion returns the value untouched in its ORIGINAL unit. Promoting that
@@ -173,10 +191,10 @@ def extract_evidence(
             mapping_note = note
             value = "" if parsed is None else ("TRUE" if parsed else "FALSE")
         elif name == "waste_depth":
-            # Bin the CONVERTED metres, not the raw value: the source may have reported feet, and
-            # the 5m boundary is only meaningful once the unit conversion above has run. A failed
-            # conversion leaves conversion.value in its original unit, so skip binning entirely
-            # there and let the conversion warning exclude the row.
+            # Bin the CONVERTED metres, not the raw value: the source may have reported feet,
+            # and the 5m boundary is only meaningful once the unit conversion above has run. A
+            # failed conversion leaves conversion.value in its original unit, so skip binning
+            # entirely there and let the conversion warning exclude the row.
             if conversion_failed:
                 value = ""
             else:
@@ -207,117 +225,162 @@ def extract_evidence(
             if numeric_note:
                 warnings.append(numeric_note)
 
-        sources = [item for item in (attribute.get("sources") or []) if isinstance(item, dict)]
-        kept = 0
-        for source_index, source in enumerate(sources, start=1):
-            raw_url = normalize_scalar(source.get("url"))
-            mirror = dropped_source_site(raw_url)
-            if mirror:
-                dropped[mirror] = dropped.get(mirror, 0) + 1
-                continue
-            kept += 1
-            order += 1
-            # The evidence id stays per citation; the source id is the exact URL's, shared by
-            # every citation of it, so evidence.csv joins sources.csv.
-            evidence_id = f"WAIEV-{site_id}-{attr_index:03d}-{source_index:03d}"
-            tier, rule = assign_source_tier(source, name)
-            link = link_results.get(raw_url)
-            url = link.resolved_url if link else raw_url
-            link_status = link.verdict if link else ""
-            dead_link = link_status == BROKEN and not keep_broken_links
-            source_id = source_id_for(url, fallback=f"WAISRC-{site_id}-{attr_index:03d}-{source_index:03d}")
+        order += 1
+        tier, rule = assign_source_tier(source, name)
 
-            item = {
+        item = {
+            "evidence_id": evidence_id,
+            "source_id": source_id,
+            "attribute_name": name,
+            "value": value,
+            "unit": conversion.unit,
+            "tier": tier,
+            "order": order,
+            "url": url,
+            "link_status": link_status,
+            "value_date": normalize_scalar(attribute.get("value_date")),
+            "confidence": normalize_scalar(attribute.get("confidence_score")),
+            "evidence_summary": normalize_scalar(attribute.get("evidence_summary")),
+        }
+        if url and not dead_link and not is_blank(value) and not numeric_note:
+            by_attribute.setdefault(name, []).append(item)
+
+        promotable = (
+            bool(url) and not dead_link and not is_blank(value) and is_promotable(tier) and not numeric_note
+        )
+        exclusion = ""
+        if not url:
+            exclusion = "No clickable source URL."
+        elif dead_link:
+            exclusion = f"Source link broken ({link.status}); not promoted."
+        elif is_blank(value):
+            exclusion = "Value empty after normalization."
+        elif numeric_note:
+            exclusion = numeric_note
+        elif not is_promotable(tier):
+            exclusion = f"{tier_label(tier)} is below the promotion floor."
+
+        evidence_rows.append(
+            {
                 "evidence_id": evidence_id,
-                "source_id": source_id,
+                "run_id": run_id,
+                "dataset_version": dataset_version,
+                "site_id": site_id,
+                "internal_facility_id": normalize_scalar(site.get("internal_facility_id") or site_id),
                 "attribute_name": name,
-                "value": value,
-                "unit": conversion.unit,
-                "tier": tier,
-                "order": order,
-                "url": url,
-                "link_status": link_status,
+                "claimed_value": conversion.original_value,
+                "claimed_unit": conversion.original_unit,
+                "normalized_value": conversion.value,
+                "normalized_unit": conversion.unit,
+                "unit_conversion_note": conversion.note,
+                "mapped_value": normalize_scalar(value),
+                "mapping_note": mapping_note,
+                "value_basis": normalize_scalar(attribute.get("value_basis")),
                 "value_date": normalize_scalar(attribute.get("value_date")),
-                "confidence": normalize_scalar(attribute.get("confidence_score")),
+                "agent_confidence": normalize_scalar(attribute.get("confidence_score")),
+                "source_id": source_id,
+                "link_status": link_status,
+                "url": url,
+                "source_tier": tier_label(tier),
+                "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
+                "tier_rule_applied": rule,
                 "evidence_summary": normalize_scalar(attribute.get("evidence_summary")),
+                "quoted_evidence_short": normalize_scalar(attribute.get("quoted_evidence_short")),
+                "search_terms_used": normalize_scalar(attribute.get("search_terms_used")),
+                "promotion_eligible": "TRUE" if promotable else "FALSE",
+                "exclusion_reason": exclusion,
+                "record_created_date": access_date.isoformat(),
+                **location_columns(source, located[source_index]),
             }
-            if url and not dead_link and not is_blank(value) and not numeric_note:
-                by_attribute.setdefault(name, []).append(item)
+        )
+        source_entries.append(source_entry(source, source_id, url, tier, rule, run_id, site_id))
 
-            promotable = (
-                bool(url) and not dead_link and not is_blank(value) and is_promotable(tier) and not numeric_note
-            )
-            exclusion = ""
-            if not url:
-                exclusion = "No clickable source URL."
-            elif dead_link:
-                exclusion = f"Source link broken ({link.status}); not promoted."
-            elif is_blank(value):
-                exclusion = "Value empty after normalization."
-            elif numeric_note:
-                exclusion = numeric_note
-            elif not is_promotable(tier):
-                exclusion = f"{tier_label(tier)} is below the promotion floor."
-
-            evidence_rows.append(
+    # Where each source puts the facility. Only a site whose coordinates are asked for (and so not
+    # from a Tier 1-2 source) has a found location reviewed; elsewhere the locations are recorded.
+    asked = asks_location(site)
+    for source_index, place in located.items():
+        source = cited_source(read["sources"][source_index - 1])
+        if not states_location(source):
+            continue
+        url, link_status, dead_link, link = link_for(source)
+        evidence_id = f"WAIEV-{site_id}-S{source_index:03d}-LOC"
+        source_id = source_id_for(url, fallback=f"WAISRC-{site_id}-S{source_index:03d}")
+        tier, rule = assign_source_tier(source, LOCATION_ATTRIBUTE)
+        value = place.value() if place.basis in VALUE_BASES else ""
+        published = normalize_scalar(source.get("publication_date"))
+        summary = f"Read as {place.basis} from the location the source states: {normalize_scalar(source.get('stated_location'))}"
+        order += 1
+        if url and not dead_link and value:
+            by_attribute.setdefault(LOCATION_ATTRIBUTE, []).append(
                 {
                     "evidence_id": evidence_id,
-                    "run_id": run_id,
-                    "dataset_version": dataset_version,
-                    "site_id": site_id,
-                    "internal_facility_id": normalize_scalar(site.get("internal_facility_id") or site_id),
-                    "attribute_name": name,
-                    "claimed_value": conversion.original_value,
-                    "claimed_unit": conversion.original_unit,
-                    "normalized_value": conversion.value,
-                    "normalized_unit": conversion.unit,
-                    "unit_conversion_note": conversion.note,
-                    "mapped_value": normalize_scalar(value),
-                    "mapping_note": mapping_note,
-                    "value_basis": normalize_scalar(attribute.get("value_basis")),
-                    "value_date": normalize_scalar(attribute.get("value_date")),
-                    "agent_confidence": normalize_scalar(attribute.get("confidence_score")),
                     "source_id": source_id,
+                    "attribute_name": LOCATION_ATTRIBUTE,
+                    "value": value,
+                    "unit": "decimal degrees",
+                    "tier": tier,
+                    "order": order,
+                    "url": url,
                     "link_status": link_status,
-                    "url": url,
-                    "source_tier": tier_label(tier),
-                    "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
-                    "tier_rule_applied": rule,
-                    "evidence_summary": normalize_scalar(attribute.get("evidence_summary")),
-                    "quoted_evidence_short": normalize_scalar(source.get("quoted_evidence_short")),
-                    "search_terms_used": normalize_scalar(attribute.get("search_terms_used")),
-                    "promotion_eligible": "TRUE" if promotable else "FALSE",
-                    "exclusion_reason": exclusion,
-                    "record_created_date": access_date.isoformat(),
+                    # A location has no date of its own; the newest source wins a tie of tiers.
+                    "value_date": published,
+                    "confidence": "",
+                    "evidence_summary": summary,
                 }
             )
+        exclusion = ""
+        if not url:
+            exclusion = "No clickable source URL."
+        elif dead_link:
+            exclusion = f"Source link broken ({link.status}); not promoted."
+        elif not value:
+            exclusion = location_exclusion(place)
+        elif not asked:
+            exclusion = "Recorded only: our location comes from a Tier 1-2 source, so it is not reviewed."
+        elif not is_promotable(tier):
+            exclusion = f"{tier_label(tier)} is below the promotion floor."
+        evidence_rows.append(
+            {
+                "evidence_id": evidence_id,
+                "run_id": run_id,
+                "dataset_version": dataset_version,
+                "site_id": site_id,
+                "internal_facility_id": normalize_scalar(site.get("internal_facility_id") or site_id),
+                "attribute_name": LOCATION_ATTRIBUTE,
+                "claimed_value": normalize_scalar(source.get("stated_location")),
+                "claimed_unit": normalize_scalar(source.get("stated_location_kind")),
+                "normalized_value": place.value(),
+                "normalized_unit": "decimal degrees" if place.point else "",
+                "unit_conversion_note": "",
+                "mapped_value": value,
+                "mapping_note": "",
+                "value_basis": "",
+                "value_date": published,
+                "agent_confidence": "",
+                "source_id": source_id,
+                "link_status": link_status,
+                "url": url,
+                "source_tier": tier_label(tier),
+                "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
+                "tier_rule_applied": rule,
+                "evidence_summary": summary,
+                "quoted_evidence_short": "",
+                "search_terms_used": "",
+                "promotion_eligible": "TRUE" if not exclusion else "FALSE",
+                "exclusion_reason": exclusion,
+                "record_created_date": access_date.isoformat(),
+                **location_columns(source, place),
+            }
+        )
+        source_entries.append(source_entry(source, source_id, url, tier, rule, run_id, site_id))
 
-            source_entries.append(
-                {
-                    "source_id": source_id,
-                    "url_normalized": normalize_url(url),
-                    "url": url,
-                    "source_title": normalize_scalar(source.get("source_title")),
-                    "publisher": normalize_scalar(source.get("publisher")),
-                    "source_type": normalize_scalar(source.get("source_type")),
-                    "source_tier": tier_label(tier),
-                    "tier_rule_applied": rule,
-                    "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
-                    "publication_date": normalize_scalar(source.get("publication_date")),
-                    "has_publication_date": "TRUE" if normalize_scalar(source.get("publication_date")) else "FALSE",
-                    "language": normalize_scalar(source.get("language")),
-                    "paywall_flag": "TRUE" if source.get("paywall_flag") else "FALSE",
-                    "subscription_followup_needed": "TRUE" if source.get("subscription_followup_needed") else "FALSE",
-                    "first_seen_run_id": run_id,
-                    "site_id": site_id,
-                }
-            )
-        if sources and not kept:
+    for name in sorted(only_dropped - kept_attributes):
+        if name in VALUE_ATTRIBUTES:
             warnings.append(f"{name}: every source was a dropped map site; not promoted.")
 
     # The agent's own leads go to the Leads sheet (payload_leads), which skips the same map sites,
     # so they are counted with the rest.
-    for lead in payload.get("unverified_leads", []) or []:
+    for lead in read["unverified_leads"]:
         mirror = dropped_source_site(lead.get("url")) if isinstance(lead, dict) else ""
         if mirror:
             dropped[mirror] = dropped.get(mirror, 0) + 1
@@ -327,7 +390,61 @@ def extract_evidence(
             f"Dropped {count} citation(s) of {mirror}: map sites that copy OpenStreetMap or scrape "
             "listings are not used as sources."
         )
-    return by_attribute, evidence_rows, source_entries, warnings
+    # A value cited by several sources is checked once per source; one warning says it.
+    return by_attribute, evidence_rows, source_entries, list(dict.fromkeys(warnings))
+
+
+def location_columns(source: dict[str, Any], place: Located) -> dict[str, str]:
+    """The facility a source describes, as it writes it, and the point read from its location."""
+    stated = states_location(source)
+    return {
+        "facility_name_in_source": normalize_scalar(source.get("facility_name_in_source")),
+        "facility_name_english": normalize_scalar(source.get("facility_name_english")),
+        "stated_location": normalize_scalar(source.get("stated_location")) if stated else "",
+        "stated_location_kind": normalize_scalar(source.get("stated_location_kind")) if stated else "",
+        "location_basis": place.basis if stated else "",
+        "located_latitude": format_coordinate(place.latitude) if stated else "",
+        "located_longitude": format_coordinate(place.longitude) if stated else "",
+        "location_reason": place.reason if stated else "",
+    }
+
+
+def describe_located(bases: list[str]) -> str:
+    """A count with its bases, for Run_Config: "12 (coordinates 9, street 3)", or "0"."""
+    return f"{len(bases):,} ({count_bases(bases)})" if bases else "0"
+
+
+def location_exclusion(place: Located) -> str:
+    """Why a stated location is not a location value."""
+    if place.basis == STREET:
+        return "An address placed only on its street is used for matching, not as a value."
+    if place.basis == HINT:
+        return f"A hint, not a location value: {place.reason}."
+    return f"No location: {place.reason}."
+
+
+def source_entry(
+    source: dict[str, Any], source_id: str, url: str, tier: int, rule: str, run_id: str, site_id: str
+) -> dict[str, Any]:
+    """One citation's row for sources.csv, before dedupe_sources makes it one row per URL."""
+    return {
+        "source_id": source_id,
+        "url_normalized": normalize_url(url),
+        "url": url,
+        "source_title": normalize_scalar(source.get("source_title")),
+        "publisher": normalize_scalar(source.get("publisher")),
+        "source_type": normalize_scalar(source.get("source_type")),
+        "source_tier": tier_label(tier),
+        "tier_rule_applied": rule,
+        "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
+        "publication_date": normalize_scalar(source.get("publication_date")),
+        "has_publication_date": "TRUE" if normalize_scalar(source.get("publication_date")) else "FALSE",
+        "language": normalize_scalar(source.get("language")),
+        "paywall_flag": "TRUE" if source.get("paywall_flag") else "FALSE",
+        "subscription_followup_needed": "TRUE" if source.get("subscription_followup_needed") else "FALSE",
+        "first_seen_run_id": run_id,
+        "site_id": site_id,
+    }
 
 
 def dedupe_sources(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -356,26 +473,6 @@ def dedupe_sources(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def merge_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
-    """Combine every pass's response for one site into a single payload.
-
-    Attributes and leads accumulate across passes; search notes are joined so a tool failure in
-    any pass stays visible.
-    """
-    if len(payloads) == 1:
-        return payloads[0]
-    merged: dict[str, Any] = {"site_id": payloads[0].get("site_id"), "attributes": [], "unverified_leads": []}
-    notes = []
-    for payload in payloads:
-        merged["attributes"].extend(payload.get("attributes") or [])
-        merged["unverified_leads"].extend(payload.get("unverified_leads") or [])
-        note = normalize_scalar(payload.get("search_notes"))
-        if note:
-            notes.append(note)
-    merged["search_notes"] = " | ".join(notes)
-    return merged
-
-
 def cached_source_urls(run_dir: Path) -> list[str]:
     """Every source URL in a run's cached responses, read the way arbitration reads them.
 
@@ -385,16 +482,10 @@ def cached_source_urls(run_dir: Path) -> list[str]:
     urls: list[str] = []
     for path in sorted(raw_dir(run_dir).glob("site_*.json")):
         try:
-            payload = merge_payloads([load_json(path)])
+            payload = load_json(path)
         except (OSError, json.JSONDecodeError):
             continue
-        for attribute in payload.get("attributes", []) or []:
-            if not isinstance(attribute, dict):
-                continue
-            for source in attribute.get("sources") or []:
-                url = normalize_scalar(source.get("url")) if isinstance(source, dict) else ""
-                if url and not dropped_source_site(url):
-                    urls.append(url)
+        urls.extend(url for url in payload_urls(payload) if not dropped_source_site(url))
     return list(dict.fromkeys(urls))
 
 
@@ -480,112 +571,57 @@ def cover_consistency_warnings(resolved: list[dict[str, Any]]) -> list[str]:
     return []
 
 
-def append_distance_row(site: dict[str, Any], resolved: list[dict[str, Any]]) -> float | None:
-    """Compute distance between found and seed coordinates. No source, so no tier (Q12)."""
-    found = {row["attribute_name"]: row for row in resolved}
-    lat = parse_float(found.get("found_latitude", {}).get("resolved_value"))
-    lon = parse_float(found.get("found_longitude", {}).get("resolved_value"))
-    base_lat = parse_float(site.get("latitude"))
-    base_lon = parse_float(site.get("longitude"))
-    if None in (lat, lon, base_lat, base_lon):
-        return None
-    km = haversine_km(base_lat, base_lon, lat, lon)
-    resolved.append(
-        calculated_row(
-            site,
-            CALCULATED_ATTRIBUTES[0],
-            f"{km:.3f}".rstrip("0").rstrip("."),
-            "km",
-            "Haversine distance between seed coordinates and source-backed found coordinates.",
-        )
-    )
-    return km
+def farthest_location_km(site: dict[str, Any], evidence_rows: list[dict[str, Any]]) -> float | None:
+    """How far from the seed the farthest of a site's sources puts it, where its point can be used.
 
-
-def axis_offset_km(site: dict[str, Any], attribute_name: str, value: Any) -> float | None:
-    """How far a single found coordinate sits from the seed, holding the other axis fixed.
-
-    Computed per axis so a coordinate can be judged even when its counterpart was never found.
+    A hint is too coarse to judge by, and a location copied from the prompt is not one at all.
     """
-    base_lat = parse_float(site.get("latitude"))
-    base_lon = parse_float(site.get("longitude"))
-    found = parse_float(value)
-    if None in (base_lat, base_lon, found):
+    seed = seed_point(site)
+    if seed is None:
         return None
-    if attribute_name == "found_latitude":
-        return haversine_km(base_lat, base_lon, found, base_lon)
-    if attribute_name == "found_longitude":
-        return haversine_km(base_lat, base_lon, base_lat, found)
-    return None
-
-
-def single_axis_offset_km(site: dict[str, Any], resolved: list[dict[str, Any]]) -> float | None:
-    """How far the one found coordinate puts the site from the seed, when only one resolved.
-
-    Without it the identity gate never ran on a lone coordinate: a latitude 222 km off left the
-    site's other values unflagged. At gate distances one axis's offset is close to the full
-    distance, so a large one still shows the agent researched another facility.
-    """
-    offsets = [
-        axis_offset_km(site, row["attribute_name"], row.get("resolved_value"))
-        for row in resolved
-        if row.get("attribute_name") in {"found_latitude", "found_longitude"}
-        and normalize_scalar(row.get("resolved_value"))
+    distances = [
+        haversine_km(*seed, float(row["located_latitude"]), float(row["located_longitude"]))
+        for row in evidence_rows
+        if row.get("attribute_name") == LOCATION_ATTRIBUTE and row.get("location_basis") in MATCHING_BASES
     ]
-    offsets = [km for km in offsets if km is not None]
-    return max(offsets) if offsets else None
+    return max(distances, default=None)
 
 
 def dropped_map_site_offset_km(site: dict[str, Any], payload: dict[str, Any]) -> tuple[float | None, str]:
-    """How far a dropped map site's own coordinates put the facility from the seed, and which site.
+    """How far a dropped map site's own location puts the facility from the seed, and which site.
 
     Dropping Mapcarta and Maptons as sources also took most of what the identity gate measures: in
     batch 1 they gave the only found coordinates at 34 of the 46 sites it flagged, each a map page
-    more than 5 km from our site. So their coordinates are still read here, for the gate alone.
-    They are never evidence or a value. A page's latitude and longitude are paired; a lone one is
-    judged by its axis offset, as single_axis_offset_km does. The farthest page counts. Build step 5
-    of the source-matching plan replaces the gate, and this goes with it.
+    more than 5 km from our site. So the location such a page states is still read here, for the
+    gate alone, never as evidence or a value. The farthest page counts. Build step 5 of the
+    source-matching plan replaces the gate, and this goes with it.
     """
-    pages: dict[str, dict[str, Any]] = {}
-    for attribute in payload.get("attributes", []) or []:
-        if not isinstance(attribute, dict):
-            continue
-        name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
-        if name not in {"found_latitude", "found_longitude"}:
-            continue
-        conversion = convert_attribute_value(name, attribute.get("value"), attribute.get("unit"))
-        value = None if conversion.warning else parse_float(conversion.value)
-        if value is None:
-            continue
-        for source in attribute.get("sources") or []:
-            url = normalize_scalar(source.get("url")) if isinstance(source, dict) else ""
-            mirror = dropped_source_site(url)
-            if mirror:
-                pages.setdefault(normalize_url(url), {"site": mirror})[name] = value
-
-    base_lat = parse_float(site.get("latitude"))
-    base_lon = parse_float(site.get("longitude"))
+    seed = seed_point(site)
+    iso3 = normalize_scalar(site.get("country_iso3"))
     farthest: float | None = None
     farthest_site = ""
-    for page in pages.values():
-        lat, lon = page.get("found_latitude"), page.get("found_longitude")
-        if None not in (lat, lon, base_lat, base_lon):
-            km = haversine_km(base_lat, base_lon, lat, lon)
-        elif lat is not None:
-            km = axis_offset_km(site, "found_latitude", lat)
-        else:
-            km = axis_offset_km(site, "found_longitude", lon)
-        if km is not None and (farthest is None or km > farthest):
-            farthest, farthest_site = km, page["site"]
+    if seed is None:
+        return farthest, farthest_site
+    for source in read_payload(payload)["sources"]:
+        mirror = dropped_source_site(source.get("url"))
+        if not mirror:
+            continue
+        stated = normalize_scalar(source.get("stated_location")).split("|")[0]
+        place = parse_point(stated, iso3) if stated else None
+        if place is None or place.point is None:
+            continue
+        km = haversine_km(*seed, *place.point)
+        if farthest is None or km > farthest:
+            farthest, farthest_site = km, mirror
     return farthest, farthest_site
 
 
 def flag_identity_mismatch(
     resolved: list[dict[str, Any]],
     km: float | None,
-    coordinates: str = "source-backed coordinates are",
+    coordinates: str = "a source's stated location is",
 ) -> bool:
-    """Warn the SME about every value from a site whose found coordinates are too far from the seed.
+    """Warn the SME about every value from a site whose sources put it too far from the seed.
 
     Tier cannot detect a credible source describing the wrong facility. Distance can, so a large
     mismatch is noted on each of the site's values. Nothing is accepted automatically, so the note
@@ -605,137 +641,104 @@ def flag_identity_mismatch(
     return True
 
 
-# How settled each verdict is, least first: a location takes the less settled of its two halves.
-LOCATION_VERDICT_ORDER = ["Routed to leads", "Needs review", NOTHING_TO_REVIEW]
-# Which half's resolution describes the pair: a change outranks a confirmation.
-LOCATION_RESOLUTION_ORDER = [
-    "Conflict - lower credibility",
-    "Conflict - needs review",
-    "Overrides baseline",
-    "Filled empty baseline",
-    "Confirmed baseline",
-]
-CONFIDENCE_ORDER = ["Excluded candidate", "Low", "Medium", "High"]
+# Words that say what kind of place a facility is, or what sort of road it is on, not which one it
+# is: "Beta Landfill" and our "Alpha Landfill" share only "landfill", which says nothing.
+FACILITY_KIND_WORDS = {
+    "landfill", "landfills", "landfil", "sanitary", "waste", "wastes", "management", "facility",
+    "facilities", "site", "sites", "dump", "dumps", "dumpsite", "dumping", "tip", "refuse", "depot",
+    "grounds", "ground", "solid", "municipal", "msw", "disposal", "recycling", "recovery", "resource",
+    "resources", "centre", "center", "transfer", "station", "garbage", "rubbish", "trash", "the",
+    "and", "for", "city", "town", "county", "district", "regional", "region", "shire", "council",
+    "borough", "township", "village", "closed", "former", "old", "new", "ltd", "limited", "inc",
+    "llc", "plc", "gmbh", "company", "corporation", "corp", "integrated", "environmental", "eco",
+    "park", "area", "cell", "cells", "works", "plant", "yard", "household", "domestic",
+    "industrial", "hazardous", "inert", "organic", "organics", "compost", "composting",
+    "construction", "demolition", "road", "street", "avenue", "highway", "lane", "drive", "route",
+    "des", "del", "los", "las", "les", "aterro", "sanitario",
+    "controlado", "lixao", "vertedero", "relleno", "botadero", "tiradero", "deponie", "decharge",
+    "enfouissement", "technique", "lieu", "discarica", "полигон", "свалка", "тбо", "тко",
+}
 
 
-def _rank(value: Any, order: list[str]) -> int:
-    """Where a value sits in `order`; one `order` doesn't list counts as earliest of all."""
-    return order.index(value) if value in order else -1
+def distinctive_words(name: Any) -> tuple[list[str], bool]:
+    """The words of a name that say which facility it is, in order, and whether it is in Latin
+    letters.
 
-
-def _least(values: list[str], order: list[str]) -> str:
-    """The value earliest in `order`."""
-    return min(values, key=lambda value: _rank(value, order))
-
-
-def _joined(halves: list[dict[str, Any]], field: str) -> str:
-    """One field from both halves: once when they agree, labelled by axis when they don't."""
-    values = [normalize_scalar(half.get(field)) for half in halves]
-    if values[0] == values[1]:
-        return values[0]
-    return " ".join(f"{axis}: {value}" for axis, value in zip(("Latitude", "Longitude"), values) if value)
-
-
-def combine_location(resolved: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Replace a site's found latitude and longitude rows with one found_location row.
-
-    The agent reports the two coordinates separately, and each is resolved against the seed on its
-    own, so half a point could be accepted while the other half went to review or to leads. On
-    batch 1 that happened at 55 of the 157 sites with a found coordinate. A location is one fact,
-    so the pair takes the less settled verdict of its two halves: it goes to review if either half
-    differs from ours. Its value is "lat, lon", which Google Maps finds when pasted into its search
-    box, like baseline_coordinates.
-
-    Runs after the distance check and the identity gate, which need the separate halves.
-
-    Returns the found half when the other coordinate wasn't found, for the caller to list as a
-    lead: half a location is no location. A half that only confirms the seed is not returned,
-    since the database already holds it.
+    Case and accents are ignored, "&" is "and", and kind words, numbers and words under three
+    letters are dropped.
     """
-    halves = {row["attribute_name"]: row for row in resolved if row.get("attribute_name") in COORDINATE_ATTRIBUTES}
-    if not halves:
-        return None
-    resolved[:] = [row for row in resolved if row.get("attribute_name") not in COORDINATE_ATTRIBUTES]
+    folded = unicodedata.normalize("NFKD", normalize_scalar(name).casefold().replace("&", " and "))
+    folded = "".join(char for char in folded if not unicodedata.combining(char))
+    words = [
+        word for word in re.split(r"[\W_]+", folded)
+        if len(word) >= 3 and not word.isdigit() and word not in FACILITY_KIND_WORDS
+    ]
+    return list(dict.fromkeys(words)), all(char.isascii() for char in folded if char.isalpha())
 
-    found = [half for half in halves.values() if normalize_scalar(half.get("resolved_value"))]
-    if len(found) < len(COORDINATE_ATTRIBUTES):
-        lone = found[0] if found else None
-        unfound = [half for half in halves.values() if half is not lone]
-        # Described by the less settled of the halves with no value, so a coordinate the
-        # baseline outranks still reaches the leads sheet, as it did before the two were joined.
-        basis = min(unfound or [lone], key=lambda half: _rank(half.get("validation_status"), LOCATION_VERDICT_ORDER))
-        row = dict(basis)
-        row.update({"attribute_name": LOCATION_ATTRIBUTE, "resolved_value": "", "resolved_unit": ""})
-        if lone is not None and (not unfound or row.get("resolution") == "Not found"):
-            axis = "latitude" if lone["attribute_name"] == "found_latitude" else "longitude"
-            row.update(
-                {
-                    "resolution": "Not found",
-                    "resolution_rule": f"Only the {axis} was found, and a location needs both, so neither is used.",
-                    "winning_evidence_id": "",
-                    "winning_source_tier": "",
-                    "winning_source_url": "",
-                    "winning_link_status": "",
-                    "value_date": "",
-                    "confidence_score": "",
-                    "validation_status": NOTHING_TO_REVIEW,
-                }
-            )
-        resolved.append(row)
-        if lone is not None and lone.get("resolution") != "Confirmed baseline":
-            return lone
-        return None
 
-    latitude, longitude = halves["found_latitude"], halves["found_longitude"]
-    pair = [latitude, longitude]
-    verdict = _least([normalize_scalar(half.get("validation_status")) for half in pair], LOCATION_VERDICT_ORDER)
-    rule = _joined(pair, "resolution_rule")
-    tiers = [normalize_scalar(half.get("winning_source_tier")) for half in pair]
-    if normalize_scalar(latitude.get("winning_source_url")) != normalize_scalar(longitude.get("winning_source_url")):
-        rule = (
-            f"{rule} The two coordinates come from different sources (longitude: "
-            f"{normalize_scalar(longitude.get('winning_source_url'))}); check they are one location."
-        ).strip()
-    if tiers[0] != tiers[1]:
-        # The pair is only as credible as its weaker half, so that is the tier the SME compares.
-        rule = f"{rule} Latitude's source is {tiers[0]}, longitude's {tiers[1]}.".strip()
+def _same_word(one: str, two: str) -> bool:
+    """Alike enough to be one word misspelled or inflected: "Meadows" and "Medows" or "Meadow"."""
+    if one == two:
+        return True
+    if min(len(one), len(two)) >= 4 and (one.startswith(two) or two.startswith(one)):
+        return True
+    return min(len(one), len(two)) >= 5 and SequenceMatcher(None, one, two).ratio() >= 0.85
 
-    notes = []
-    for half in pair:
-        note = normalize_scalar(half.get("researcher_notes"))
-        if note and note not in notes:
-            notes.append(note)
-    baselines = [normalize_scalar(half.get("baseline_value")) for half in pair]
-    baseline = ", ".join(baselines) if all(baselines) else ""
-    resolution = _least([normalize_scalar(half.get("resolution")) for half in pair], LOCATION_RESOLUTION_ORDER)
-    value = f"{latitude['resolved_value']}, {longitude['resolved_value']}"
-    if resolution == "Confirmed baseline" and baseline:
-        # A location that confirms the seed's matches it to comparison precision, and keeps the
-        # seed's point, so nothing moves. One that differs by more is a value for review.
-        if value != baseline:
-            rule = f"{rule} Found {value}, which confirms the seed's location, so the seed's is kept.".strip()
-        value = baseline
 
-    row = dict(latitude)
-    row.update(
-        {
-            "attribute_name": LOCATION_ATTRIBUTE,
-            "baseline_value": baseline,
-            "resolved_value": value,
-            "resolved_unit": "decimal degrees",
-            "resolution": resolution,
-            "resolution_rule": rule,
-            "winning_source_tier": max(tiers, key=lambda tier: TIER_BY_LABEL.get(tier, 0)),
-            "agreeing_source_count": min(int(half.get("agreeing_source_count") or 0) for half in pair),
-            "dissenting_source_count": max(int(half.get("dissenting_source_count") or 0) for half in pair),
-            "value_date": max((normalize_scalar(half.get("value_date")) for half in pair), key=date_key),
-            "confidence_score": _least([normalize_scalar(half.get("confidence_score")) for half in pair], CONFIDENCE_ORDER),
-            "validation_status": verdict,
-            "researcher_notes": " ".join(notes),
-        }
-    )
-    resolved.append(row)
-    return None
+def names_another_facility(source_names: list[Any], our_names: list[Any]) -> bool:
+    """Whether a source's name for the facility shares no distinctive word with any name of ours.
+
+    Names are compared only where both say which facility they are and are written in the same
+    script; a generic name ("Landfill Site") or one in another script can't be judged, and is not
+    flagged. Build step 5's name matching replaces this.
+    """
+    judged = False
+    for source_name in source_names:
+        theirs, their_script = distinctive_words(source_name)
+        if not theirs:
+            continue
+        for our_name in our_names:
+            ours, our_script = distinctive_words(our_name)
+            if not ours or their_script != our_script:
+                continue
+            judged = True
+            # One word written as two, or two as one, reads alike run together: "Peaks Nook".
+            if any(_same_word(one, two) for one in theirs for two in ours) or _same_word("".join(theirs), "".join(ours)):
+                return False
+    return judged
+
+
+def flag_other_facility_names(
+    site: dict[str, Any], resolved: list[dict[str, Any]], evidence_rows: list[dict[str, Any]]
+) -> int:
+    """Note each value whose winning source names a facility that shares no word with ours.
+
+    Until build step 5 matches each source to the site it is about, every source is filed under the
+    site searched, and the agent reports a source about another facility rather than leaving it out.
+    The 5 km check flags one that places the facility elsewhere; this flags one that names another,
+    with or without a location. Returns how many values it noted.
+    """
+    # A placeholder or generic name of ours ("OpenStreetMap Landfill", "Domestic landfill") says
+    # nothing about which facility it is, so a source can't be judged against it.
+    ours = [name for name in (site.get("site_name"), site.get("original_site_name")) if name_class(name) == NAMED]
+    by_id = {row["evidence_id"]: row for row in evidence_rows}
+    noted = 0
+    for row in resolved:
+        winner = by_id.get(normalize_scalar(row.get("winning_evidence_id")))
+        if winner is None or row.get("resolution") in {"Not found", "Calculated"}:
+            continue
+        in_source = normalize_scalar(winner.get("facility_name_in_source"))
+        english = normalize_scalar(winner.get("facility_name_english"))
+        if not names_another_facility([in_source, english], ours):
+            continue
+        named = in_source or english
+        if in_source and english and distinctive_words(in_source)[0] != distinctive_words(english)[0]:
+            named = f"{in_source} ({english})"
+        note = f"The winning source names {named}; check it is about this facility."
+        existing = normalize_scalar(row.get("researcher_notes"))
+        row["researcher_notes"] = f"{existing} {note}".strip() if existing else note
+        noted += 1
+    return noted
 
 
 def payload_leads(
@@ -753,10 +756,10 @@ def payload_leads(
         site_id = site_id_from_path(path)
         site = sites_by_id.get(site_id, {})
         try:
-            payload = load_json(path)
+            payload = read_payload(load_json(path))
         except (OSError, json.JSONDecodeError):
             continue
-        for lead in payload.get("unverified_leads", []) or []:
+        for lead in payload["unverified_leads"]:
             if isinstance(lead, dict):
                 summary = normalize_scalar(lead.get("lead_summary") or lead.get("summary") or lead.get("note"))
                 url = normalize_scalar(lead.get("url"))
@@ -820,8 +823,9 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     sites, _headers = resolve_sites(config, allow_database=False)
     sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
 
-    # Read only: the search phase did the fetching, so arbitration stays offline.
+    # Read only: the search phase did the fetching and the geocoding, so arbitration stays offline.
     link_results = load_results(config.run_dir / LINK_CHECK_FILE)
+    locations = load_locations(config.run_dir / SOURCE_LOCATIONS_FILE)
 
     # A site may have several cached responses - one per pass - and all of them count as evidence.
     by_site: dict[str, list[Path]] = {}
@@ -834,6 +838,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     leads: list[dict[str, Any]] = []
     parse_warnings: list[dict[str, Any]] = []
     retry_sites: list[dict[str, Any]] = []
+    # What each source that states a location was read as, for Run_Config.
+    stated_bases: list[str] = []
 
     for site_id, paths in sorted(by_site.items()):
         site = sites_by_id.get(site_id)
@@ -860,7 +866,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             continue
         payload = merge_payloads(payloads)
 
-        if not (payload.get("attributes") or []) and search_tool_failed(payload):
+        if is_empty(payload) and search_tool_failed(payload):
             retry_sites.append(
                 {
                     "site_id": site_id,
@@ -891,9 +897,10 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
 
         by_attribute, site_evidence, site_sources, warnings = extract_evidence(
             site, payload, config.run_id, config.dataset_version, access_date,
-            link_results=link_results, keep_broken_links=config.keep_broken_links,
+            link_results=link_results, keep_broken_links=config.keep_broken_links, locations=locations,
         )
         source_entries.extend(site_sources)
+        stated_bases += [row["location_basis"] for row in site_evidence if row["attribute_name"] == LOCATION_ATTRIBUTE]
         for warning in warnings:
             parse_warnings.append(
                 {
@@ -907,9 +914,11 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         # Resolve everything we would ask for, plus anything the agent actually returned.
         # A follow-up pass answers attributes the current seed would no longer request, and
         # discarding that evidence because of a stale baseline would silently lose the finding.
+        # A location is the exception: every source states one, but it is reviewed only where our
+        # coordinates are asked for, as found_location.
         site_resolved: list[dict[str, Any]] = []
         to_resolve = list(requested_attributes(site))
-        to_resolve += [name for name in by_attribute if name not in to_resolve]
+        to_resolve += [name for name in by_attribute if name not in to_resolve and name != LOCATION_ATTRIBUTE]
         for name in to_resolve:
             site_resolved.append(resolve(site, name, by_attribute.get(name, [])))
         for warning in cover_consistency_warnings(site_resolved):
@@ -922,10 +931,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                 }
             )
 
-        km = append_distance_row(site, site_resolved)
-        if km is None:
-            km = single_axis_offset_km(site, site_resolved)
-        coordinates, found = "source-backed coordinates are", "found coordinates"
+        km = farthest_location_km(site, site_evidence)
+        coordinates, found = "a source's stated location is", "a source's stated location"
         # A dropped map site is not a source, but its page still shows the agent looking at
         # another landfill, so its coordinates can fail the identity check too.
         map_km, map_site = dropped_map_site_offset_km(site, payload)
@@ -943,7 +950,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                     "warning": f"Identity not confirmed: {found} {km:.1f} km from seed location.",
                 }
             )
-        half_location = combine_location(site_resolved)
+        flag_other_facility_names(site, site_resolved, site_evidence)
         resolved_rows.extend(site_resolved)
 
         # Q8: cap evidence rows for pure confirmations; keep everything else.
@@ -952,8 +959,6 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             for row in site_resolved
             if row["resolution"] == "Confirmed baseline"
         }
-        if LOCATION_ATTRIBUTE in confirmed:
-            confirmed.update(COORDINATE_ATTRIBUTES)
         kept_per_attribute: dict[str, int] = {}
         for row in site_evidence:
             name = row["attribute_name"]
@@ -980,21 +985,6 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                     "exclusion_reason": row["resolution"],
                 }
             )
-        if half_location is not None:
-            leads.append(
-                {
-                    "run_id": config.run_id,
-                    "site_id": site_id,
-                    "site_name": normalize_scalar(site.get("site_name")),
-                    "country_iso3": normalize_scalar(site.get("country_iso3")),
-                    "attribute_name": half_location["attribute_name"],
-                    "lead_value": half_location["resolved_value"],
-                    "source_tier": half_location["winning_source_tier"] or half_location["best_tier_available"],
-                    "lead_summary": half_location["resolution_rule"],
-                    "url": half_location["winning_source_url"],
-                    "exclusion_reason": "Half a location: the other coordinate was not found.",
-                }
-            )
 
         # Feedback 1 lets a low-tier source fill an empty baseline, so a piece of evidence the
         # tier gate marked ineligible can still end up winning. Listing it as a lead as well would
@@ -1004,15 +994,15 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             for row in site_resolved
             if normalize_scalar(row.get("resolved_value"))
         }
-        if LOCATION_ATTRIBUTE in promoted_attributes:
-            promoted_attributes.update(COORDINATE_ATTRIBUTES)
-        # The lone coordinate of half a location is listed above, so its evidence isn't again.
-        half_location_evidence = normalize_scalar(half_location.get("winning_evidence_id")) if half_location else ""
 
         for row in site_evidence:
             if row["promotion_eligible"] == "TRUE" or not row["exclusion_reason"]:
                 continue
-            if half_location_evidence and normalize_scalar(row.get("evidence_id")) == half_location_evidence:
+            # A stated location is a lead only where it could have been a value and lost: a hint, a
+            # street-level address and a location recorded but not reviewed stay in evidence.csv.
+            if row["attribute_name"] == LOCATION_ATTRIBUTE and (
+                not asks_location(site) or row["location_basis"] not in VALUE_BASES
+            ):
                 continue
             # A finding already promoted is not listed again as a lead. A dead-link source is the
             # exception: it never won anything - it was excluded before resolution - so the lead is
@@ -1118,6 +1108,12 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {
                 "setting": "broken_link_route",
                 "value": "kept promotable" if config.keep_broken_links else "routed to leads",
+            },
+            {"setting": "locations_stated", "value": describe_located(stated_bases)},
+            {"setting": "locations_used", "value": describe_located([b for b in stated_bases if b in MATCHING_BASES])},
+            {
+                "setting": "geocoder",
+                "value": describe_geocoders(locations, (config.run_dir / SOURCE_LOCATIONS_FILE).exists()),
             },
             {"setting": "contradiction_checks", "value": contradiction_checks},
             {"setting": "not_a_waste_facility", "value": not_a_waste_facility},
