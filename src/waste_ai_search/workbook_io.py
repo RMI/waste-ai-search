@@ -345,7 +345,8 @@ def add_site_choices(ws, rows: list[dict[str, Any]]) -> None:
 
     The candidates are the site the value is filed under, the site searched, and the other sites
     its source fitted: our sites within 2 km of where it says the facility is, or namesakes of
-    its name. A typed site id is still accepted, so the list suggests rather than restricts.
+    its name. For a source with no location they also include every other site whose search cited
+    the same page. A typed site id is still accepted, so the list suggests rather than restricts.
     """
     headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
     if "corrected_site_id" not in headers:

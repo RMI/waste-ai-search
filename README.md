@@ -302,7 +302,7 @@ as none.
 | A location | 3. None within 2 km, but its name strongly matches the site searched, within 5 km of it (25 km where our location is flagged inexact) | The site searched. Its location is reviewed as a coordinate correction. Where we hold no location for the site searched, the name alone decides. |
 | A location | 4. Anything else | No site. Listed in `new_facility_candidates.csv`. |
 | No location | 5. Its name strongly matches exactly one other site of ours within 200 km of the site searched, and not the site searched | That site, **moved by name** |
-| No location | 6. Anything else | The site searched, flagged **no location**. The flag names any site of ours within 200 km that the name also fits, ties included, and says if the same page was cited for other searches. |
+| No location | 6. Anything else | The site searched, flagged **no location**. The flag names any site of ours within 200 km that the name also fits, ties included, and says if the same page was cited for other searches. `corrected_site_id` offers those sites, and the sites whose searches cited the page. |
 
 **Names** are scored by CJ's `facility_names.py` from #225, kept here as
 [`facility_names.py`](src/waste_ai_search/facility_names.py), which must stay aligned with it. Case,
@@ -1067,7 +1067,7 @@ credible document that describes the *wrong landfill*. In the pilot, one search'
 | **Tie** | Several of our sites are within 2 km and the name couldn't pick. `corrected_site_id` offers them. |
 | **Name nearby** | The source places it just beyond 2 km, but its name strongly matches this site: its location is a coordinate correction. |
 | **Moved by name** | The source gives no location, but its name strongly matches this site and not the one searched. |
-| **No location** | The source gives no location, so the value stays with the site searched, and only you can tell whether it is about this facility. The note names any of our sites nearby that the name also fits, and says if the same page was cited for other searches. |
+| **No location** | The source gives no location, so the value stays with the site searched, and only you can tell whether it is about this facility. The note names any of our sites nearby that the name also fits, and says if the same page was cited for other searches; `corrected_site_id` offers all of them. |
 
 A renamed site is fine. If the value is right but about another of our sites, put that site's id
 in `corrected_site_id` (a dropdown where there were several candidates; any site id may be typed)

@@ -576,7 +576,9 @@ class Matcher:
             )
             match += f" The same page was cited for {len(other_searches)} other search(es): {listed}."
         self.counts[NO_LOCATION] += 1
-        choices = [citation.searched_site_id, *(site.site_id for _km_away, site, _fit in namesakes)]
+        # The SME may re-file it under a namesake, or under a site whose own search cited the page:
+        # batch 1's Prairie Green pages, 283-311 km from Prairie Green, were cited by its search too.
+        choices = [citation.searched_site_id, *(site.site_id for _km_away, site, _fit in namesakes), *other_searches]
         if searched is None:
             self.filings[key] = Filing(citation.searched_site_id, NO_LOCATION, match, choices, citation.searched_site_id in self.selection)
             return

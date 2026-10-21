@@ -394,6 +394,24 @@ def test_the_flag_says_the_page_was_cited_for_other_searches():
     assert {filing.site_id for filing in matching.filings.values()} == {"12101", "12200", "12300"}
     assert "The same page was cited for 2 other search(es): 12200, 12300." in matching.filings[("12101", 1)].match
     assert matching.counts[NO_LOCATION] == 3  # once per search, never pooled
+    # The SME may re-file it under any of them.
+    assert matching.filings[("12200", 1)].choices == ["12200", "12101", "12300"]
+
+
+def test_prairie_green_beyond_200_km_stays_but_the_sme_is_offered_prairie_greens_own_search():
+    """Batch 1: Prairie Green's page was cited by the searches of 13490, 311 km away, and of Prairie
+    Green itself. Too far to move by name, it stays with 13490, and corrected_site_id offers 18529.
+    Brandon's page at Guelph's Eastview, 1,716 km away, is offered back to Brandon the same way."""
+    prairie_green = seed("18529", "Prairie Green IWMF", 50.0047, -97.1307)
+    searched = seed("13490", "domestic landfill", 50.94687, -101.26409)
+    page = "https://www.wasteconnections.ca/prairie-green"
+    matching = match([cite("13490", page, "Prairie Green Integrated Waste Management Facility"), cite("18529", page, "Prairie Green Landfill")],
+                     [prairie_green, searched])
+    filing = matching.filings[("13490", 1)]
+    assert (filing.site_id, filing.outcome, filing.choices) == ("13490", NO_LOCATION, ["13490", "18529"])
+    filing = match([cite("18499", BRANDON_PAGE, "Eastview Landfill"), cite("13338", BRANDON_PAGE, "Eastview Landfill")],
+                   [BRANDON, GUELPH]).filings[("18499", 1)]
+    assert (filing.site_id, filing.choices) == ("18499", ["18499", "13338"])
 
 
 def test_an_unusable_location_says_why():
