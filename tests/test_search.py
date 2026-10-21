@@ -227,8 +227,9 @@ def test_known_closed_sites_get_upfront_closing_year_emphasis():
     assert "appears to be closed" not in build_site_prompt(plain)
 
 
-def test_every_prompt_requires_closing_year_once_closure_is_discovered():
-    """Covers the case where closure is only learned during the search itself."""
+def test_a_prompt_asking_for_status_requires_closing_year_once_closure_is_discovered():
+    """Covers the case where closure is only learned during the search itself. A prompt that asks
+    for neither status nor closing year leaves this out (test_source_first_prompt.py)."""
     from waste_ai_search.prompt_builder import build_site_prompt
 
     prompt = build_site_prompt({"site_id": "3", "site_name": "Guagua Dumpsite", "country_iso3": "PHL"})
