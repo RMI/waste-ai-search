@@ -1,8 +1,9 @@
 # AI search: file each source under the site it is about, and review everything
 
-**Status:** agreed 20 October 2026, with the decisions listed below. Steps 1-4 of the build order
+**Status:** agreed 20 October 2026, with the decisions listed below. Steps 1-5 of the build order
 are built on branches (drop-map-mirrors, skip-unsearchable-names, review-everything,
-source-first-output), not yet merged. The step 4 live test has not run. To be built before batch 2.
+source-first-output, match-sources-to-sites), not yet merged. The step 4 live test has not run.
+The matching #261 changes are ingestion's, still to make. To be built before batch 2.
 **Date:** 20 October 2026
 
 ## The problem

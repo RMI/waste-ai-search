@@ -203,14 +203,17 @@ in Ireland's grids. Elsewhere the grid is unknown, so such metres are not read. 
 taken for an Irish Grid square, and where a text holds a licence number and a grid reference, the
 reference 100 m or finer wins.
 
-"Matching" is build step 5's: until then, a usable location feeds the site's `found_location` and
-the 5 km identity check (see [Attributes searched](#attributes-searched)).
+"Matching" is filing each source under the site of ours it is about (see
+[Matching each source to a site](#matching-each-source-to-a-site)).
 
 Three guards throw a location out, with the reason in `evidence.csv`:
 
-- **Copied from the prompt.** Coordinates equal to the rounded point the prompt gives, or within
-  10 m of our own point. In batch 1 the agent credited our exact OSM centroid to an Ontario
-  registry six times.
+- **Copied from the prompt.** Coordinates equal to the rounded point the prompt gives. In batch 1,
+  whose prompts carried our full point, the agent credited our exact OSM centroid to an Ontario
+  registry six times. The prompt no longer carries that point, so a source stating it exactly is
+  not a copy but a source that agrees with us, such as the regulator our seed came from, and it is
+  matched and confirms our location. (Until build step 5, a point within 10 m of ours counted as
+  copied too.)
 - **wastebook.co.uk.** Its coordinates are postcode centroids.
 - **A doubtful pair.** Where a source gives coordinates and an address, the coordinates win; if the
   address lands more than 2 km from them, neither is used. Coarse coordinates (a hint) give way to
@@ -224,6 +227,11 @@ street address is sent, with any leading facility name taken off, and text that 
 not sent at all. The names are the source's own, any `found_facility_name` it gives, and our
 site's `site_name` and `original_site_name`; `&` and `and` count as the same, and a name is taken
 off only where a comma, a dash or a number follows it, so "Hart" never shortens "Hartland Avenue".
+Text with no civic number that ends in a word for a waste site is a name too, whoever's it is:
+"Mapleward Road Landfill", "Highway 16 Transfer Station" or "Main Street Recycling Centre" is never
+sent, while "5405 Mapleward Road" is. The words are landfill, dump, tip, eco-centre, and site,
+station, centre, depot, park or grounds after waste, refuse, recycling, transfer, disposal and the
+like.
 
 **A PO box is where post goes, not where the site is.** A PO box, `Box 219`, `C.P.`, case postale,
 private or locked bag, `PMB`, `BP` and the like is taken out of an address, and what is left is
@@ -266,6 +274,97 @@ uv run waste-ai-search run --geocoder nominatim ...   # choose the geocoder for 
 Run_Config records `locations_stated` and `locations_used` (the usable ones: coordinates, grid
 reference, rooftop and street), each counted by basis, and `geocoder`: which geocoder answered,
 `none configured`, `none needed (no address stated)` or `locate step not run`.
+
+## Matching each source to a site
+
+Everything the agent returns used to be filed under the site it was asked about, and nothing
+checked that a source was about that site. Now arbitration files each source under the site of
+ours it is about, by where the source places the facility, with its name as a check (build step 5
+of [the plan](docs/plans/2026-10-20-match-sources-by-location.md);
+[`match.py`](src/waste_ai_search/match.py)). It runs offline, like the rest of arbitration.
+
+**Our sites** are every site in the run's `seed.csv`, in every country. A `--batch` run's seed holds
+the whole corpus; a run seeded with `--iso3` holds only those countries, so a source about a site
+across the border can't match it there.
+
+**Distance** is to a site's approximate edge: the distance to its point, less the radius of a circle
+with its `area_square_meters`, the radius capped at 2 km. A site with no area is its point. This is
+how entity linkage's `precise_v1` measures it (RMI/waste_data_ingestion_pipeline#225).
+
+**A location** is one the locate step read as coordinates, a grid reference, or an address placed
+on its building or its street. A hint, a location copied from the prompt and a doubtful one count
+as none.
+
+| The source has | Rule | Filed under |
+|---|---|---|
+| A location | 1. Exactly one of our sites within 2 km | That site, whether or not it was the one searched |
+| A location | 2. Two or more within 2 km | The one its name strongly matches, if exactly one does. Otherwise a **tie**: the site searched if it is one of them, else the nearest (among those its name fits, where it fits several). The pairs go on `possible_duplicates.csv`. |
+| A location | 3. None within 2 km, but its name strongly matches the site searched, within 5 km of it (25 km where our location is flagged inexact) | The site searched. Its location is reviewed as a coordinate correction. Where we hold no location for the site searched, the name alone decides. |
+| A location | 4. Anything else | No site. Listed in `new_facility_candidates.csv`. |
+| No location | 5. Its name strongly matches exactly one other site of ours within 200 km of the site searched, and not the site searched | That site, **moved by name** |
+| No location | 6. Anything else | The site searched, flagged **no location**. The flag names any site of ours within 200 km that the name also fits, ties included, and says if the same page was cited for other searches. |
+
+**Names** are scored by CJ's `facility_names.py` from #225, kept here as
+[`facility_names.py`](src/waste_ai_search/facility_names.py), which must stay aligned with it. Case,
+accents, punctuation, company suffixes and permit codes are ignored, and generic words are dropped
+("landfill", "sanitary", "waste management", and nine more this corpus needs, to be agreed with CJ:
+tip, refuse, depot, grounds, nuisance, lieu, enfouissement, technique and LET). The score, from 0 to
+1, is the higher of the share of the shorter name's words found in the longer one and how alike the
+two read as strings, so "Seaton Meadows Landfil" still matches "Seaton Meadows". Conflicting
+qualifiers (North and South, Cell I and Cell II) score 0.
+
+- A **strong** match scores 0.8 or more and shares at least two distinctive words. One shared word
+  is never strong: "Eastview Landfill" is both a Brandon and a Guelph site, 1,716 km apart. So a
+  source naming a one-word landfill, such as Merrick, is filed by its location or not moved at all.
+- A name with no distinctive words left, and our placeholders and generic labels ("OpenStreetMap
+  Landfill", "domestic landfill"), can't be judged.
+- A source's `facility_name_english` is compared with our `site_name`, and its
+  `facility_name_in_source` with our `original_site_name` where we have one. The higher score
+  counts. A response cached before build step 4 has no English name, so its name is compared as
+  written.
+
+**The same page counts once.** A source is its exact URL, query string included, with the facility
+name it gives, so a registry page naming many sites is several sources, and one cited by several
+searches is one. A page cited with no name is told apart by the location it states. A source with
+a location is matched once, however many searches cited it, and all their citations are filed
+with it. One with no location is matched for each search on its own, since rules 5 and 6 depend on
+the site searched. Located sources that match none of our sites and lie within 2 km of each other
+become one new-landfill candidate. Where two of our sites within 2 km of each other were both
+searched and cited the same page, the pair goes on `possible_duplicates.csv`: E-PRTR re-registered
+many facilities under new ids.
+
+**Only the run's selection gets values.** The selection is every site in the countries the run
+searched (those with a cached response), and in a default-excluded country (the US, Brazil) only
+the sites the run itself searched. A source filed under a site outside it, in another batch's
+country say, goes on `outside_run_matches.csv` instead of the review queue, since ingestion #261
+stops on a facility with values from two runs.
+
+**A site's trust still decides what is asked of SMEs.** Where the name or coordinates of the site a
+source is filed under come from a Tier 1–2 source, the source's name and location still match it,
+but they are recorded in `evidence.csv`, not queued as `found_facility_name` or `found_location`
+values. This is judged on the site the source is filed under, not the one searched.
+
+**"Not a Waste Facility"** is filed only under the site searched, and only where that site was
+offered the check (see [Not a waste facility](#not-a-waste-facility-wp-525)). A source that matching
+would file anywhere else gives its verdict to Leads, and is never a new-landfill candidate.
+
+The 5 km identity check, a dropped map page's coordinates read for it, and the note on a value
+whose winning source named another facility are gone: matching replaces all three.
+
+Run_Config counts each outcome, a source with a location once and one without once per search
+that cited it: `match_located`, `match_named_among_several`, `match_tie`, `match_name_nearby`,
+`match_new_facility`, `match_moved_by_name`, `match_no_location` and `match_outside_run`, beside
+`new_facility_candidates` and `possible_duplicates`.
+
+**On the batch-1 replay**, a plumbing check since batch 1's sources rarely give a location, 91
+located sources matched one site, 2 tied, 8 matched none, 76 moved by name, and 4,656 citations had
+no location. The queue has 6,432 rows (6,562 before), never two for one site, attribute and year.
+86 of them are filed under a site other than the one searched, at 26 sites: Thunder Bay's 15 rows,
+moved by name from searches of nearby "domestic landfill" sites, Otter Lake, Fredericton, Prairie
+Green, Moose Jaw and Benaraby among them. 11 rows go to two Ontario "domestic landfill" sites
+located at 0.0 km, because batch 1's prompts carried our full point and the agent copied it; new
+runs' prompts don't. 41 pairs are possible duplicates, Cowpen Bewley's and Foxhall's E-PRTR records
+among them.
 
 ## Storage and sharing
 
@@ -312,7 +411,9 @@ That searches, arbitrates, and — if any facility turns out to have a gas colle
 seed did not know about — automatically runs a second, narrow pass for that facility's gas-capture
 attributes and re-arbitrates. Same run id, same output directory, no reseeding by hand. Pass
 `--no-followup` to stop after the first pass. Nothing has been reviewed by then, so the follow-up
-reads the gas collection findings still waiting in the review queue.
+reads the gas collection findings still waiting in the review queue. They are keyed by the site
+each source is filed under, so the follow-up searches that site, and only a site in the run's
+selection.
 
 Why a second pass exists at all: gas-capture attributes are only asked of facilities known to have
 a collection system, and `has_landfill_gas_collection` is itself one of the searched attributes. A
@@ -343,6 +444,10 @@ uv run waste-ai-search arbitrate --run-id pilot10
 uv run waste-ai-search refresh-seed --run-id pilot10
 uv run waste-ai-search search --run-id pilot10_pass2 \
   --input-csv outputs/runs/pilot10/refreshed_seed.csv --site-ids <ids printed above>
+
+# After review - add the values SMEs rejected as "New facility - not in our database" to the run's
+# new_facility_candidates.csv. Reads the SharePoint copy of the workbook, else the run folder's.
+uv run waste-ai-search collect-new-facilities --run-id pilot10 [--workbook <reviewed .xlsx>]
 ```
 
 **Never search `refreshed_seed.csv` without `--site-ids`.** It holds the whole seeded corpus
@@ -405,11 +510,8 @@ used, with the facility that source describes and the values it gives.
 asked about. A source that turns out to describe a different facility is reported anyway, with that
 facility's name and location, but the agent does not go on researching it; from a registry that
 lists many sites, only the entry it used. A source that names or locates the facility but gives no
-value is reported too. Until build step 5 matches each source to the site it is about, everything
-is still filed under the site searched. The 5 km identity check flags a source that places the
-facility somewhere else, and a value whose winning source names a facility sharing no distinctive
-word with our `site_name` or `original_site_name` carries a note saying so, with or without a
-location (see [the identity check](#attributes-searched)).
+value is reported too. Arbitration then files each source under the site of ours it is about,
+which may not be the site searched (see [Matching each source to a site](#matching-each-source-to-a-site)).
 
 **The prompt gives our coordinates rounded to 2 decimals (about 1 km),** with the municipality
 and admin names where the seed has them: enough to search with, and nothing worth copying. With
@@ -607,35 +709,26 @@ the agent researched the *right* facility.
 
 `found_location` is not a value the agent returns. Every source states where it puts the
 facility, the locate step turns that into a point (see [Locating each source](#locating-each-source)),
-and the site's found location is resolved from its sources' usable points — coordinates, a grid
-reference or a rooftop address — by the usual rules: the most credible source, then the newest by
-publication date. It is one value, `lat, lon`, so it is reviewed and loaded as a point or not at
+and a site's found location is resolved from the usable points of the sources filed under it —
+coordinates, a grid reference or a rooftop address — by the usual rules: the most credible source,
+then the newest by publication date. It is one value, `lat, lon`, so it is reviewed and loaded as a point or not at
 all. A street-level address or a hint is never a value. A map directory is Tier 3 for a location,
 as it was for coordinates. Asking for it, where our coordinates are not trusted, means the prompt
 stresses finding a source that states the location, and its row reaches the review queue; where
-they are trusted, each source's location is still in `evidence.csv`, and nothing is queued.
+the coordinates of the site a source is filed under are trusted, its location is still in
+`evidence.csv`, and nothing is queued.
 
-**The identity check.** Until build step 5 matches each source to the site it is about, the 5 km
-gate stays. It measures how far the farthest of a site's sources puts it from the seed — a source
-located by coordinates, a grid reference or an address placed on its building or street — and, as
-before, a dropped map page's own stated location (see [Source credibility](#source-credibility)).
-Beyond 5 km every value from that site's search carries the distance in `researcher_notes`. A hint
-and a location copied from the prompt don't count.
-
-A source with no location can't fail that check, so names are checked too. Where the source that
-won a value calls the facility by a name sharing no distinctive word with ours, the value's
-`researcher_notes` says *"The winning source names Beta Landfill; check it is about this
-facility."* Words that only say what kind of place it is (landfill, waste, transfer station, road)
-don't count, nor do numbers; a misspelling, a plural, or one word written as two still counts as
-the same. A generic or placeholder name, ours ("OpenStreetMap Landfill") or the source's, or one in
-another script with no English rendering, can't be judged and is not noted. On the batch-1 replay
-the note falls on 105 of 6,562 queue rows, at 33 sites. Build step 5's name matching replaces
-this.
+**Which site a value belongs to** is decided by matching each source to the site it is about,
+by where the source places the facility and with its name as a check (see
+[Matching each source to a site](#matching-each-source-to-a-site)). It replaced the 5 km identity
+check, which measured how far a site's sources put it from the seed and only added a note, and the
+note on a value whose winning source named another facility. A source's location is reviewed as
+the `found_location` of the site it is filed under, where that site's coordinates are asked for.
 
 A location that matches the seed's to comparison precision (six significant digits) confirms it,
-and like any confirmation it is not queued, so nothing moves. One within 10 m of ours counts as
-copied from the prompt and is no location at all. One that differs by more, even by a few hundred
-metres, goes to review like any other value. There is no "same place" distance any more. The 1 km rule, and the 0.5 km rule that replaced it, counted a
+and like any confirmation it is not queued, so nothing moves. One equal to the prompt's rounded
+point is copied from the prompt and is no location at all. One that differs by more, even by a few
+hundred metres, goes to review like any other value. There is no "same place" distance any more. The 1 km rule, and the 0.5 km rule that replaced it, counted a
 permit's coordinates near OSM's as confirming OSM's, when the permit's point is the one worth
 having.
 
@@ -741,7 +834,10 @@ with closure in `facility_status = Inactive` and `closing_year`. The question is
 waste disposal site?*, not *is it operating today?*
 
 The value is **handled like any facility_type**. It goes to review whatever its tier, as every found
-value does, on the site's own `facility_type` row in Review_Queue — there is no separate tab. It also
+value does, on the site's own `facility_type` row in Review_Queue — there is no separate tab. It is
+kept only for the site searched, and only where that site was offered the check: a source that
+matching files under another site, or under none, gives its verdict to Leads, and a place that is
+no landfill is never listed as a new one. It also
 reaches the next pass's seed, which `refresh-seed` builds from values still awaiting review. Where
 the same run also found the site closed, the likeliest misreading, the row's `evidence_summary` says
 so.
@@ -785,14 +881,17 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 
 | File | Purpose |
 |---|---|
-| `<run_id>_review.xlsx` | **The SME artifact.** Every found value for an empty field, whatever its tier, and every disagreement with our value from a Tier 1–3 source at least as credible as ours, with dropdowns. Weaker disagreements are under Leads. Ingestion reads the SMEs' decisions from it. |
+| `<run_id>_review.xlsx` | **The SME artifact.** Every found value for an empty field, whatever its tier, and every disagreement with our value from a Tier 1–3 source at least as credible as ours, with dropdowns: one row per site, attribute and, for a yearly attribute, year, under the site each source is about. Weaker disagreements are under Leads. Ingestion reads the SMEs' decisions from it. |
 | `resolved.csv` | A header and no rows. Nothing is accepted automatically, and ingestion accepts it empty. Runs from before (batch 1) wrote the values they accepted here. |
-| `evidence.csv` | One row per source-backed claim, confirmations of our values included. The audit trail. Its `source_id` finds the source in `sources.csv`. Every row also gives the facility its source describes (`facility_name_in_source`, `facility_name_english`), the location it states (`stated_location`, `stated_location_kind`) and the point read from it (`location_basis`, `located_latitude`, `located_longitude`, and `location_reason` when it is not usable). A source that states a location has a `found_location` row of its own. |
+| `evidence.csv` | One row per source-backed claim, confirmations of our values included. The audit trail. Its `source_id` finds the source in `sources.csv`. Every row also gives the facility its source describes (`facility_name_in_source`, `facility_name_english`), the location it states (`stated_location`, `stated_location_kind`) and the point read from it (`location_basis`, `located_latitude`, `located_longitude`, and `location_reason` when it is not usable). A source that states a location has a `found_location` row of its own. Its `site_id` is the site the source is filed under, blank for a likely new facility; `searched_site_id` is the search that found it, and `match` says why. |
 | `source_locations.json` | Each stated location's point, keyed by its text and country (see [Locating each source](#locating-each-source)). |
 | `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below). |
 | `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
 | `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
+| `new_facility_candidates.csv` | For ingestion: landfills none of our sites is. One row per group of located sources more than 2 km from every site of ours (grouped within 2 km of each other), with their URLs, names as written and in English, stated locations, the point and its basis, our nearest site and its distance, and the searches that found them. `collect-new-facilities` adds the values SMEs rejected as "New facility - not in our database" (`found_by` = `SME`); arbitrating again keeps those. |
+| `possible_duplicates.csv` | For ingestion (CJ's #225 tackles E-PRTR re-registrations): pairs of our sites, with names, distance apart, the sources that hit both and why: one source placed within 2 km of both that its name couldn't settle, or one page cited by both sites' searches where they lie within 2 km. |
+| `outside_run_matches.csv` | Sources filed under a site outside the run's selection: the source, the site, its country, and the search that found it. Not reviewed. |
 
 **Nothing is loaded from this repository.** It used to write a standardized table and a `.load.sql`
 beside it, built before review. Ingestion now builds the AI search's table itself, from the values
@@ -855,14 +954,8 @@ not link-checked. A value whose only sources were these two is not promoted, lik
 with no source, and neither appears in Leads. Wikimapia, an independent crowd-sourced map, stays as
 a weak source.
 
-One thing is still read from a dropped page: the location it states, for the
-[identity check](#3-decide) alone. A map page far from our site shows the agent was looking at
-another landfill, and in batch 1 these pages gave the only found coordinates at 34 of the 46 sites
-the check flagged. So until the check is replaced (build step 5 of
-[the source-matching plan](docs/plans/2026-10-20-match-sources-by-location.md)), a dropped page
-placing the facility more than 5 km away still puts the identity warning on every value from the
-site's search, even when another source's location is close. Its location is never located by the
-locate step, and never becomes a value.
+Nothing is read from a dropped page. Until build step 5, its stated location still fed the 5 km
+identity check; matching each source to the site it is about replaced that check.
 
 The prompt tells the agent not to cite the two, and to cite the government source where a
 directory republishes one: `wastebook.co.uk` copies the Environment Agency register (its
@@ -907,6 +1000,17 @@ Not shown: a source that only confirms what the database holds (it stays in `evi
 nothing from it is loaded), a search that found nothing, and a disagreement from a source below the
 floor or weaker than what we hold, which is under Leads.
 
+**One row per site, attribute and year.** Each source is filed under the site of ours it is about
+(see [Matching each source to a site](#matching-each-source-to-a-site)), and everything filed under
+a site, from any search, is decided together: one row per site and attribute, the key ingestion
+loads by. A yearly attribute — status, waste received, waste in place, waste depth, cover types and
+the gas figures, as consolidation keeps them by year — has a row for each year a source reports,
+the year of its `value_date`, or the run's year where it has none. Its `baseline_value` is ours for
+that year: the seed holds one row per site, at its reference year, so for any other year our latest
+value stands in, and `evidence_summary` says so. Where our value for the reference year was carried
+forward from an earlier one, we hold nothing for that year, so a value found for it fills an empty
+field.
+
 ### 2. Read the row
 
 The five columns that decide your judgement:
@@ -919,8 +1023,17 @@ The five columns that decide your judgement:
 | `baseline_source` | Which dataset supplied the value we already had (blank if there was none) |
 | `winning_source_url` | The actual source. **Open it.** |
 | `evidence_summary` | The pipeline's one-line explanation of the decision |
+| `match` | Why the value is filed under this site: where its source places the facility, and how far from the site searched |
 
-Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab.
+Every site column (`site_id`, the names, `country_iso3`, `baseline_coordinates` and the `baseline_`
+columns) describes the site the value is filed under. `searched_site_id` is the one column about the
+search that found it. `facility_name_in_source` and `stated_location` are the facility as the
+winning source writes it, and `location_basis`, on a `found_location` row, how its point was read.
+
+Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab. The `match`
+cell has a colour of its own where the value needs a second look at its site: orange where it is
+filed under a site other than the one searched, blue where its source gives no location, and
+yellow where several of our sites tied.
 
 **Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and compare it with what the source describes. A `found_location` row is where its source says the site is — coordinates, a grid reference, or an address placed on its building — in the same form: accept or reject it as one point. `evidence.csv` shows what the source wrote, in `stated_location`.
 
@@ -936,16 +1049,24 @@ Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions
 | **Overrides baseline** | A more credible source contradicts existing data. Confirm the new value is right before it replaces a database value. |
 | **Conflict - needs review** | Two sources of equal or near-equal credibility disagree, and the pipeline will not pick a winner. You pick, or reject both. |
 
-**The single highest-value check: identity.** Tier cannot detect a perfectly credible document that
-describes the *wrong landfill*. If `researcher_notes` says
-*"Identity not confirmed: a source's stated location is N km from the seed location"*, treat every
-row for that site as suspect regardless of tier. In the pilot this caught a site whose findings
-were 238 km from the facility. The note may instead say *"coordinates on a mapcarta.com page the
-agent cited (dropped as a source) are N km from the seed location"*: the agent read a map page of a
-landfill N km away, which is not a source, but the values beside it may well describe that landfill
-too. A row whose note says *"The winning source names …; check it is about this facility"* was won
-by a source that calls the facility something else: a renamed site is fine, but another landfill's
-value is a rejection (`Wrong facility`).
+**The single highest-value check: is the source about this site?** Tier cannot detect a perfectly
+credible document that describes the *wrong landfill*. In the pilot, one search's findings were
+238 km from the facility. `match` starts with the rule that filed the value here:
+
+| `match` starts | What it means |
+|---|---|
+| **Located** | The source places the facility within 2 km of this site and no other. If `searched_site_id` is another site, that search found it. |
+| **Named among several** | Several of our sites are within 2 km, and the source's name picked this one. |
+| **Tie** | Several of our sites are within 2 km and the name couldn't pick. `corrected_site_id` offers them. |
+| **Name nearby** | The source places it just beyond 2 km, but its name strongly matches this site: its location is a coordinate correction. |
+| **Moved by name** | The source gives no location, but its name strongly matches this site and not the one searched. |
+| **No location** | The source gives no location, so the value stays with the site searched, and only you can tell whether it is about this facility. The note names any of our sites nearby that the name also fits, and says if the same page was cited for other searches. |
+
+A renamed site is fine. If the value is right but about another of our sites, put that site's id
+in `corrected_site_id` (a dropdown where there were several candidates; any site id may be typed)
+and validate it. If it is about another of our sites and you can't tell which, reject it as
+`Wrong facility - another site in our database`; if it is about a landfill we don't hold, as
+`New facility - not in our database`.
 
 ### 4. Record the decision
 
@@ -954,14 +1075,17 @@ Edit only these columns; everything else is read-only:
 | Column | Enter |
 |---|---|
 | `validation_status` | `Validated` or `Rejected` (dropdown) |
-| `rejection_reason` | For a rejection: `Wrong facility`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Counted by cause to find where the AI errs |
+| `rejection_reason` | For a rejection: `Wrong facility - another site in our database`, `New facility - not in our database`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Plain `Wrong facility` stays for batch 1's workbook. Counted by cause to find where the AI errs |
 | `corrected_value` | If you know the right value: enter it here. For categorical fields (site type, status, waste type, depth, yes/no fields, cover and gas-project types) it is a dropdown of the allowed values for that row's attribute; multi-value fields also accept a typed combination. A location is `lat, lon`. Never edit `resolved_value` — it keeps the AI's own answer, which is how its error rate is measured |
 | `corrected_value_date` | Only if your corrected value is for a different date than `value_date`, such as a current figure replacing one you rejected as `Outdated`: that date, as `YYYY`, `YYYY-MM` or `YYYY-MM-DD` |
+| `corrected_site_id` | Only if the value belongs to another of our sites: that site's id. A dropdown of the candidates where there were several |
 | `reviewer` | Your name |
 | `reviewed_date` | The date |
 | `researcher_notes` | Why, especially for a rejection |
 
 `Validated` means the value is correct and may be merged. `Rejected` means the search's value must not be; a `corrected_value` you give is merged instead. Ingestion reads these decisions straight from this tab.
+
+Once the review is done, `collect-new-facilities --run-id <run_id>` adds the values rejected as `New facility - not in our database` to the run's `new_facility_candidates.csv`, once each, for the ingestion team. It reads the workbook in the SharePoint folder, else the run folder's, or the one `--workbook` names.
 
 ### 5. Optional tabs
 
