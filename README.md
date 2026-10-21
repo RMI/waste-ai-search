@@ -405,8 +405,10 @@ asked about. A source that turns out to describe a different facility is reporte
 facility's name and location, but the agent does not go on researching it; from a registry that
 lists many sites, only the entry it used. A source that names or locates the facility but gives no
 value is reported too. Until build step 5 matches each source to the site it is about, everything
-is still filed under the site searched, and the 5 km identity check is what flags a source that is
-about somewhere else.
+is still filed under the site searched. The 5 km identity check flags a source that places the
+facility somewhere else, and a value whose winning source names a facility sharing no distinctive
+word with our `site_name` or `original_site_name` carries a note saying so, with or without a
+location (see [the identity check](#attributes-searched)).
 
 **The prompt gives our coordinates rounded to 2 decimals (about 1 km),** with the municipality
 and admin names where the seed has them: enough to search with, and nothing worth copying. With
@@ -614,6 +616,14 @@ located by coordinates, a grid reference or an address placed on its building or
 before, a dropped map page's own stated location (see [Source credibility](#source-credibility)).
 Beyond 5 km every value from that site's search carries the distance in `researcher_notes`. A hint
 and a location copied from the prompt don't count.
+
+A source with no location can't fail that check, so names are checked too. Where the source that
+won a value calls the facility by a name sharing no distinctive word with ours, the value's
+`researcher_notes` says *"The winning source names Beta Landfill; check it is about this
+facility."* Words that only say what kind of place it is (landfill, waste, transfer station, road)
+don't count, nor do numbers; a misspelling or a plural still counts as the same word. A generic
+name, or one in another script with no English rendering, can't be judged and is not noted. Build
+step 5's name matching replaces this.
 
 A location that matches the seed's to comparison precision (six significant digits) confirms it,
 and like any confirmation it is not queued, so nothing moves. One within 10 m of ours counts as
@@ -926,7 +936,9 @@ row for that site as suspect regardless of tier. In the pilot this caught a site
 were 238 km from the facility. The note may instead say *"coordinates on a mapcarta.com page the
 agent cited (dropped as a source) are N km from the seed location"*: the agent read a map page of a
 landfill N km away, which is not a source, but the values beside it may well describe that landfill
-too.
+too. A row whose note says *"The winning source names …; check it is about this facility"* was won
+by a source that calls the facility something else: a renamed site is fine, but another landfill's
+value is a rejection (`Wrong facility`).
 
 ### 4. Record the decision
 

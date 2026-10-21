@@ -6,7 +6,10 @@ can be re-applied to a finished run for free and an interrupted search is never 
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from datetime import date, datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -635,6 +638,102 @@ def flag_identity_mismatch(
     return True
 
 
+# Words that say what kind of place a facility is, or what sort of road it is on, not which one it
+# is: "Beta Landfill" and our "Alpha Landfill" share only "landfill", which says nothing.
+FACILITY_KIND_WORDS = {
+    "landfill", "landfills", "landfil", "sanitary", "waste", "wastes", "management", "facility",
+    "facilities", "site", "sites", "dump", "dumps", "dumpsite", "dumping", "tip", "refuse", "depot",
+    "grounds", "ground", "solid", "municipal", "msw", "disposal", "recycling", "recovery", "resource",
+    "resources", "centre", "center", "transfer", "station", "garbage", "rubbish", "trash", "the",
+    "and", "for", "city", "town", "county", "district", "regional", "region", "shire", "council",
+    "borough", "township", "village", "closed", "former", "old", "new", "ltd", "limited", "inc",
+    "llc", "plc", "gmbh", "company", "corporation", "corp", "integrated", "environmental", "eco",
+    "park", "area", "cell", "cells", "works", "plant", "yard", "household", "domestic",
+    "industrial", "hazardous", "inert", "organic", "organics", "compost", "composting",
+    "construction", "demolition", "road", "street", "avenue", "highway", "lane", "drive", "route",
+    "des", "del", "los", "las", "les", "aterro", "sanitario",
+    "controlado", "lixao", "vertedero", "relleno", "botadero", "tiradero", "deponie", "decharge",
+    "enfouissement", "technique", "lieu", "discarica", "полигон", "свалка", "тбо", "тко",
+}
+
+
+def distinctive_words(name: Any) -> tuple[set[str], bool]:
+    """The words of a name that say which facility it is, and whether it is in Latin letters.
+
+    Case and accents are ignored, "&" is "and", and kind words, numbers and words under three
+    letters are dropped.
+    """
+    folded = unicodedata.normalize("NFKD", normalize_scalar(name).casefold().replace("&", " and "))
+    folded = "".join(char for char in folded if not unicodedata.combining(char))
+    words = {
+        word for word in re.split(r"[\W_]+", folded)
+        if len(word) >= 3 and not word.isdigit() and word not in FACILITY_KIND_WORDS
+    }
+    return words, all(char.isascii() for char in folded if char.isalpha())
+
+
+def _same_word(one: str, two: str) -> bool:
+    """Alike enough to be one word misspelled or inflected: "Meadows" and "Medows" or "Meadow"."""
+    if one == two:
+        return True
+    if min(len(one), len(two)) >= 4 and (one.startswith(two) or two.startswith(one)):
+        return True
+    return min(len(one), len(two)) >= 5 and SequenceMatcher(None, one, two).ratio() >= 0.85
+
+
+def names_another_facility(source_names: list[Any], our_names: list[Any]) -> bool:
+    """Whether a source's name for the facility shares no distinctive word with any name of ours.
+
+    Names are compared only where both say which facility they are and are written in the same
+    script; a generic name ("Landfill Site") or one in another script can't be judged, and is not
+    flagged. Build step 5's name matching replaces this.
+    """
+    judged = False
+    for source_name in source_names:
+        theirs, their_script = distinctive_words(source_name)
+        if not theirs:
+            continue
+        for our_name in our_names:
+            ours, our_script = distinctive_words(our_name)
+            if not ours or their_script != our_script:
+                continue
+            judged = True
+            if any(_same_word(one, two) for one in theirs for two in ours):
+                return False
+    return judged
+
+
+def flag_other_facility_names(
+    site: dict[str, Any], resolved: list[dict[str, Any]], evidence_rows: list[dict[str, Any]]
+) -> int:
+    """Note each value whose winning source names a facility that shares no word with ours.
+
+    Until build step 5 matches each source to the site it is about, every source is filed under the
+    site searched, and the agent reports a source about another facility rather than leaving it out.
+    The 5 km check flags one that places the facility elsewhere; this flags one that names another,
+    with or without a location. Returns how many values it noted.
+    """
+    ours = [site.get("site_name"), site.get("original_site_name")]
+    by_id = {row["evidence_id"]: row for row in evidence_rows}
+    noted = 0
+    for row in resolved:
+        winner = by_id.get(normalize_scalar(row.get("winning_evidence_id")))
+        if winner is None or row.get("resolution") in {"Not found", "Calculated"}:
+            continue
+        in_source = normalize_scalar(winner.get("facility_name_in_source"))
+        english = normalize_scalar(winner.get("facility_name_english"))
+        if not names_another_facility([in_source, english], ours):
+            continue
+        named = in_source or english
+        if in_source and english and distinctive_words(in_source)[0] != distinctive_words(english)[0]:
+            named = f"{in_source} ({english})"
+        note = f"The winning source names {named}; check it is about this facility."
+        existing = normalize_scalar(row.get("researcher_notes"))
+        row["researcher_notes"] = f"{existing} {note}".strip() if existing else note
+        noted += 1
+    return noted
+
+
 def payload_leads(
     cached: list[Path],
     sites_by_id: dict[str, dict[str, Any]],
@@ -844,6 +943,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                     "warning": f"Identity not confirmed: {found} {km:.1f} km from seed location.",
                 }
             )
+        flag_other_facility_names(site, site_resolved, site_evidence)
         resolved_rows.extend(site_resolved)
 
         # Q8: cap evidence rows for pure confirmations; keep everything else.
