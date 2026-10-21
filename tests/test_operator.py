@@ -1,8 +1,8 @@
 """WP-531 item 2: search for the facility operator, in the review layer only.
 
-The upstream standardized spec has no operator column yet, so operator reaches resolved.csv and the
-review queue but never the standardized table. Promotion is a separate follow-up once upstream adds
-the column; these tests pin today's boundary so that change is deliberate.
+The upstream standardized spec has no operator column yet, so operator reaches the review queue but
+has no standardized column to go to. Adding one is a separate follow-up once upstream adds the
+column; these tests pin today's boundary so that change is deliberate.
 """
 from __future__ import annotations
 
@@ -95,16 +95,10 @@ def test_a_tier_3_operator_reaches_the_review_queue():
     assert needs_review(row)
 
 
-def test_operator_never_reaches_the_standardized_table():
-    """Review layer only until upstream adds a column. Pinned so promoting it is deliberate."""
-    from waste_ai_search.standardized import build_standard_record
-
-    s, row = resolve_operator("Lagos Waste Management Authority", [NEWS])
-    record, _notes = build_standard_record(s, [row], sha="deadbeef")
-
+def test_operator_has_no_standardized_column():
+    """Review layer only until upstream adds a column. Pinned so adding it is deliberate."""
     assert "operator" not in ATTRIBUTE_TO_STANDARD_COLUMN
     assert "operator" not in STANDARDIZED_FACILITY_COLUMNS
-    assert record is None or "operator" not in record
 
 
 def test_a_found_operator_is_carried_into_the_next_pass_seed():
@@ -118,12 +112,12 @@ def test_a_found_operator_is_carried_into_the_next_pass_seed():
     assert "operator" not in requested_attributes(refreshed)
 
 
-def test_a_tier_1_operator_auto_validates_and_stays_out_of_the_review_queue():
-    """Pins the behaviour the README now describes. Copilot flagged the old wording, which said every
-    found operator reached the review queue; like any attribute, a Tier 1-2 fill auto-validates."""
+def test_a_tier_1_operator_reaches_the_review_queue_too():
+    """Reversed on purpose: a Tier 1-2 fill once auto-validated. Like any attribute, every found
+    operator now reaches the review queue, whatever its tier."""
     from waste_ai_search.arbitration import needs_review
 
     regulator = dict(NEWS, source_type="Regulator", url="https://agency.example.gov/permit")
     _s, row = resolve_operator("Lagos Waste Management Authority", [regulator])
-    assert row["validation_status"] == "Auto-validated"
-    assert not needs_review(row)
+    assert row["validation_status"] == "Needs review"
+    assert needs_review(row)

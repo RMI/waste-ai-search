@@ -41,9 +41,10 @@ OTHER_SOURCES = "has another source"
 SOURCE_GROUPS = [MAP_ONLY, OTHER_SOURCES]
 
 # What counts as a new value: the search filled an empty field or challenged an existing one.
-# resolved.csv holds auto-accepted values, and a confirmation there adds nothing new; every row in
-# the review queue is a candidate except a confirmation, which is there only for a failed identity
-# check.
+# resolved.csv holds the values a run accepted without review. Only batch 1 and earlier runs have
+# any: later runs accept nothing automatically, write it header-only and queue every new value. A
+# confirmation adds nothing new: every row in the review queue is a candidate except one, which
+# batch 1 queued only for a failed identity check and later runs never queue.
 CONFIRMED = "Confirmed baseline"
 NEW_VALUE_RESOLUTIONS = {"Filled empty baseline", "Overrides baseline"}
 IDENTITY_NOTE = "Identity not confirmed"

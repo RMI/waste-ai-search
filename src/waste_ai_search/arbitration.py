@@ -20,7 +20,6 @@ from .credibility import (
     backfilled_years,
     baseline_tier,
     is_promotable,
-    may_auto_validate,
     may_override_baseline,
     parse_year,
     tier_label,
@@ -28,13 +27,12 @@ from .credibility import (
     RECENCY_OVERRIDE_ATTRIBUTES,
 )
 from .schema import (
-    ALWAYS_REVIEW_VALUES,
     AI_SEARCH_DATA_SOURCE,
     ARRAY_TARGET_ATTRIBUTES,
-    AUTO_REVIEWER,
     GAP_FILL_ATTRIBUTES,
     NUMERIC_ARRAY_TARGET_ATTRIBUTES,
     LEAD_ROUTED_RESOLUTIONS,
+    NOTHING_TO_REVIEW,
     is_blank,
     normalize_for_compare,
     normalize_scalar,
@@ -106,12 +104,12 @@ def resolve(
     site: dict[str, Any],
     attribute_name: str,
     evidence: list[dict[str, Any]],
-    reviewed_on: Any = None,
 ) -> dict[str, Any]:
     """Arbitrate one (facility, attribute) pair.
 
-    `reviewed_on` stamps rows the pipeline signs off itself, so an auto-validated row carries the
-    same reviewer/date/notes a human would have left rather than three blank columns.
+    Nothing is accepted automatically. A found value that differs from ours, whatever its tier,
+    needs review; one weaker than ours goes to leads; a confirmation of ours, or nothing found,
+    leaves our database as it is, so there is nothing to review.
     """
     site_id = normalize_scalar(site.get("site_id"))
     baseline = baseline_for(site, attribute_name)
@@ -192,15 +190,14 @@ def resolve(
 
     if not evidence:
         row["resolution_rule"] = "No source-backed evidence returned."
-        row["validation_status"] = "Auto-validated"
-        stamp_auto_review(row, reviewed_on)
+        row["validation_status"] = NOTHING_TO_REVIEW
         return row
 
     tiers = [int(item.get("tier", TIER_5)) for item in evidence]
     row["best_tier_available"] = tier_label(min(tiers))
 
     # An empty baseline is filled from whatever was found, regardless of tier: a sourced value
-    # beats no value at all. Tier still decides whether a human has to look at it.
+    # beats no value at all. A human still looks at it, whatever the tier.
     baseline_empty = is_blank(baseline)
     candidates = evidence if baseline_empty else [item for item in evidence if is_promotable(int(item.get("tier", TIER_5)))]
 
@@ -244,7 +241,6 @@ def resolve(
 
     # For status, a lower-tier source down to the promotion floor may win if it is at least
     # NEWER_SOURCE_YEARS newer - a dated permit (Tier 1) against recent news (Tier 3).
-    recency_review = False
     if attribute_name in RECENCY_OVERRIDE_ATTRIBUTES and win_year:
         eligible = [
             item for item in candidates
@@ -270,12 +266,10 @@ def resolve(
             new_tier = int(item.get("tier", TIER_5))
             recency_notes.append(
                 f"{tier_label(new_tier)} source dated {year} replaces the {tier_label(win_tier)} "
-                f"source dated {win_year}: status from a source {year - win_year} years newer wins, "
-                "always for review."
+                f"source dated {win_year}: status from a source {year - win_year} years newer wins."
             )
             winner, win_year, win_tier = item, year, new_tier
             win_key = comparable(winner.get("value"), attribute_name)
-            recency_review = True
 
     row["resolved_value"] = normalize_scalar(winner.get("value"))
     row["resolved_unit"] = normalize_scalar(winner.get("unit"))
@@ -294,13 +288,15 @@ def resolve(
     matches_baseline = not baseline_empty and comparable(baseline, attribute_name) == win_key
 
     if matches_baseline:
+        # Kept in evidence.csv, but neither queued nor loaded, so the search doesn't become the
+        # credited source for a value nobody reviewed.
         row["resolution"] = "Confirmed baseline"
         row["resolution_rule"] = f"{tier_label(win_tier)} source agrees with {tier_label(base_tier)} baseline."
-        row["validation_status"] = "Auto-validated"
+        row["validation_status"] = NOTHING_TO_REVIEW
     elif baseline_empty:
         row["resolution"] = "Filled empty baseline"
         row["resolution_rule"] = f"Baseline empty; filled from {tier_label(win_tier)} source."
-        row["validation_status"] = "Auto-validated" if may_auto_validate(win_tier) else "Needs review"
+        row["validation_status"] = "Needs review"
     elif win_tier < base_tier:
         # Candidate is more credible than the baseline: a decision worth a human's time.
         if may_override_baseline(win_tier):
@@ -350,34 +346,7 @@ def resolve(
 
     if recency_notes:
         row["resolution_rule"] = " ".join([row["resolution_rule"], *recency_notes]).strip()
-    if recency_review and row["validation_status"] == "Auto-validated":
-        row["validation_status"] = "Needs review"
-
-    # Some verdicts are never the pipeline's to sign off. Without this a Tier 1-2 source calling a
-    # site a quarry would take the ordinary empty-baseline path above and auto-validate. It sets
-    # the review flag only; the value is still promoted like any other.
-    if (attribute_name, row["resolved_value"]) in ALWAYS_REVIEW_VALUES:
-        row["validation_status"] = "Needs review"
-        row["resolution_rule"] = (
-            f"{row['resolution_rule']} Always reviewed: a not-a-waste-facility verdict is never "
-            "signed off automatically, whatever the tier."
-        )
-
-    stamp_auto_review(row, reviewed_on, agent_note=normalize_scalar(winner.get("evidence_summary")))
     return row
-
-
-def stamp_auto_review(row: dict[str, Any], reviewed_on: Any, agent_note: str = "") -> None:
-    """Record the agent as the reviewer on any row no human needs to see."""
-    if normalize_scalar(row.get("validation_status")) != "Auto-validated":
-        return
-    row["reviewer"] = AUTO_REVIEWER
-    if reviewed_on is not None:
-        row["reviewed_date"] = normalize_scalar(reviewed_on)
-    note = agent_note or normalize_scalar(row.get("resolution_rule"))
-    existing = normalize_scalar(row.get("researcher_notes"))
-    if note and note not in existing:
-        row["researcher_notes"] = f"{existing} {note}".strip() if existing else note
 
 
 def calculated_row(
@@ -386,9 +355,8 @@ def calculated_row(
     value: Any,
     unit: str,
     note: str,
-    reviewed_on: Any = None,
 ) -> dict[str, Any]:
-    """A locally computed value with no source and therefore no tier (Q12)."""
+    """A locally computed value with no source and therefore no tier (Q12). Never queued or loaded."""
     site_id = normalize_scalar(site.get("site_id"))
     return {
         "site_id": site_id,
@@ -414,9 +382,9 @@ def calculated_row(
         "credibility_margin": "",
         "value_date": "",
         "confidence_score": "",
-        "validation_status": "Auto-validated",
-        "reviewer": AUTO_REVIEWER,
-        "reviewed_date": normalize_scalar(reviewed_on) if reviewed_on is not None else "",
+        "validation_status": NOTHING_TO_REVIEW,
+        "reviewer": "",
+        "reviewed_date": "",
         "researcher_notes": note,
     }
 

@@ -120,7 +120,7 @@ def test_a_real_arbitration_writes_both_names_everywhere(tmp_path):
     config = PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v")
     run_arbitration(config)
 
-    # The value is Tier 3, so it waits for review: resolved.csv keeps only auto-validated rows.
+    # The value waits for review, as every found value does; resolved.csv is written header-only.
     for name in ("review_queue.csv", "evidence.csv"):
         row = next(csv.DictReader((run_dir / name).open()))
         assert (row["site_name"], row["original_site_name"], row["source_language"]) == ("THE FUNGUS", "EL HONGO", "es"), name

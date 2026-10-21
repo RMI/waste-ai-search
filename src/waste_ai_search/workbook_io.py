@@ -140,11 +140,11 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": "Review_Queue",
         "purpose": (
-            "YOUR WORKLIST. The values the pipeline would not sign off itself: a value from a "
-            "weak or unclassifiable source, or a candidate that disagrees with the existing "
-            "baseline. Values it did sign off (reviewer = AI Agent) are in resolved.csv instead "
-            "and are not shown here. These rows are not in resolved.csv: this tab is the only "
-            "place they live until you validate them."
+            "YOUR WORKLIST. Every value the search found that differs from what the database "
+            "holds: a value for an empty field, or one that disagrees with the existing value, "
+            "whatever the source's tier. Nothing is accepted without review. A source that only "
+            "confirms the database's value is not shown, and nothing from it is loaded. Ingestion "
+            "reads your decisions from this tab."
         ),
         "sme_action": (
             "Work top to bottom. To see where the database puts the site, paste "
@@ -163,25 +163,12 @@ REVIEW_INSTRUCTIONS = [
         ),
     },
     {
-        "tab_name": "(file) resolved.csv",
-        "purpose": (
-            "One row per value the agent found and the rules auto-validated: what the pipeline "
-            "now believes and why. Values awaiting your decision are in Review_Queue instead, and "
-            "attributes that were searched but not found are not written anywhere."
-        ),
-        "sme_action": "Read only. Open it to see what was accepted without review.",
-        "editable": "nothing",
-    },
-    {
         "tab_name": "(file) evidence.csv",
-        "purpose": "One row per source-backed claim, with the tier rule applied to each source.",
+        "purpose": (
+            "One row per source-backed claim, with the tier rule applied to each source. Sources "
+            "that only confirm the database's value are here too."
+        ),
         "sme_action": "Read only. Open it to see why a value won or lost.",
-        "editable": "nothing",
-    },
-    {
-        "tab_name": "(file) std_facility_tbl_ai_search_*.csv",
-        "purpose": "The 43-column standardized facility table - only promoted values, ready to merge.",
-        "sme_action": "Read only.",
         "editable": "nothing",
     },
     {
@@ -324,8 +311,8 @@ def write_review_workbook(
 ) -> Path:
     """The SME-facing artifact: only rows that need a human decision (Q31).
 
-    Evidence, Resolved and the standardized table stay as CSV sidecars for audit. They are far too
-    large to review by hand at full scale, and nothing in them requires a decision.
+    Evidence and sources stay as CSV sidecars for audit. They are far too large to review by hand at
+    full scale, and nothing in them requires a decision.
     """
     wb = Workbook()
     wb.remove(wb.active)

@@ -32,13 +32,13 @@ from .schema import (
     ENUM_MAPS,
     EVIDENCE_HEADERS,
     LOCATION_ATTRIBUTE,
+    NOTHING_TO_REVIEW,
     NUMERIC_TARGET_ATTRIBUTES,
     PARSE_WARNING_HEADERS,
     REQUESTABLE_ATTRIBUTES,
     RESOLVED_HEADERS,
     REVIEW_QUEUE_HEADERS,
     SOURCES_HEADERS,
-    STANDARDIZED_FACILITY_COLUMNS,
     SUPPLEMENTARY_LEADS_HEADERS,
     bucket_waste_depth,
     is_blank,
@@ -47,7 +47,6 @@ from .schema import (
     parse_tristate_bool,
     validate_foundry_payload,
 )
-from .standardized import PROMOTED_RESOLUTIONS, build_standard_table, to_csv_row, write_load_statement
 from .unit_converter import convert_attribute_value
 from .workbook_io import write_review_workbook
 
@@ -55,19 +54,12 @@ from .workbook_io import write_review_workbook
 MAX_CONFIRMATION_EVIDENCE_ROWS = 2
 
 
-# Auto-validation (Q30) rests on having confirmed the agent found the right facility. Once
-# coordinates resolve, distance from the seed location measures that directly. Beyond this
-# threshold the identity is not established, so nothing for that site may auto-validate.
-# A landfill footprint spans at most a couple of km and seed coordinates are polygon centroids,
-# so 5 km is generous; tune it if legitimate sites are being flagged.
+# Whether the agent found the right facility (Q34). Once coordinates resolve, distance from the
+# seed location measures that directly. Beyond this threshold the identity is not established, and
+# every value from that site's search says so to the SME who reviews it. A landfill footprint spans
+# at most a couple of km and seed coordinates are polygon centroids, so 5 km is generous. Build
+# step 5 of the source-matching plan replaces this check with matching each source by location.
 IDENTITY_DISTANCE_KM_THRESHOLD = 5.0
-
-
-# Coordinate disagreements below this are a more precise fix on the same place, not a different
-# facility, and reviewing them is wasted SME time. Measured on the pilot: four of five coordinate
-# conflicts were 0.003-0.195 km apart; the fifth was 238 km and is the one worth a human.
-# 0.5 km covers those four; it was 1 km until WP-552.
-COORDINATE_REVIEW_KM_THRESHOLD = 0.5
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -488,11 +480,7 @@ def cover_consistency_warnings(resolved: list[dict[str, Any]]) -> list[str]:
     return []
 
 
-def append_distance_row(
-    site: dict[str, Any],
-    resolved: list[dict[str, Any]],
-    reviewed_on: Any = None,
-) -> float | None:
+def append_distance_row(site: dict[str, Any], resolved: list[dict[str, Any]]) -> float | None:
     """Compute distance between found and seed coordinates. No source, so no tier (Q12)."""
     found = {row["attribute_name"]: row for row in resolved}
     lat = parse_float(found.get("found_latitude", {}).get("resolved_value"))
@@ -509,7 +497,6 @@ def append_distance_row(
             f"{km:.3f}".rstrip("0").rstrip("."),
             "km",
             "Haversine distance between seed coordinates and source-backed found coordinates.",
-            reviewed_on=reviewed_on,
         )
     )
     return km
@@ -536,7 +523,7 @@ def single_axis_offset_km(site: dict[str, Any], resolved: list[dict[str, Any]]) 
     """How far the one found coordinate puts the site from the seed, when only one resolved.
 
     Without it the identity gate never ran on a lone coordinate: a latitude 222 km off left the
-    site's other fills auto-validated. At gate distances one axis's offset is close to the full
+    site's other values unflagged. At gate distances one axis's offset is close to the full
     distance, so a large one still shows the agent researched another facility.
     """
     offsets = [
@@ -556,7 +543,7 @@ def dropped_map_site_offset_km(site: dict[str, Any], payload: dict[str, Any]) ->
     batch 1 they gave the only found coordinates at 34 of the 46 sites it flagged, each a map page
     more than 5 km from our site. So their coordinates are still read here, for the gate alone.
     They are never evidence or a value. A page's latitude and longitude are paired; a lone one is
-    judged by its axis offset, as single_axis_offset_km does. The farthest page counts. Build step 3
+    judged by its axis offset, as single_axis_offset_km does. The farthest page counts. Build step 5
     of the source-matching plan replaces the gate, and this goes with it.
     """
     pages: dict[str, dict[str, Any]] = {}
@@ -593,63 +580,33 @@ def dropped_map_site_offset_km(site: dict[str, Any], payload: dict[str, Any]) ->
     return farthest, farthest_site
 
 
-def settle_near_coordinates(site: dict[str, Any], resolved: list[dict[str, Any]]) -> int:
-    """Stop sending sub-threshold coordinate differences to review (pilot feedback 5).
-
-    A coordinate that close to the seed's is the same place, so it confirms the seed's, and its
-    resolution says so. Left as a conflict, it would be auto-validated but match neither
-    resolved.csv, which takes only promoted resolutions, nor the review queue, which takes only
-    rows needing review.
-    """
-    settled = 0
-    for row in resolved:
-        name = normalize_scalar(row.get("attribute_name"))
-        if name not in {"found_latitude", "found_longitude"}:
-            continue
-        if not needs_review(row) or not normalize_scalar(row.get("resolved_value")):
-            continue
-        km = axis_offset_km(site, name, row.get("resolved_value"))
-        if km is None or km > COORDINATE_REVIEW_KM_THRESHOLD:
-            continue
-        row["validation_status"] = "Auto-validated"
-        row["resolution"] = "Confirmed baseline"
-        row["resolution_rule"] = (
-            f"{row.get('resolution_rule', '')} Within {km:.3f} km of the seed location "
-            f"(threshold {COORDINATE_REVIEW_KM_THRESHOLD:g} km); treated as the same place."
-        ).strip()
-        settled += 1
-    return settled
-
-
 def flag_identity_mismatch(
     resolved: list[dict[str, Any]],
     km: float | None,
     coordinates: str = "source-backed coordinates are",
 ) -> bool:
-    """Revoke auto-validation for a site whose found coordinates are too far from the seed.
+    """Warn the SME about every value from a site whose found coordinates are too far from the seed.
 
     Tier cannot detect a credible source describing the wrong facility. Distance can, so a large
-    mismatch withdraws the identity assumption that auto-validation depends on. `coordinates` says
-    in the note where the distance came from.
+    mismatch is noted on each of the site's values. Nothing is accepted automatically, so the note
+    is all it changes. `coordinates` says in the note where the distance came from.
     """
     if km is None or km <= IDENTITY_DISTANCE_KM_THRESHOLD:
         return False
     note = (
         f"Identity not confirmed: {coordinates} {km:.1f} km from the seed "
-        f"location (threshold {IDENTITY_DISTANCE_KM_THRESHOLD:g} km). Auto-validation withdrawn."
+        f"location (threshold {IDENTITY_DISTANCE_KM_THRESHOLD:g} km). Check the source is about this facility."
     )
     for row in resolved:
         if row.get("resolution") in {"Not found", "Calculated"}:
             continue
-        if row.get("validation_status") == "Auto-validated":
-            row["validation_status"] = "Needs review"
         existing = normalize_scalar(row.get("researcher_notes"))
         row["researcher_notes"] = f"{existing} {note}".strip() if existing else note
     return True
 
 
 # How settled each verdict is, least first: a location takes the less settled of its two halves.
-LOCATION_VERDICT_ORDER = ["Routed to leads", "Needs review", "Auto-validated"]
+LOCATION_VERDICT_ORDER = ["Routed to leads", "Needs review", NOTHING_TO_REVIEW]
 # Which half's resolution describes the pair: a change outranks a confirmation.
 LOCATION_RESOLUTION_ORDER = [
     "Conflict - lower credibility",
@@ -685,9 +642,9 @@ def combine_location(resolved: list[dict[str, Any]]) -> dict[str, Any] | None:
     The agent reports the two coordinates separately, and each is resolved against the seed on its
     own, so half a point could be accepted while the other half went to review or to leads. On
     batch 1 that happened at 55 of the 157 sites with a found coordinate. A location is one fact,
-    so the pair takes the less settled verdict of its two halves, and goes to review if they came
-    from different sources. Its value is "lat, lon", which Google Maps finds when pasted into its
-    search box, like baseline_coordinates.
+    so the pair takes the less settled verdict of its two halves: it goes to review if either half
+    differs from ours. Its value is "lat, lon", which Google Maps finds when pasted into its search
+    box, like baseline_coordinates.
 
     Runs after the distance check and the identity gate, which need the separate halves.
 
@@ -721,7 +678,7 @@ def combine_location(resolved: list[dict[str, Any]]) -> dict[str, Any] | None:
                     "winning_link_status": "",
                     "value_date": "",
                     "confidence_score": "",
-                    "validation_status": "Auto-validated",
+                    "validation_status": NOTHING_TO_REVIEW,
                 }
             )
         resolved.append(row)
@@ -739,8 +696,6 @@ def combine_location(resolved: list[dict[str, Any]]) -> dict[str, Any] | None:
             f"{rule} The two coordinates come from different sources (longitude: "
             f"{normalize_scalar(longitude.get('winning_source_url'))}); check they are one location."
         ).strip()
-        if verdict == "Auto-validated":
-            verdict = "Needs review"
     if tiers[0] != tiers[1]:
         # The pair is only as credible as its weaker half, so that is the tier the SME compares.
         rule = f"{rule} Latitude's source is {tiers[0]}, longitude's {tiers[1]}.".strip()
@@ -755,8 +710,8 @@ def combine_location(resolved: list[dict[str, Any]]) -> dict[str, Any] | None:
     resolution = _least([normalize_scalar(half.get("resolution")) for half in pair], LOCATION_RESOLUTION_ORDER)
     value = f"{latitude['resolved_value']}, {longitude['resolved_value']}"
     if resolution == "Confirmed baseline" and baseline:
-        # A location that confirms the seed's, by matching it or by lying within
-        # COORDINATE_REVIEW_KM_THRESHOLD of it, keeps the seed's point, so nothing moves.
+        # A location that confirms the seed's matches it to comparison precision, and keeps the
+        # seed's point, so nothing moves. One that differs by more is a value for review.
         if value != baseline:
             rule = f"{rule} Found {value}, which confirms the seed's location, so the seed's is kept.".strip()
         value = baseline
@@ -779,9 +734,6 @@ def combine_location(resolved: list[dict[str, Any]]) -> dict[str, Any] | None:
             "researcher_notes": " ".join(notes),
         }
     )
-    if verdict != "Auto-validated":
-        row["reviewer"] = ""
-        row["reviewed_date"] = ""
     resolved.append(row)
     return None
 
@@ -931,7 +883,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         to_resolve = list(requested_attributes(site))
         to_resolve += [name for name in by_attribute if name not in to_resolve]
         for name in to_resolve:
-            site_resolved.append(resolve(site, name, by_attribute.get(name, []), reviewed_on=access_date))
+            site_resolved.append(resolve(site, name, by_attribute.get(name, [])))
         for warning in cover_consistency_warnings(site_resolved):
             parse_warnings.append(
                 {
@@ -942,13 +894,12 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                 }
             )
 
-        km = append_distance_row(site, site_resolved, reviewed_on=access_date)
+        km = append_distance_row(site, site_resolved)
         if km is None:
             km = single_axis_offset_km(site, site_resolved)
-        settle_near_coordinates(site, site_resolved)
         coordinates, found = "source-backed coordinates are", "found coordinates"
         # A dropped map site is not a source, but its page still shows the agent looking at
-        # another landfill, so its coordinates can withdraw auto-validation too.
+        # another landfill, so its coordinates can fail the identity check too.
         map_km, map_site = dropped_map_site_offset_km(site, payload)
         kept_far = km is not None and km > IDENTITY_DISTANCE_KM_THRESHOLD
         if not kept_far and map_km is not None and map_km > IDENTITY_DISTANCE_KM_THRESHOLD:
@@ -1095,18 +1046,6 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         if sid in sites_by_id and (cls := site_name_class(sites_by_id[sid])) in SKIPPED_NAME_CLASSES
     ])
 
-    standard_records, standard_notes = build_standard_table(sites_by_id, resolved_rows)
-    for note_site_id, note in standard_notes:
-        note_site = sites_by_id.get(note_site_id, {})
-        parse_warnings.append(
-            {
-                "run_id": config.run_id,
-                "site_id": note_site_id,
-                "site_name": normalize_scalar(note_site.get("site_name")),
-                "warning": note,
-            }
-        )
-
     out = config.run_dir
     paths = {
         "evidence": out / "evidence.csv",
@@ -1115,11 +1054,12 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         "review_queue": out / "review_queue.csv",
         "leads": out / "supplementary_leads.csv",
         "warnings": out / "parse_warnings.csv",
-        "standardized": out / f"std_facility_tbl_ai_search_{config.run_id}.csv",
         "retry": out / "sites_to_retry.csv",
     }
     write_csv_records(paths["evidence"], evidence_rows, EVIDENCE_HEADERS)
-    write_csv_records(paths["resolved"], auto_validated_rows(resolved_rows), RESOLVED_HEADERS)
+    # Header only: nothing is accepted automatically. Ingestion reads the SMEs' decisions from the
+    # workbook, and accepts an empty resolved.csv beside it.
+    write_csv_records(paths["resolved"], [], RESOLVED_HEADERS)
     write_csv_records(paths["sources"], dedupe_sources(source_entries), SOURCES_HEADERS)
     write_csv_records(paths["review_queue"], review_queue, REVIEW_QUEUE_HEADERS)
     write_csv_records(paths["leads"], leads, SUPPLEMENTARY_LEADS_HEADERS)
@@ -1127,13 +1067,6 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     write_csv_records(
         paths["retry"], retry_sites, ["site_id", "site_name", "country_iso3", "reason", "search_notes"]
     )
-    write_csv_records(
-        paths["standardized"],
-        [to_csv_row(record) for record in standard_records],
-        STANDARDIZED_FACILITY_COLUMNS,
-    )
-    # Ship the load statement next to the data so a name-based load is the easy path.
-    paths["load_sql"] = write_load_statement(paths["standardized"])
 
     paths["workbook"] = write_review_workbook(
         out / f"{config.run_id}_review.xlsx",
@@ -1159,38 +1092,17 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             },
             {"setting": "contradiction_checks", "value": contradiction_checks},
             {"setting": "not_a_waste_facility", "value": not_a_waste_facility},
-            {"setting": "standardized_records", "value": len(standard_records)},
         ],
         review_queue=review_queue,
         leads=leads,
         parse_warnings=parse_warnings,
     )
 
-    print_summary(
-        by_site, resolved_rows, evidence_rows, review_queue, standard_records, leads, parse_warnings, retry_sites
-    )
+    print_summary(by_site, resolved_rows, evidence_rows, review_queue, leads, parse_warnings, retry_sites)
     return paths
 
 
-def auto_validated_rows(resolved_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The rows resolved.csv keeps: a value the agent found that our rules accepted without a human.
-
-    "Not found" rows carry no value, and rows awaiting review belong in the review workbook until an
-    SME promotes them, so neither is written. Those rows are still built in memory - the review
-    queue and the standardized table are derived from them.
-    """
-    return [
-        row
-        for row in resolved_rows
-        if normalize_scalar(row.get("resolution")) in PROMOTED_RESOLUTIONS
-        and normalize_scalar(row.get("validation_status")) == "Auto-validated"
-        and normalize_scalar(row.get("resolved_value"))
-    ]
-
-
-def print_summary(
-    cached, resolved_rows, evidence_rows, review_queue, standard_records, leads, warnings, retry_sites
-) -> None:
+def print_summary(cached, resolved_rows, evidence_rows, review_queue, leads, warnings, retry_sites) -> None:
     from collections import Counter
 
     resolutions = Counter(row["resolution"] for row in resolved_rows)
@@ -1198,8 +1110,6 @@ def print_summary(
     print(f"\nSites arbitrated:        {len(cached)}")
     print(f"Evidence rows:           {len(evidence_rows)}")
     print(f"Attributes arbitrated:   {len(resolved_rows)}")
-    print(f"Auto-validated rows:     {len(auto_validated_rows(resolved_rows))}  (resolved.csv)")
-    print(f"Standardized records:    {len(standard_records)}")
     print(f"Leads:                   {len(leads)}")
     print(f"Parse warnings:          {len(warnings)}")
     if retry_sites:
@@ -1209,7 +1119,7 @@ def print_summary(
         )
         print("   These are NOT 'no data found'. Retry them:")
         print(f"   uv run waste-ai-search search --run-id <run> --force --site-ids {ids}")
-    print(f"\nSME review queue:        {len(review_queue)} rows")
+    print(f"\nSME review queue:        {len(review_queue)} rows  (nothing is accepted without review)")
     print("\nResolutions:")
     for name, count in resolutions.most_common():
         print(f"  {count:>5}  {name}")

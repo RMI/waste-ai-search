@@ -216,7 +216,8 @@ uv run waste-ai-search run --run-id pilot10 --iso3 NGA PHL --limit 10
 That searches, arbitrates, and — if any facility turns out to have a gas collection system the
 seed did not know about — automatically runs a second, narrow pass for that facility's gas-capture
 attributes and re-arbitrates. Same run id, same output directory, no reseeding by hand. Pass
-`--no-followup` to stop after the first pass.
+`--no-followup` to stop after the first pass. Nothing has been reviewed by then, so the follow-up
+reads the gas collection findings still waiting in the review queue.
 
 Why a second pass exists at all: gas-capture attributes are only asked of facilities known to have
 a collection system, and `has_landfill_gas_collection` is itself one of the searched attributes. A
@@ -240,8 +241,9 @@ uv run waste-ai-search search --run-id pilot10 --pilot-size 10
 # With blob storage configured this pulls from blob first (VPN); add --local to stay fully offline.
 uv run waste-ai-search arbitrate --run-id pilot10
 
-# Phase 3 - `run` does this for you. By hand: fold promoted values back into the seed, then
-# search ONLY the sites where gas collection was discovered - refresh-seed prints the command.
+# Phase 3 - `run` does this for you. By hand: fold found values, still awaiting review, back into
+# the seed, then search ONLY the sites where gas collection was discovered - refresh-seed prints
+# the command.
 uv run waste-ai-search refresh-seed --run-id pilot10
 uv run waste-ai-search search --run-id pilot10_pass2 \
   --input-csv outputs/runs/pilot10/refreshed_seed.csv --site-ids <ids printed above>
@@ -336,7 +338,7 @@ Unknown is **not** treated as inexact: only an explicit FALSE triggers a coordin
 **3. Everywhere else: gap-fill, plus the gas-capture gate.**
 
 - Identity (`found_facility_name`, `found_latitude`, `found_longitude`) is requested **except** where the seed's value came from a Tier 1–2 source: the name for about 10,600 facilities, and both coordinates for 4,063 of the 12,122 searchable sites (Mexico INEGI, E-PRTR, Canada GHGRP). This needs per-attribute provenance; with none, the attribute is still asked. Coordinates flagged inexact are still searched.
-- **Where both are trusted, the wrong-facility check does not run.** That check compares the found coordinates with the seed and withdraws auto-validation beyond 5 km; with no found coordinates there is nothing to compare. Accepted to cut cost (design doc F29): skipping coordinates saves 8,126 of 175,293 attribute-requests (4.6%).
+- **Where both are trusted, the wrong-facility check does not run.** That check compares the found coordinates with the seed and, beyond 5 km, warns the SME on every value from that site's search; with no found coordinates there is nothing to compare. Accepted to cut cost (design doc F29): skipping coordinates saves 8,126 of 175,293 attribute-requests (4.6%).
 - Metadata attributes are requested **only where that facility's baseline is empty**.
 - The seven `gccs_*` attributes are requested **only where gas collection is known present** —
   212 to 603 facilities each, not 13,000. See the two-pass note above for why this loses nothing.
@@ -438,14 +440,20 @@ never as a value.
 | `found_longitude` | numeric | `decimal degrees` | `longitude` |
 
 The two coordinates are asked for and checked separately, then combined into one value,
-`found_location`, written `lat, lon`. A location is one fact, so it is accepted, reviewed and
-loaded as a pair or not at all: it takes the less settled verdict of its two halves, and goes to
-review if they came from different sources. A coordinate found without its other half is listed
-under Leads. On batch 1, the halves had split at 55 of the 157 sites with a found coordinate.
-A coordinate within 0.5 km of the seed's is the same place, so it confirms the seed's, and a
-location that confirms the seed's keeps the seed's point: nothing moves.
+`found_location`, written `lat, lon`. A location is one fact, so it is reviewed and loaded as a
+pair or not at all: it takes the less settled verdict of its two halves, so it goes to review if
+either differs from ours, and `resolution_rule` says if they came from different sources. A
+coordinate found without its other half is listed under Leads. On batch 1, the halves had split at
+55 of the 157 sites with a found coordinate.
 
-**Newer sources win.** The agent is told to prefer the most recent source when sources disagree, and to base `facility_status` on the latest evidence it can find (a closure notice, current opening hours, recent news) rather than an older permit or directory listing. Arbitration follows the same rule: within a tier the newer `value_date` wins, and for `facility_status` only, a lower-tier source down to Tier 3 may win when it is at least 3 years newer than the source or baseline it replaces. Such a win always goes to review, and `resolution_rule` states the dates.
+A location that matches the seed's to comparison precision (six significant digits) confirms it.
+It keeps the seed's point, so nothing moves, and like any confirmation it is not queued. One that
+differs by more, even by a few hundred metres, goes to review like any other value. There is no
+"same place" distance any more. The 1 km rule, and the 0.5 km rule that replaced it, counted a
+permit's coordinates near OSM's as confirming OSM's, when the permit's point is the one worth
+having.
+
+**Newer sources win.** The agent is told to prefer the most recent source when sources disagree, and to base `facility_status` on the latest evidence it can find (a closure notice, current opening hours, recent news) rather than an older permit or directory listing. Arbitration follows the same rule: within a tier the newer `value_date` wins, and for `facility_status` only, a lower-tier source down to Tier 3 may win when it is at least 3 years newer than the source or baseline it replaces. Such a win goes to review like any change, and `resolution_rule` states the dates.
 
 `found_facility_name` must be **specific**: a name that identifies the site on its own ("Wonthaggi Transfer Station"), not a generic label ("Waste Management Facility"). If a source gives only a generic name, the agent adds the municipality, town or operator that the same source names ("Bass Coast Shire Waste Management Facility"), never a place the source doesn't mention.
 
@@ -468,7 +476,7 @@ location that confirms the seed's keeps the seed's point: nothing moves.
 | `cover_types` | enum array | — | `cover_types` |
 | `has_biocover` | boolean | — | `has_biocover` |
 
-‡ **Review-layer only: `operator`, `bulk_waste_type`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value reaches `resolved.csv` but never the standardized table. Like every attribute, a Tier 1–2 value auto-validates into `resolved.csv`; Tier 3 and below go to the review queue instead. Promoting them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
+‡ **Review-layer only: `operator`, `bulk_waste_type`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value reaches the review queue but has no standardized column to load into. Like every attribute, a found value goes to review whatever its tier. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
 
 `bulk_waste_type` is the waste that makes up **most** of what a site receives. It separates
 municipal solid waste (household and similar waste, which decomposes and generates methane) from
@@ -504,7 +512,7 @@ discovery into the baseline and the next pass picks up that facility's GCCS attr
 
 **No longer searched (F31):** `gccs_ch4_generated_metric_tonnes`, `gccs_ch4_collected_metric_tonnes`
 and `gccs_ch4_flow_to_project_metric_tonnes`. They are still read from the seed, and a run cached
-before the change still re-arbitrates them into their standardized columns.
+before the change still re-arbitrates them for review.
 
 **Computed locally, never searched.**
 
@@ -552,16 +560,16 @@ decades, which is why WasteMAP tracks it. A landfill that is now a park keeps it
 with closure in `facility_status = Inactive` and `closing_year`. The question is *was this ever a
 waste disposal site?*, not *is it operating today?*
 
-The value is **promoted like any facility_type**, so it reaches the standardized table and the next
-pass's seed. Every such verdict is also routed to review whatever its tier, on the site's own
-`facility_type` row in Review_Queue — there is no separate tab. Where the same run also found the
-site closed, the likeliest misreading, the row's `evidence_summary` says so.
+The value is **handled like any facility_type**. It goes to review whatever its tier, as every found
+value does, on the site's own `facility_type` row in Review_Queue — there is no separate tab. It also
+reaches the next pass's seed, which `refresh-seed` builds from values still awaiting review. Where
+the same run also found the site closed, the likeliest misreading, the row's `evidence_summary` says
+so.
 
 > **Pending upstream.** The database's `facility_type` enum and `chk_facility_type` do not carry
-> `Not a Waste Facility` yet, so a load containing it will be rejected — and `COPY` is
-> all-or-nothing, so one such row blocks the whole run's load. `check_db_schema.py` warns about it.
-> The value needs adding upstream in `waste_data_ingestion_pipeline`, ideally alongside creating
-> `transformed.transformed_ai_search`, which does not exist yet either.
+> `Not a Waste Facility` yet, so consolidating a validated one will be rejected.
+> `check_db_schema.py` warns about it. The value needs adding upstream in
+> `waste_data_ingestion_pipeline`.
 
 Facilities with any other source, or any corroborating attribute, are never offered the value, so
 the other 10,928 prompts carry the ordinary values and none of this guidance.
@@ -597,15 +605,17 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 
 | File | Purpose |
 |---|---|
-| `<run_id>_review.xlsx` | **The SME artifact.** Only rows needing a human decision, with dropdowns. |
-| `resolved.csv` | One row per value the agent found and the rules auto-validated: what we now believe and why. `Not found` and needs-review rows are not written. |
-| `evidence.csv` | One row per source-backed claim. The audit trail. Its `source_id` finds the source in `sources.csv`. |
+| `<run_id>_review.xlsx` | **The SME artifact.** Every found value that differs from what the database holds, with dropdowns. Ingestion reads the SMEs' decisions from it. |
+| `resolved.csv` | A header and no rows. Nothing is accepted automatically, and ingestion accepts it empty. Runs from before (batch 1) wrote the values they accepted here. |
+| `evidence.csv` | One row per source-backed claim, confirmations of our values included. The audit trail. Its `source_id` finds the source in `sources.csv`. |
 | `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below). |
-| `std_facility_tbl_ai_search_<run_id>.csv` | 44-column spec-conformant standardized table. |
-| `std_facility_tbl_ai_search_<run_id>.load.sql` | Load statement naming every column, so table column order is irrelevant. |
 | `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
 | `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
+
+**Nothing is loaded from this repository.** It used to write a standardized table and a `.load.sql`
+beside it, built before review. Ingestion now builds the AI search's table itself, from the values
+SMEs validate (`waste_data_ingestion_pipeline` #261).
 
 **One source per exact URL.** The query string is part of the URL, so documents that one script
 serves by id stay separate sources: dropping it once merged 103 different Natural Resources Wales
@@ -623,11 +633,19 @@ simultaneously. Its number is kept as `agent_proposed_tier` for drift monitoring
 
 | Tier | Class | Can fill an empty baseline | Can override a baseline |
 |---|---|---|---|
-| 1 | Regulator, permit/registry, operator disclosure | yes, auto-validated | yes |
-| 2 | Peer-reviewed, IFI/UN dataset, govt statistics | yes, auto-validated | yes |
-| 3 | News, trade press, NGO report | yes, needs review | no |
-| 4 | Aggregator, wiki, directory listing | yes, needs review | no |
-| 5 | Source type could not be established | yes, needs review | no |
+| 1 | Regulator, permit/registry, operator disclosure | yes | yes |
+| 2 | Peer-reviewed, IFI/UN dataset, govt statistics | yes | yes |
+| 3 | News, trade press, NGO report | yes | no |
+| 4 | Aggregator, wiki, directory listing | yes | no |
+| 5 | Source type could not be established | yes | no |
+
+**Nothing is accepted automatically.** Whatever its tier, a found value that differs from what the
+database holds goes to the review queue; one weaker than ours goes to Leads. A value equal to ours
+is a confirmation: its evidence stays in `evidence.csv`, but it is not queued and not loaded, so the
+AI search never becomes the credited source for a value nobody reviewed. Tier still decides between
+the queue and Leads, and is shown beside each value. Until build step 3 of
+[the source-matching plan](docs/plans/2026-10-20-match-sources-by-location.md), Tier 1–2 fills and
+confirmations were accepted without review: 2,932 values in batch 1.
 
 Baseline credibility is judged **per attribute**, from
 `consolidation.value_resolution_ledger`, not from the facility's composite
@@ -635,8 +653,8 @@ Baseline credibility is judged **per attribute**, from
 facility also has a GHGRP filing. The dataset is shown as `baseline_source`.
 
 A source with no publication date is capped at Tier 3 whatever its publisher. An **empty**
-baseline is filled at any tier — a sourced value beats no value — but only Tier 1-2 fills
-auto-validate. Once a baseline value exists, only Tier 1-2 may override it.
+baseline is filled at any tier — a sourced value beats no value. Once a baseline value exists, only
+Tier 1-2 may override it.
 
 Corroboration counts sources, not citations. A page cited twice for one attribute counts once in
 `agreeing_source_count`, once when the most-corroborated value breaks a tie, and once in the
@@ -656,10 +674,11 @@ a weak source.
 One thing is still read from a dropped page: its coordinates, for the
 [identity check](#3-decide) alone. A map page far from our site shows the agent was looking at
 another landfill, and in batch 1 these pages gave the only found coordinates at 34 of the 46 sites
-the check flagged. So until the check is replaced (build step 3 of
+the check flagged. So until the check is replaced (build step 5 of
 [the source-matching plan](docs/plans/2026-10-20-match-sources-by-location.md)), a dropped page
-placing the facility more than 5 km away still withdraws auto-validation for the whole site, even
-when another source's coordinates are close. Its coordinates never become a value.
+placing the facility more than 5 km away still puts the identity warning on every value from the
+site's search, even when another source's coordinates are close. Its coordinates never become a
+value.
 
 The prompt tells the agent not to cite the two, and to cite the government source where a
 directory republishes one: `wastebook.co.uk` copies the Environment Agency register (its
@@ -689,18 +708,19 @@ the run directory is audit material you only need if a row raises a question.
 
 ### 1. Open the Review_Queue tab
 
-This is the worklist. It contains only rows the pipeline would not sign off itself — nothing else.
-An empty queue means nothing needs you.
+This is the worklist: every value the search found that differs from what the database holds.
+**Nothing is accepted without review**, whatever the source's tier. An empty queue means nothing
+needs you.
 
 Rows arrive here for one of two reasons:
 
-- **A value came from a weak or unclassifiable source** (Tier 3, 4 or 5). It filled a field that was
-  empty, but no one has confirmed it.
+- **A value fills a field that was empty.** It may come from a regulator or from a directory; the
+  tier is beside it.
 - **A value disagrees with what the database already holds**, at equal or better credibility.
 
-Everything the pipeline was confident about — Tier 1-2 fills, confirmations, and every search
-that found nothing — is already marked `Auto-validated` with `reviewer = AI Agent`, and is not
-shown here. In the 10-site pilot that was 122 of 136 rows, leaving 12 for a human.
+Not shown: a source that only confirms what the database holds (it stays in `evidence.csv`, and
+nothing from it is loaded), a search that found nothing, and a finding weaker than what we hold,
+which is under Leads.
 
 ### 2. Read the row
 
@@ -719,7 +739,7 @@ Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions
 
 **Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and compare it with what the source describes. A `found_location` row is the location the source gives, in the same form: accept or reject it as one point.
 
-**Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `resolved.csv` and `evidence.csv`; they are blank where the source was never translated.
+**Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `evidence.csv`; they are blank where the source was never translated.
 
 **Source links.** `winning_link_status` beside the URL says whether it was checked and found working (`OK`) or could not be verified (`Unverified` — usually a site refusing automated checks, so it may still open for you). A source whose link is dead never wins: it is routed to Leads instead. `winning_source_url` is clickable, and shows the URL exactly as the source gave it. The link behind it is made safe (spaces and accented characters encoded), so it opens even when the text has them. A URL that is not `http`/`https`, or longer than Excel can follow, is shown as plain text rather than linked.
 
@@ -730,16 +750,15 @@ Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions
 | **Filled empty baseline** | The field was empty and now has a value. Open the URL: does the source actually say this, and is it about *this* facility? |
 | **Overrides baseline** | A more credible source contradicts existing data. Confirm the new value is right before it replaces a database value. |
 | **Conflict - needs review** | Two sources of equal or near-equal credibility disagree, and the pipeline will not pick a winner. You pick, or reject both. |
-| **Confirmed baseline** (rare here) | Normally auto-validated. If it appears in the queue, the site failed the identity check — see below. |
 
 **The single highest-value check: identity.** Tier cannot detect a perfectly credible document that
 describes the *wrong landfill*. If `researcher_notes` says
 *"Identity not confirmed: source-backed coordinates are N km from the seed location"*, treat every
-row for that site as suspect regardless of tier — the pipeline has already withdrawn its own
-sign-off. In the pilot this caught a site whose findings were 238 km from the facility. The note
-may instead say *"coordinates on a mapcarta.com page the agent cited (dropped as a source) are N km
-from the seed location"*: the agent read a map page of a landfill N km away, which is not a source,
-but the values beside it may well describe that landfill too.
+row for that site as suspect regardless of tier. In the pilot this caught a site whose findings
+were 238 km from the facility. The note may instead say *"coordinates on a mapcarta.com page the
+agent cited (dropped as a source) are N km from the seed location"*: the agent read a map page of a
+landfill N km away, which is not a source, but the values beside it may well describe that landfill
+too.
 
 ### 4. Record the decision
 
@@ -748,14 +767,14 @@ Edit only these columns; everything else is read-only:
 | Column | Enter |
 |---|---|
 | `validation_status` | `Validated` or `Rejected` (dropdown) |
-| `rejection_reason` | For a rejection: `Wrong facility`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Counted by cause to find where the AI errs and where auto-validation is safe |
+| `rejection_reason` | For a rejection: `Wrong facility`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Counted by cause to find where the AI errs |
 | `corrected_value` | If you know the right value: enter it here. For categorical fields (site type, status, waste type, depth, yes/no fields, cover and gas-project types) it is a dropdown of the allowed values for that row's attribute; multi-value fields also accept a typed combination. A location is `lat, lon`. Never edit `resolved_value` — it keeps the AI's own answer, which is how its error rate is measured |
 | `corrected_value_date` | Only if your corrected value is for a different date than `value_date`, such as a current figure replacing one you rejected as `Outdated`: that date, as `YYYY`, `YYYY-MM` or `YYYY-MM-DD` |
 | `reviewer` | Your name |
 | `reviewed_date` | The date |
 | `researcher_notes` | Why, especially for a rejection |
 
-`Validated` means the value is correct and may be merged. `Rejected` means the search's value must not be; a `corrected_value` you give is merged instead.
+`Validated` means the value is correct and may be merged. `Rejected` means the search's value must not be; a `corrected_value` you give is merged instead. Ingestion reads these decisions straight from this tab.
 
 ### 5. Optional tabs
 
@@ -805,10 +824,11 @@ uv run waste-ai-search arbitrate --run-id <run_id>
 
 ### Auditing a decision
 
-`resolved.csv` holds only values the agent found and the rules auto-validated. Values awaiting a
-decision are in the review queue instead, until an SME promotes them; attributes not found are not
-written anywhere. `evidence.csv` holds one row per source-backed
-claim with the tier rule applied to each source, so you can see exactly why a value won or lost.
+Nothing is accepted automatically, so `resolved.csv` has a header and no rows. Every value awaiting
+a decision is in the review queue. A source that confirms what we hold is in `evidence.csv` but not
+in the queue, and attributes not found are not written anywhere. `evidence.csv` holds one row per
+source-backed claim with the tier rule applied to each source, so you can see exactly why a value
+won or lost.
 `sources.csv` holds one row per exact URL; a row's `source_id` in `evidence.csv` finds its URL,
 title and publisher there.
 
@@ -875,6 +895,10 @@ uv run python scripts/generate_enums.py --check  # is the committed copy stale?
 
 Both need database access (so, the VPN). Exit `1` means real drift; exit `2` means the database
 could not be reached, so CI can tell a network blip from a genuine mismatch.
+
+`check_db_schema.py` checks the spec's columns, and the types the code expects of them, against
+`transformed.transformed_osm`, a table built to the same spec. This repository no longer writes a
+standardized table of its own, so there is no AI search table here to check.
 
 `generate_enums.py` reads allowed values from **both** places they live: Postgres enum types, and
 CHECK constraints on `consolidated_facility`. `waste_depth` is only in the second — it is a `text`
