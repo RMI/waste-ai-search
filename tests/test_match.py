@@ -312,6 +312,9 @@ def test_eastview_one_shared_word_stays_with_the_site_searched_and_names_the_nam
 @pytest.mark.parametrize("ours, searched_at, name", [
     # The SME's examples: no location given, and the name scored 1.0 against the right site.
     (seed("18529", "Prairie Green IWMF", 50.0047, -97.1307), (50.30, -97.00), "Prairie Green Landfill"),
+    # Batch 1's 13354, 133 km away: "Integrated Waste Management Facility" is what IWMF stands for.
+    (seed("18529", "Prairie Green IWMF", 50.0047, -97.1307), (49.25037, -98.57193),
+     "Prairie Green Integrated Waste Management Facility (Landfill)"),
     (seed("13449", "City of Moose Jaw (Landfill)", 50.39872, -105.48078), (50.90, -106.30), "Moose Jaw Sanitary Landfill"),
 ])
 def test_a_name_strongly_matching_one_other_site_within_200_km_moves_the_source(ours, searched_at, name):

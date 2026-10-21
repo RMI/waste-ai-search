@@ -40,6 +40,8 @@ def test_the_added_words_leave_the_place_name():
 @pytest.mark.parametrize("name, words", [
     ("Noosa Resource Recovery Centre", {"noosa"}),
     ("Nambour Landfill & Resource Recovery Centre", {"nambour"}),
+    ("Prairie Green Integrated Waste Management Facility (Landfill)", {"prairie", "green"}),
+    ("Prairie Green IWMF", {"prairie", "green"}),
     ("Installation de stockage de déchets non dangereux de Hendaye", {"hendaye"}),
     ("Installation de Stockage des Déchets Non Dangereux (ISDND)", {"isdnd"}),
     ("Landfill for Non-Hazardous Waste, Gien", {"gien"}),

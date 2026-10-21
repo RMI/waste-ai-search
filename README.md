@@ -311,8 +311,9 @@ as none.
 accents, punctuation, company suffixes and permit codes are ignored, and generic words are dropped
 ("landfill", "sanitary", "waste management", and more this corpus needs, to be agreed with CJ:
 tip, refuse, depot, grounds, nuisance, lieu, enfouissement, technique and LET; the words of other
-kinds of site, such as Australia's "Resource Recovery Centre", France's "Installation de Stockage de
-Déchets Non Dangereux" and Mexico's "tiradero a cielo abierto"; and small words such as "for", "in"
+kinds of site, such as Australia's "Resource Recovery Centre", Canada's "Integrated Waste Management
+Facility" (IWMF), France's "Installation de Stockage de Déchets Non Dangereux" and Mexico's "tiradero
+a cielo abierto"; and small words such as "for", "in"
 and the French "à"). The score, from 0 to 1, is the higher of the share of the shorter name's words found in the longer one and how alike the
 two read as strings, so "Seaton Meadows Landfil" still matches "Seaton Meadows". Conflicting
 qualifiers (North and South, Cell I and Cell II) score 0.
@@ -366,16 +367,15 @@ that cited it: `match_located`, `match_named_among_several`, `match_tie`, `match
 `new_facility_candidates` and `possible_duplicates`.
 
 **On the batch-1 replay**, a plumbing check since batch 1's sources rarely give a location, 85
-located sources matched one site, 2 tied, 8 matched none, 90 moved by name, and 4,651 citations had
-no location. The queue has 6,416 rows (6,562 before), never two for one site, attribute and year.
+located sources matched one site, 2 tied, 8 matched none, 91 moved by name, and 4,650 citations had
+no location. The queue has 6,414 rows (6,562 before), never two for one site, attribute and year.
 80 of them are filed under a site other than the one searched, at 25 sites: Thunder Bay's 15 rows,
 moved by name from searches of nearby "domestic landfill" sites, Fredericton, Otter Lake, Sault
 Ste. Marie, North Bay (the SME's Merrick example), Prairie Green, Moose Jaw and Benaraby among
 them. The six points batch 1's agent copied from our own count as no location. Rule 6 leaves some
-known cases with the site searched, flagged: Prairie Green's pages at two sites 283 and 311 km from
-it, West Perth's page at 14 "domestic landfill" sites, and Brandon's Eastview pages at 12 Manitoba
-sites and at Guelph's Eastview; `corrected_site_id` offers the sites whose searches cited each
-page. 41 pairs are possible duplicates, Cowpen Bewley's and Foxhall's E-PRTR records among them.
+known cases with the site searched, flagged: Prairie Green's pages at four sites 283-633 km from it,
+West Perth's page at 14 unnamed sites, and Brandon's Eastview pages at 12 Manitoba sites and at
+Guelph's Eastview; `corrected_site_id` offers the sites whose searches cited each page. 41 pairs are possible duplicates, Cowpen Bewley's and Foxhall's E-PRTR records among them.
 
 ## Storage and sharing
 
