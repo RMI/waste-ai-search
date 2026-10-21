@@ -12,7 +12,7 @@ import pytest
 
 def _seed(tmp_path, count):
     seed = tmp_path / "seed.csv"
-    rows = "".join(f"{i},Landfill {i},NGA\n" for i in range(1, count + 1))
+    rows = "".join(f"{i},Hillside Landfill {i},NGA\n" for i in range(1, count + 1))
     seed.write_text("site_id,site_name,country_iso3\n" + rows, encoding="utf-8")
     return seed
 

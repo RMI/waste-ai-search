@@ -232,8 +232,8 @@ run it as often as you like against a search that is still in progress:
 uv run waste-ai-search search --run-id pilot10 --iso3 NGA PHL --limit 10
 
 # ...or sample a spread instead of the first N. --limit follows seed order, which is
-# facility-id order and clusters by country; --pilot-size draws across countries and
-# deliberately includes generic-named hard cases.
+# facility-id order and clusters by country; --pilot-size draws across countries, and adds
+# generic-named hard cases only with --include-unsearchable-names.
 uv run waste-ai-search search --run-id pilot10 --pilot-size 10
 
 # Phase 2 - rebuild every output from the cached responses. No agent calls, re-runnable.
@@ -287,11 +287,15 @@ uv run waste-ai-search run --run-id batch1 --batch 1 --workers 16
 | 6 | Every other country (110 today) | 2,574 | ~$700 |
 
 The six cover all 12,122 searchable sites once each. USA and Brazil stay excluded, as everywhere.
+These sizes and costs predate rule 4 below, which also skips sites whose name gives a search
+nothing to look for, so each batch searches fewer sites than this. `measure_name_yield.py
+--list-sites` counts how many per batch.
 
 ### What is actually searched — read this before a full run
 
-Three rules narrow the search. Together they mean a full run queries **12,392 of 15,537
-facilities** and makes **167,410 attribute-requests** instead of 22 x 15,537 = 341,814.
+Four rules narrow the search. The first three mean a full run queries **12,392 of 15,537
+facilities** and makes **167,410 attribute-requests** instead of 22 x 15,537 = 341,814. The fourth
+removes more; those figures predate it.
 
 **1. United States facilities are excluded by default — 3,145 sites, 20% of the corpus.**
 
@@ -324,7 +328,8 @@ With the municipality the agent found the right facilities, but in reports that 
 coordinates: **0 of 20** sites got usable coordinates either way. So Brazil is excluded by default
 like the US, and searching it is opt-in with the same three overrides (`--iso3 BRA`, `--site-ids`,
 `--include-excluded-countries`). Matching against OSM/GPW landfills within the municipality is the
-likelier fix.
+likelier fix. Opting in to Brazil does not lift rule 4, and many of SINIR's names are generic
+labels such as `Dump`, so pass `--include-unsearchable-names` too to search those.
 
 Unknown is **not** treated as inexact: only an explicit FALSE triggers a coordinate search.
 
@@ -347,16 +352,62 @@ found by web search on the WP-543 test.
 A site left with no attributes to search is dropped from selection entirely — querying it would
 spend a request and a prompt to receive nothing.
 
-**Under review: sites whose name gives a search nothing to look for.** Filler such as
-`OpenStreetMap Landfill`, stray text such as a URL, or only a kind of site such as `domestic
-landfill` may be skipped too, but only once finished runs show that searching them rarely finds
-anything ([the plan](docs/plans/2026-10-15-skip-unsearchable-names.md)). This read-only script
-measures it, comparing each class of name with named sites from the same kind of source, and
-forecasts what each batch would spend on each class:
+**4. Sites whose name gives a search nothing to look for are skipped by default.**
+
+The agent finds a facility by its name and location. A name that is filler, stray text or only a
+kind of site gives it nothing to search for, so its queries are wasted or find a different
+facility nearby. Four classes of name are skipped
+([the plan](docs/plans/2026-10-15-skip-unsearchable-names.md);
+[`searchable_names.py`](src/waste_ai_search/searchable_names.py) holds the test):
+
+| Class | What it is | Examples |
+|---|---|---|
+| No name | An empty name, or the filler ingestion gives an OSM polygon with no name, unless the source's own spelling is a name | `OpenStreetMap Landfill` |
+| Not a name | A URL, a bare number or a survey note that ended up as the name | `update the tag landuse after survey`, `4000` |
+| Generic label | Only says what kind of site it is (`is_generic_site_name`). Initials and route codes count as a name: `K & W Landfill` and `SR 85 Landfill` are searched | `domestic landfill`, `Landfill`, `Municipal Dump`, `Landfill II` |
+| Mining feature | A spoil heap or similar, matched in the English name or the original (отвал, террикон, відвал) | `Overburden Blade`, `Terrikon` |
+
+Nothing in the database changes: a skipped site stays in WasteMAP and Climate TRACE. It just isn't
+web-searched until it has a name worth searching for. The test leaves some description-only names
+in, such as `Sanitary Landfill` and `Controlled Landfill`, and names still in Cyrillic.
+
+The generic test knows only English words, so it reads the English name, not the source's own
+spelling. It can't tell a generic original such as `Полигон ТБО` ("MSW landfill") from a
+distinctive one, so a site whose English name is a generic translation is skipped even when its
+original, which the agent would search first, names it. How often that happens can't be measured
+from data in this repo.
+
+It works like the country rules. The run prints how many sites it skipped in each class, and an
+explicit request wins:
+
+```bash
+uv run waste-ai-search search --run-id r --batch 2 --include-unsearchable-names  # search them
+uv run waste-ai-search search --run-id r --site-ids 499                          # listing ids wins
+```
+
+Naming a country with `--iso3` does not lift it, and `--pilot-size` draws its generic-named hard
+cases only with `--include-unsearchable-names`. The rule runs after the country rules and the
+nothing-to-ask check, and before `--limit` and `--pilot-size`, so a limit or a sample takes sites
+worth searching. Its count is therefore of the whole selection: a 10-site pilot of a batch lists
+every site in the batch the rule skips, not only those the pilot would have reached. It only
+removes sites from a batch and never moves one to another.
+
+Every skipped site is listed in `skipped_sites.csv` in the run folder, with its class and the
+rule it tripped. The list is the run's, not the last search's: each search under the run id adds
+its skips, so resuming one country keeps the others on record, and a site the run searches later
+(by id, or with the flag) comes off it. Run_Config records `unsearchable_names_skipped`, the
+sites skipped and never searched, by class, and `unsearchable_names_searched`, the sites in those
+classes that were searched anyway (listed by id or with the flag). A site is counted in one or the
+other, never both. Runs from before the rule say "not recorded".
+
+This read-only script measures what searching each class found in finished runs, against named
+sites from the same kind of source, and forecasts what each batch would spend on each class
+without the rule:
 
 ```bash
 uv run python scripts/measure_name_yield.py                    # list the runs in blob
 uv run python scripts/measure_name_yield.py --run-id <run id>  # measure them
+uv run python scripts/measure_name_yield.py --list-sites       # every site each batch skips
 ```
 
 | Scope | Sites | Attribute-requests |
@@ -365,7 +416,8 @@ uv run python scripts/measure_name_yield.py --run-id <run id>  # measure them
 | Gap-fill + GCCS gate only | 15,537 | 197,110 |
 | **+ country rules (default)** | **12,089** | **166,804** |
 
-At the measured 42s/site that is roughly **6.3 days** serial, down from 8.0.
+At the measured 42s/site that is roughly **6.3 days** serial, down from 8.0. These figures predate
+rule 4, which lowers them further.
 
 ### Attributes searched
 
@@ -506,6 +558,12 @@ site closed, the likeliest misreading, the row's `evidence_summary` says so.
 Facilities with any other source, or any corroborating attribute, are never offered the value, so
 the other 10,928 prompts carry the ordinary values and none of this guidance.
 
+**Rule 4 narrows this a lot.** It skips OSM polygons with no name (`OpenStreetMap Landfill`, all of
+them OSM-only), many of the sites this check was aimed at, along with any OSM or GPW site whose name
+is only a generic label. So the verdict can now come only from named OSM and GPW sites, and the
+8,564 and 10,928 above predate the rule. Whether the skipped sites are landfills is left to the
+Climate TRACE review.
+
 ### Transfer stations and recycling centres
 
 `facility_type` also offers **`Transfer Station`** and **`Recycling Center`**, both pending upstream
@@ -539,6 +597,7 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 | `std_facility_tbl_ai_search_<run_id>.load.sql` | Load statement naming every column, so table column order is irrelevant. |
 | `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
+| `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
 
 **One source per exact URL.** The query string is part of the URL, so documents that one script
 serves by id stay separate sources: dropping it once merged 103 different Natural Resources Wales

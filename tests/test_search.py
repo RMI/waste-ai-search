@@ -274,7 +274,8 @@ def test_pilot_size_samples_a_spread_where_limit_takes_the_first_n():
     from waste_ai_search.search import select_sites
 
     sites, _headers = load_sites(PILOT_FIXTURE)
-    base = dict(input_csv=PILOT_FIXTURE, run_dir=PILOT_FIXTURE.parent, run_id="t")
+    # The fixture's generic-named hard cases are searched only with --include-unsearchable-names.
+    base = dict(input_csv=PILOT_FIXTURE, run_dir=PILOT_FIXTURE.parent, run_id="t", include_unsearchable_names=True)
 
     # The fixture leaves 4 eligible sites once the country rules apply, so sample 3.
     first_n = select_sites(sites, PipelineConfig(limit=3, **base))
@@ -313,7 +314,8 @@ def seed_with_countries(tmp_path, *countries, is_location_exact="FALSE"):
     path = tmp_path / "seed.csv"
     lines = ["site_id,site_name,country_iso3,is_location_exact,latitude,longitude"]
     for index, iso3 in enumerate(countries, start=1):
-        lines.append(f"{index},Landfill {index},{iso3},{is_location_exact},1.0,2.0")
+        # A name with something to search for: "Landfill 1" is a generic label, which isn't searched.
+        lines.append(f"{index},Hillside Landfill {index},{iso3},{is_location_exact},1.0,2.0")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 

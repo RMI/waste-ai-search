@@ -56,6 +56,8 @@ class PipelineConfig:
     use_geocode_cache: bool = False
     pilot_size: int = 0
     include_excluded_countries: bool = False
+    # Also search sites whose name gives a search nothing to look for (searchable_names.py).
+    include_unsearchable_names: bool = False
     # WP-533. Fetch cited URLs at the end of the search phase (network); arbitration only reads
     # the verdicts. keep_broken_links lets a dead source stay promotable instead of going to leads.
     check_links: bool = True
