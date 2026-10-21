@@ -84,11 +84,22 @@ NO_LOCATION_TEXT = {"", "none", "n/a", "na", "not stated", "not given", "unknown
 NO_GEOCODER = "no geocoder configured"
 NOT_LOCATED = "not located yet: run `locate --run-id` for this run"
 
-# A PO box, private bag or the like is where post goes, not where the site is.
+# A PO box, private bag or the like, with its number, is where post goes, not where the site is:
+# "PO Box 253", "Box 219", "C.P. 123", "Case postale 123", "Private Mail Bag 12", "PMB 12", "BP 45".
 PO_BOX = re.compile(
-    r"\b(?:p\.?\s*o\.?\s*box|post\s*office\s*box|g\.?p\.?o\.?\s*box|private\s+bag|locked\s+bag|"
-    r"postfach|apartado(?:\s+postal)?|caixa\s+postal|casilla(?:\s+postal)?|bo[iî]te\s+postale|"
-    r"b\.p\.\s*\d|postbus|box\s+\d+\s*$)",
+    r"(?<![\w.])(?:p\.?\s*o\.?\s*box|post\s*office\s*box|g\.?\s*p\.?\s*o\.?\s*box|box|"
+    r"private\s+(?:mail\s+)?bag|locked\s+bag|p\.?\s*m\.?\s*b\.?|c\.?\s*p\.?|case\s+postale|"
+    r"bo[iî]te\s+postale|b\.?\s*p\.?|postfach|apartado(?:\s+postal)?|caixa\s+postal|"
+    r"casilla(?:\s+postal)?|postbus)\s*(?:no\.?|n[°º]|#)?\s*\d+[A-Za-z]?(?!\w)",
+    re.IGNORECASE,
+)
+# What is left of an address once its PO box is taken out is still worth sending when it has a
+# civic number before a word, or names a road: "29786 Rte. 2, Wellington PE". A town and postcode
+# alone ("Hearst, ON P0L 1N0") are not.
+STREET_OR_NUMBER = re.compile(
+    r"(?<!\w)\d+[A-Za-z]?(?:-\d+)?\s+[^\W\d_]{2,}|"
+    r"\b(?:road|rd|street|avenue|ave|highway|hwy|route|rte|lane|drive|boulevard|blvd|chemin|rue|"
+    r"rang|concession|strasse|straße|weg|calle|avenida|rua|rodovia|estrada|carretera|via)\b",
     re.IGNORECASE,
 )
 
@@ -785,22 +796,41 @@ def iso2(iso3: Any) -> str:
 
 
 def _plain(text: Any) -> str:
-    return re.sub(r"[\W_]+", " ", normalize_scalar(text).casefold()).strip()
+    """Words only, in one case, with "&" read as "and"."""
+    return re.sub(r"[\W_]+", " ", normalize_scalar(text).casefold().replace("&", " and ")).strip()
+
+
+def _leading_name(name: str) -> re.Pattern:
+    """A name at the start of an address, in any case and punctuation, "&" or "and", ending where
+    a separator or a number follows: "Hart" never leads "Hartland Avenue 1", nor "Eastview" leads
+    "Eastview Road 18499"."""
+    words = re.sub(r"[\W_]+", " ", name.lower().replace("&", " and ")).split()
+    pattern = r"[\W_]*".join(r"(?:and|&)" if word == "and" else re.escape(word) for word in words)
+    return re.compile(rf"[\W_]*{pattern}(?=\s*(?:[,;:|(\-–—]|$)|\s+\d)", re.IGNORECASE)
+
+
+def without_po_box(text: str) -> tuple[str, bool]:
+    """The address with any PO box taken out, and whether there was one."""
+    rest, count = PO_BOX.subn(",", text)
+    if not count:
+        return text, False
+    return re.sub(r"\s*,[\s,;]*", ", ", rest).strip(" ,;:-–—"), True
 
 
 def address_to_send(text: str, names: list[str]) -> str:
     """The address text a geocoder may see: never a facility name, and never one leading it.
 
     "Brady Road Landfill, 1777 Brady Road, Winnipeg" is sent as "1777 Brady Road, Winnipeg". Text
-    that is only the name gives nothing to send.
+    that is only a name gives nothing to send. `names` are the source's names for the facility and
+    our own, since an address the agent filled with our site's name is just as much a name.
     """
     address = normalize_scalar(text)
-    for name in sorted({normalize_scalar(n) for n in names if normalize_scalar(n)}, key=len, reverse=True):
+    for name in sorted({normalize_scalar(n) for n in names if _plain(n)}, key=len, reverse=True):
         if _plain(address) == _plain(name):
             return ""
-        leading = re.match(re.escape(name), address, re.IGNORECASE)
+        leading = _leading_name(name).match(address)
         if leading:
-            rest = address[leading.end():].lstrip(" ,;:-–")
+            rest = address[leading.end():].lstrip(" ,;:-–—|(")
             if rest:
                 address = rest
     return address
@@ -959,7 +989,17 @@ def locate_source(
     if not states_location(source):
         return Located(reason="no location stated")
     iso3 = normalize_scalar(site.get("country_iso3")).upper()
-    names = [source.get("facility_name_in_source"), source.get("facility_name_english")]
+    # Every name the facility goes by, the source's and ours: none of them is ever geocoded.
+    names = [
+        source.get("facility_name_in_source"),
+        source.get("facility_name_english"),
+        *(
+            value.get("value") for value in source.get("values") or []
+            if isinstance(value, dict) and normalize_scalar(value.get("attribute_name")) == "found_facility_name"
+        ),
+        site.get("site_name"),
+        site.get("original_site_name"),
+    ]
 
     point: Located | None = None
     address: Located | None = None
@@ -983,16 +1023,20 @@ def locate_source(
                 else "not coordinates, a grid reference or a street address"
             )
             continue
-        if address is not None:
+        if address is not None and address.point is not None:
             continue
-        if PO_BOX.search(part):
-            address = Located(reason="a PO box is not where the site is")
-            continue
-        sent = address_to_send(part, names)
-        if not sent:
-            address = Located(reason="the stated location is the facility's name, which is never geocoded")
-            continue
-        address = geocode_address(sent, iso3, cache, geocoder, live)
+        # A PO box is taken out, and what is left is sent if it still has a street or a number.
+        rest, boxed = without_po_box(part)
+        sent = address_to_send(rest, names)
+        if boxed and not STREET_OR_NUMBER.search(rest):
+            tried = Located(reason="a PO box is not where the site is")
+        elif not sent:
+            tried = Located(reason="the stated location is the facility's name, which is never geocoded")
+        else:
+            tried = geocode_address(sent, iso3, cache, geocoder, live)
+        # A later address takes over from one that placed nothing, such as a mailing address.
+        if address is None or (address.point is None and tried.point is not None):
+            address = tried
 
     if point is not None and point.point is not None:
         if point.basis in {COORDINATES, GRID_REFERENCE, HINT} and _host_is(source.get("url"), POSTCODE_CENTROID_SITES):
@@ -1001,17 +1045,19 @@ def locate_source(
             point = Located(reason="copied from the prompt")
     located_address = address is not None and address.basis in MATCHING_BASES
     if point is not None and point.point is not None:
-        if located_address and point.basis == HINT:
-            # Coarse coordinates say less than an address placed on its street or building.
-            return address
         if located_address:
-            # The coordinates win, unless the address puts the site somewhere else entirely.
+            # The coordinates win, unless the address puts the site somewhere else entirely. A hint
+            # may be off by up to its own coarseness as well.
             km = haversine_km(*point.point, *address.point)
-            if km > DOUBTFUL_ADDRESS_KM:
+            allowed = DOUBTFUL_ADDRESS_KM + (point.uncertainty_km if point.basis == HINT else 0.0)
+            if km > allowed:
                 return Located(
                     reason=f"doubtful: its address lands {km:.1f} km from its coordinates",
                     geocoder=address.geocoder,
                 )
+            if point.basis == HINT:
+                # Coarse coordinates say less than an address that agrees with them.
+                return address
         return point
     if address is not None and (address.point is not None or point is None):
         return address

@@ -213,12 +213,22 @@ Three guards throw a location out, with the reason in `evidence.csv`:
 - **wastebook.co.uk.** Its coordinates are postcode centroids.
 - **A doubtful pair.** Where a source gives coordinates and an address, the coordinates win; if the
   address lands more than 2 km from them, neither is used. Coarse coordinates (a hint) give way to
-  a located address.
+  a located address that agrees with them: within 2 km plus the hint's own coarseness, about
+  0.8 km for 2 decimals. An address farther off, such as an operator's office, makes the pair
+  doubtful too.
 
 **A facility name is never geocoded.** Geocoders find landfills by name from OpenStreetMap, where
 most of our sites came from, so it would hand our own point back. Only text the agent labelled a
-street address is sent, with any leading facility name taken off, and text that is only the name
-is not sent at all.
+street address is sent, with any leading facility name taken off, and text that is only a name is
+not sent at all. The names are the source's own, any `found_facility_name` it gives, and our
+site's `site_name` and `original_site_name`; `&` and `and` count as the same, and a name is taken
+off only where a comma, a dash or a number follows it, so "Hart" never shortens "Hartland Avenue".
+
+**A PO box is where post goes, not where the site is.** A PO box, `Box 219`, `C.P.`, case postale,
+private or locked bag, `PMB`, `BP` and the like is taken out of an address, and what is left is
+sent only if it still has a civic number or names a road: "29786 Rte. 2 PO Box 253 Wellington PE"
+is sent as "29786 Rte. 2, Wellington PE", while "PO Box 1234, Thunder Bay, ON" is not sent. Where a
+source gives two addresses, the second is tried when the first placed nothing.
 
 ### Geocoder
 

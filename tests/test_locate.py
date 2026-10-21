@@ -24,6 +24,7 @@ from waste_ai_search.locate import (
     GeocoderError,
     Located,
     NominatimGeocoder,
+    address_to_send,
     azure_match,
     cache_key,
     describe_bases,
@@ -501,6 +502,7 @@ def test_saving_leaves_no_temporary_file(tmp_path):
     save_locations(path, {"CAN|x": {"basis": "none"}})
     assert [p.name for p in tmp_path.iterdir()] == ["source_locations.json"]
 
+
 # --- what reviewers found the parsers misread --------------------------------------------------
 @pytest.mark.parametrize(
     "text",
@@ -579,3 +581,81 @@ def test_a_licence_number_before_a_grid_reference_does_not_hide_it():
     located = parse_grid_reference("Licence W0123, grid ref T 285 935", "IRL")
     assert located.basis == GRID_REFERENCE
     near(located, *parse_grid_reference("T 285 935", "IRL").point, metres=1)
+
+
+def test_coarse_coordinates_give_way_only_to_an_address_that_agrees_with_them():
+    site = {"site_id": "1", "country_iso3": "CAN", "latitude": "45.0", "longitude": "-75.0"}
+    geocoder = FakeGeocoder({
+        "12 Main St, Town": GeocodeMatch(45.3, -75.0, ROOFTOP, ""),      # an office, 32 km away
+        "1 Gate Road, Town": GeocodeMatch(45.0325, -75.01, ROOFTOP, ""),  # 2.5 km: within 2 km and the hint's spread
+    })
+    far = locate_source(source("45.01, -75.01 | 12 Main St, Town", "coordinates | street address"), site, {}, geocoder, live=True)
+    assert (far.basis, far.reason) == (NONE, "doubtful: its address lands 32.3 km from its coordinates")
+    close = locate_source(source("45.01, -75.01 | 1 Gate Road, Town", "coordinates | street address"), site, {}, geocoder, live=True)
+    assert (close.basis, close.value()) == (ROOFTOP, "45.0325, -75.01")
+
+
+def test_a_po_box_is_taken_out_and_the_street_address_left_is_sent():
+    geocoder = FakeGeocoder()
+    for stated in (
+        "29786 Rte. 2 PO Box 253 Wellington PE C0B 1T0 Canada",  # batch 1, East Prince
+        "Box 219, 1350 Aster Street, Pemberton BC",               # batch 1, Pemberton
+    ):
+        locate_source(source(stated, "street address"), SITE, {}, geocoder, live=True)
+    assert [address for address, _country in geocoder.calls] == [
+        "29786 Rte. 2, Wellington PE C0B 1T0 Canada",
+        "1350 Aster Street, Pemberton BC",
+    ]
+
+
+@pytest.mark.parametrize(
+    "stated",
+    [
+        "C.P. 123, Sainte-Sophie, QC",
+        "Case postale 123, Sainte-Sophie",
+        "Box 10, Hearst, ON P0L 1N0",
+        "Private Mail Bag 12, Darwin",
+        "PMB 12, Darwin",
+        "BP 45, Abidjan",
+        "GPO Box 12, Sydney NSW 2001",
+    ],
+)
+def test_a_po_box_with_only_a_town_left_is_not_sent(stated):
+    geocoder = FakeGeocoder()
+    located = locate_source(source(stated, "street address"), SITE, {}, geocoder, live=True)
+    assert (located.reason, geocoder.calls) == ("a PO box is not where the site is", [])
+
+
+def test_a_street_address_after_a_mailing_address_is_still_located():
+    geocoder = FakeGeocoder({"5405 Mapleward Road, Thunder Bay": GeocodeMatch(48.44, -89.37, ROOFTOP, "")})
+    stated = source("Mail: PO Box 100 | 5405 Mapleward Road, Thunder Bay", "street address | street address")
+    assert locate_source(stated, SITE, {}, geocoder, live=True).basis == ROOFTOP
+    assert geocoder.calls == [("5405 Mapleward Road, Thunder Bay", "CA")]
+
+
+def test_our_own_names_are_never_geocoded_either():
+    geocoder = FakeGeocoder()
+    named = {**SITE, "site_name": "Thunder Bay Solid Waste and Recycling Facility", "original_site_name": "Décharge de Thunder Bay"}
+    for stated in ("Thunder Bay Solid Waste and Recycling Facility", "Décharge de Thunder Bay", "Thunder Bay Solid Waste & Recycling Facility"):
+        located = locate_source(source(stated, "street address"), named, {}, geocoder, live=True)
+        assert "facility's name" in located.reason
+    # A name the source gives as a found_facility_name value counts too.
+    valued = source(
+        "Mapleward Landfill, 5405 Mapleward Road", "street address",
+        values=[{"attribute_name": "found_facility_name", "value": "Mapleward Landfill"}],
+    )
+    locate_source(valued, SITE, {}, geocoder, live=True)
+    assert geocoder.calls == [("5405 Mapleward Road", "CA")]
+
+
+def test_a_leading_name_spelled_with_an_ampersand_is_taken_off():
+    assert address_to_send(
+        "Thunder Bay Solid Waste & Recycling Facility, 5405 Mapleward Road",
+        ["Thunder Bay Solid Waste and Recycling Facility"],
+    ) == "5405 Mapleward Road"
+
+
+def test_a_name_is_taken_off_only_where_it_ends_at_a_separator():
+    assert address_to_send("Hartland Avenue 1, Victoria", ["Hart"]) == "Hartland Avenue 1, Victoria"
+    assert address_to_send("Eastview Road 18499, Guelph", ["Eastview"]) == "Eastview Road 18499, Guelph"
+    assert address_to_send("Brady Road Landfill 1777 Brady Road", ["Brady Road Landfill"]) == "1777 Brady Road"
