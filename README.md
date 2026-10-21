@@ -1216,7 +1216,25 @@ Once the review is done, `collect-new-facilities --run-id <run_id>` adds the val
 
 Bing grounding bills per query, so the run log records the queries each site made in
 `web_searches` (every retried attempt, resumed run and follow-up pass included, since each is
-billed), and the search prints the run's total. Each site's row is written as it finishes, so an
+billed), and the search prints the run's total.
+
+**Model tokens are recorded too, and the run is priced.** Each site's row also gives the model that
+answered (`model`) and its tokens: `input_tokens`, of which `cached_input_tokens` were read from the
+prompt cache, `output_tokens`, and of those `reasoning_tokens`. Like `web_searches`, the token counts
+add up across every attempt and pass. A search prints its queries, tokens and estimated cost at list
+prices:
+
+```text
+Bing queries: 157 across 10 searched site(s), ~$2.20 at $14 per 1,000.
+Model tokens on gpt-5.4-2026-03-05: 1,234,567 in (234,567 cached), 45,678 out, ~$3.21.
+Estimated cost at list prices: ~$5.41, ~$0.54 a site.
+```
+
+The workbook's Run_Config records the same for the whole run, as `search_cost`. The prices are in
+`costs.py` (`WEB_SEARCH_PER_1000`, `MODEL_PRICES`): OpenAI's list prices as of October 2026, which
+Azure's GlobalStandard deployments match, and Bing's $14 per 1,000, which batch 1's bill bore out.
+Azure Cost Management has the billed amount; check the table against it when prices change. A run
+searched before tokens were recorded says so rather than show a cost of zero. Each site's row is written as it finishes, so an
 interrupted run keeps its counts. One exception: a call abandoned at the time limit is billed for
 any queries it made, but returns no response to count them from. One live site with 12 attributes made **39 queries**.
 Retries are capped at 2 for both

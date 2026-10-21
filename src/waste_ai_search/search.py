@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .costs import RUN_LOG_FILE, TOKEN_COLUMNS, Usage, describe_run_cost, run_cost
 from .credibility import dropped_source_site
 from .geocoder import enrich_sites_from_cache
 from .input_loader import resolve_sites, run_seed_path, write_csv_records
@@ -152,6 +153,17 @@ def add_searches(total: int | None, client: Any) -> int | None:
     if count is None:
         return total
     return (total or 0) + count
+
+
+def add_usage(total: Usage | None, client: Any) -> Usage | None:
+    """Add the model tokens of the client's last call to a site's running total."""
+    usage = getattr(client, "usage", None)
+    if not isinstance(usage, Usage):
+        return total
+    total = total or Usage()
+    for column in TOKEN_COLUMNS:
+        setattr(total, column, getattr(total, column) + getattr(usage, column))
+    return total
 
 
 # --- phase 1: search --------------------------------------------------------------------------
@@ -332,7 +344,7 @@ def run_search(
 
     workers = max(1, config.workers)
     print(f"Searching {len(work)} site(s), {workers} at a time.", flush=True)
-    log_path = config.run_dir / "foundry_run_log.csv"
+    log_path = config.run_dir / RUN_LOG_FILE
     executor = ThreadPoolExecutor(max_workers=workers)
     futures = []
     run_log: list[dict[str, Any]] = []
@@ -366,9 +378,9 @@ def run_search(
 
     failures = [row for row in run_log if str(row["status"]).startswith("Search tool failed")]
     print(f"\nSearched {len(work)} sites. Run log: {log_path}")
-    counted = [row["web_searches"] for row in run_log if row["web_searches"] != ""]
-    if counted:
-        print(f"Bing queries: {sum(counted):,} across {len(counted)} searched site(s).")
+    if any(row["web_searches"] != "" for row in run_log):
+        for line in describe_run_cost(run_cost(run_log)):
+            print(line)
 
     # WP-533: verify cited URLs now, so arbitration can apply the verdicts offline. Every URL in
     # the run's cached responses is passed, but the sidecar is a cache, so a resumed search or the
@@ -406,6 +418,7 @@ def search_one_site(
     tool_retries = 0
     # None when the client cannot count (a fake in tests); blank in the log, never a false 0.
     web_searches: int | None = None
+    usage: Usage | None = None
 
     payload: dict[str, Any] | None = None
     if path.exists() and not config.force:
@@ -422,10 +435,12 @@ def search_one_site(
                 payload = client.search_site(site, prompt)
             except Exception as exc:  # noqa: BLE001 - one bad site must not end a multi-day run
                 web_searches = add_searches(web_searches, client)
+                usage = add_usage(usage, client)
                 status, error = "Failed", f"{type(exc).__name__}: {exc}"
                 print(f"    {site_id}: {error}", flush=True)
                 break
             web_searches = add_searches(web_searches, client)
+            usage = add_usage(usage, client)
 
             if not search_tool_failed(payload):
                 save_json(path, payload)
@@ -472,6 +487,8 @@ def search_one_site(
         "error_message": error,
         "retry_count": tool_retries,
         "web_searches": "" if web_searches is None else web_searches,
+        "model": normalize_scalar(getattr(client, "model", "")) if usage is not None else "",
+        **(usage.as_row() if usage is not None else {column: "" for column in TOKEN_COLUMNS}),
     }
 
 
@@ -492,8 +509,9 @@ def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, 
     A retried search only covers the sites it touched, so replacing the file would erase every
     other site from the log - which matters a great deal for a multi-day resumable run.
 
-    `web_searches` is the exception: every pass is billed, so a site's count adds to its earlier
-    one. A skipped site logs a blank count, which keeps the earlier one rather than erasing it.
+    `web_searches` and the token counts are the exception: every pass is billed, so a site's count
+    adds to its earlier one. A skipped site logs a blank count, which keeps the earlier one rather than
+    erasing it, and its model.
     """
     merged: dict[str, dict[str, Any]] = {}
     if path.exists():
@@ -502,9 +520,14 @@ def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, 
                 merged[normalize_scalar(row.get("site_id"))] = dict(row)
     for row in new_rows:
         site_id = normalize_scalar(row.get("site_id"))
-        earlier = str((merged.get(site_id) or {}).get("web_searches") or "")
-        if earlier.isdigit():
-            row = {**row, "web_searches": int(earlier) + int(row["web_searches"] or 0)}
+        before = merged.get(site_id) or {}
+        row = dict(row)
+        for column in ("web_searches", *TOKEN_COLUMNS):
+            earlier = str(before.get(column) or "")
+            if earlier.isdigit():
+                row[column] = int(earlier) + int(row.get(column) or 0)
+        if not row.get("model") and before.get("model"):
+            row["model"] = before["model"]
         merged[site_id] = row
     return sorted(
         merged.values(),

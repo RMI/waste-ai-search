@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from .costs import Usage
+
 
 class FoundryClient(Protocol):
     def search_site(self, site: dict[str, Any], prompt: str) -> dict[str, Any]:
@@ -70,10 +72,17 @@ class AzureFoundryAgentClient:
             credential=credential,
             allow_preview=True,
         )
+        # A search's billed use, which the run log records: Bing queries, model tokens, and the
+        # model that answered.
+        self.web_searches = 0
+        self.usage = Usage()
+        self.model = ""
 
     def search_site(self, site: dict[str, Any], prompt: str) -> dict[str, Any]:
-        # Bing bills per query, and a retry repeats every query, so all attempts are counted.
+        # Bing bills per query, and a retry repeats every query, so all attempts are counted; so are
+        # their tokens, which the model bills for whether or not its answer could be read.
         self.web_searches = 0
+        self.usage = Usage()
         limit = self.config.site_timeout_seconds
         deadline = time.monotonic() + limit if limit > 0 else None
         last_error: Exception | None = None
@@ -165,6 +174,10 @@ class AzureFoundryAgentClient:
             limit,
         )
         self.web_searches += count_web_searches(response)
+        if not isinstance(getattr(self, "usage", None), Usage):
+            self.usage = Usage()
+        self.usage.add(response)
+        self.model = str(getattr(response, "model", "") or getattr(self, "model", ""))
         text = getattr(response, "output_text", "")
         if text:
             return text
