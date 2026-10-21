@@ -889,6 +889,21 @@ def locate_source(
 
 def describe_bases(located: list[Located]) -> str:
     """Counts by basis, most useful first: "coordinates 3, street 1, hint 2, none 4", or "0"."""
-    counts = {basis: sum(1 for item in located if item.basis == basis) for basis in BASES}
+    return count_bases([item.basis for item in located])
+
+
+def count_bases(bases: list[str]) -> str:
+    counts = {basis: sum(1 for item in bases if item == basis) for basis in BASES}
     parts = [f"{basis} {count:,}" for basis, count in counts.items() if count]
     return ", ".join(parts) if parts else "0"
+
+
+def describe_geocoders(entries: dict[str, dict[str, Any]], located: bool) -> str:
+    """Which geocoder answered a run's addresses, for Run_Config. `located` says the locate step
+    wrote source_locations.json at all."""
+    names = sorted({normalize_scalar(entry.get("geocoder")) for entry in entries.values()} - {""})
+    if names:
+        return ", ".join(names)
+    if any(entry.get("reason") == NO_GEOCODER for entry in entries.values()):
+        return "none configured"
+    return "none needed (no address stated)" if located else "locate step not run"

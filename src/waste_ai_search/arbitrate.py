@@ -21,6 +21,8 @@ from .locate import (
     STREET,
     VALUE_BASES,
     Located,
+    count_bases,
+    describe_geocoders,
     format_coordinate,
     haversine_km,
     load_locations,
@@ -400,6 +402,11 @@ def location_columns(source: dict[str, Any], place: Located) -> dict[str, str]:
     }
 
 
+def describe_located(bases: list[str]) -> str:
+    """A count with its bases, for Run_Config: "12 (coordinates 9, street 3)", or "0"."""
+    return f"{len(bases):,} ({count_bases(bases)})" if bases else "0"
+
+
 def location_exclusion(place: Located) -> str:
     """Why a stated location is not a location value."""
     if place.basis == STREET:
@@ -724,6 +731,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     leads: list[dict[str, Any]] = []
     parse_warnings: list[dict[str, Any]] = []
     retry_sites: list[dict[str, Any]] = []
+    # What each source that states a location was read as, for Run_Config.
+    stated_bases: list[str] = []
 
     for site_id, paths in sorted(by_site.items()):
         site = sites_by_id.get(site_id)
@@ -784,6 +793,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             link_results=link_results, keep_broken_links=config.keep_broken_links, locations=locations,
         )
         source_entries.extend(site_sources)
+        stated_bases += [row["location_basis"] for row in site_evidence if row["attribute_name"] == LOCATION_ATTRIBUTE]
         for warning in warnings:
             parse_warnings.append(
                 {
@@ -990,6 +1000,12 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {
                 "setting": "broken_link_route",
                 "value": "kept promotable" if config.keep_broken_links else "routed to leads",
+            },
+            {"setting": "locations_stated", "value": describe_located(stated_bases)},
+            {"setting": "locations_used", "value": describe_located([b for b in stated_bases if b in MATCHING_BASES])},
+            {
+                "setting": "geocoder",
+                "value": describe_geocoders(locations, (config.run_dir / SOURCE_LOCATIONS_FILE).exists()),
             },
             {"setting": "contradiction_checks", "value": contradiction_checks},
             {"setting": "not_a_waste_facility", "value": not_a_waste_facility},

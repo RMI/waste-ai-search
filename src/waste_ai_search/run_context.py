@@ -62,6 +62,11 @@ class PipelineConfig:
     # the verdicts. keep_broken_links lets a dead source stay promotable instead of going to leads.
     check_links: bool = True
     keep_broken_links: bool = False
+    # Build step 4 of the source-matching plan. Locate each source's stated location after the
+    # link check (geocoding addresses is network); arbitration only reads source_locations.json.
+    # `geocoder` names one (azure-maps, nominatim or none); blank reads WASTE_AI_SEARCH_GEOCODER.
+    locate: bool = True
+    geocoder: str = ""
 
 
 def default_run_id() -> str:
