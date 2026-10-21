@@ -229,7 +229,7 @@ configured". Choose one with `WASTE_AI_SEARCH_GEOCODER` in `.env`, or with `--ge
 | Geocoder | Settings | How a match is read |
 |---|---|---|
 | `azure-maps` | `AZURE_MAPS_SUBSCRIPTION_KEY`, or `AZURE_MAPS_CLIENT_ID` to sign in with Entra ID (`az login`) | [Get Geocoding](https://learn.microsoft.com/en-us/rest/api/maps/search/get-geocoding?view=rest-maps-2026-01-01), api-version 2026-01-01. An address matched to its rooftop or parcel is `rooftop`; an interpolated address, a block or an intersection is `street`. A match it had to broaden (`UpHierarchy`), an ambiguous one, or Low confidence is not used. The account is IT's to create. |
-| `nominatim` | `NOMINATIM_URL` (the public instance if blank) and `NOMINATIM_USER_AGENT` (default `waste-ai-search (RMI)`, which names the application, never a person) | OpenStreetMap's geocoder, at most one request a second. An address point or building is `rooftop`, a road is `street`. A mapped feature that carries the address, such as the landfill itself, is not used: it would be OSM's own point. Enough for the live test. |
+| `nominatim` | `NOMINATIM_URL` (the public instance if blank) and `NOMINATIM_USER_AGENT` (default `waste-ai-search (RMI)`, which names the application, never a person) | OpenStreetMap's geocoder, at most one request a second. An address point or building is `rooftop`; a road, or a house number Nominatim interpolated along its street (`place=house` on a way), is `street`, as with Azure Maps. A mapped feature that carries the address, such as the landfill itself, is not used: it would be OSM's own point. Enough for the live test. |
 | `none` | | Addresses stay unlocated. |
 
 ### `source_locations.json`

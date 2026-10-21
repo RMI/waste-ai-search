@@ -703,18 +703,27 @@ class NominatimGeocoder:
 def nominatim_match(result: dict[str, Any]) -> GeocodeMatch | None:
     """Read one Nominatim result: an address point or building is rooftop, a road is street.
 
-    Anything else - a town, a postcode, or a mapped feature such as a landfill that happens to carry
-    the address - is not used: the last would be OpenStreetMap's own point for the site.
+    A house number Nominatim interpolated along its street comes back as place=house too, but on
+    the interpolation line, a way, so it counts as street, as Azure Maps' interpolated addresses
+    do. Anything else - a town, a postcode, or a mapped feature such as a landfill that happens to
+    carry the address - is not used: the last would be OpenStreetMap's own point for the site.
     """
     lat, lon = _float(result.get("lat")), _float(result.get("lon"))
     if lat is None or lon is None:
         return None
     category = normalize_scalar(result.get("category") or result.get("class"))
     kind = normalize_scalar(result.get("type"))
-    described = f"{category or '?'}={kind or '?'}, rank {normalize_scalar(result.get('place_rank')) or '?'}"
+    on_way = normalize_scalar(result.get("osm_type")).lower() in {"way", "w"}
+    described = (
+        f"{category or '?'}={kind or '?'}"
+        + (f" on {normalize_scalar(result.get('osm_type')).lower()}" if result.get("osm_type") else "")
+        + f", rank {normalize_scalar(result.get('place_rank')) or '?'}"
+    )
     precision = ""
-    if category == "building" or (category == "place" and kind in {"house", "building"}):
+    if category == "building":
         precision = ROOFTOP
+    elif category == "place" and kind in {"house", "building"}:
+        precision = STREET if on_way else ROOFTOP
     elif category == "highway":
         precision = STREET
     return GeocodeMatch(lat, lon, precision, described)

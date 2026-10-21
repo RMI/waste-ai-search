@@ -456,7 +456,11 @@ def test_nominatims_url_and_user_agent_come_from_configuration(monkeypatch):
     ("result", "precision"),
     [
         ({"category": "place", "type": "house"}, ROOFTOP),
+        ({"category": "place", "type": "house", "osm_type": "node"}, ROOFTOP),
+        # A house number interpolated along its street sits on the interpolation line, a way.
+        ({"category": "place", "type": "house", "osm_type": "way"}, STREET),
         ({"category": "building", "type": "yes"}, ROOFTOP),
+        ({"category": "building", "type": "yes", "osm_type": "way"}, ROOFTOP),
         ({"category": "highway", "type": "residential"}, STREET),
         # A mapped landfill that carries the address would be OSM's own point for the site.
         ({"category": "landuse", "type": "landfill"}, ""),
