@@ -13,7 +13,8 @@ with no area is its point.
 A source has a location when the locate step read it as coordinates, a grid reference, or an
 address placed on its building or its street. A hint, a location copied from the prompt and a
 doubtful one count as none. The same exact page, under the same facility name, is one source
-however many searches cited it, and a source with a location is matched once.
+however many searches cited it, and a source with a location is matched once. A name the page
+gives to places more than 2 km apart, a list of "Closed Landfill"s say, is one source per place.
 
 | The source has | Rule | Filed under |
 |---|---|---|
@@ -351,6 +352,30 @@ class Citation:
         return url, name, "" if name else _plain(self.stated_location)
 
 
+def entries(cited: list[Citation]) -> list[list[Citation]]:
+    """The entries of a page that one facility name stands for, each to be matched on its own.
+
+    Usually one. But a page can give one name to several places, as a council's list of closed
+    landfills does when each row is just "Closed Landfill", so citations placing it more than
+    MATCH_KM apart are different entries. A citation with no location joins the entry only where
+    its name says which facility it is and stands for one place on the page. A generic name may
+    stand for rows no search located, and a name placed in several spots leaves no telling which
+    one was meant, so there the citation is matched on its own, as one with no location.
+    """
+    groups: list[list[Citation]] = []
+    for citation in (citation for citation in cited if citation.located):
+        for group in groups:
+            if any(haversine_km(*citation.point, *other.point) <= MATCH_KM for other in group):
+                group.append(citation)
+                break
+        else:
+            groups.append([citation])
+    unlocated = [citation for citation in cited if not citation.located]
+    if len(groups) == 1 and unlocated and judged_name(unlocated[0].name_in_source or unlocated[0].english):
+        return [groups[0] + unlocated]
+    return groups + ([unlocated] if unlocated else [])
+
+
 def _plain(text: Any) -> str:
     """Case, accents and punctuation ignored, in any script."""
     folded = unicodedata.normalize("NFKD", normalize_scalar(text).casefold())
@@ -445,13 +470,14 @@ class Matcher:
                 pages.setdefault(normalize_url(citation.url), set()).add(citation.searched_site_id)
 
         for cited in by_key.values():
-            located = next((citation for citation in cited if citation.located), None)
-            if located is not None:
-                self._match_located(located, cited)
-            else:
-                for citation in cited:
-                    others = pages.get(normalize_url(citation.url), set()) - {citation.searched_site_id}
-                    self._match_unlocated(citation, sorted(others, key=_id_order))
+            for entry in entries(cited):
+                located = next((citation for citation in entry if citation.located), None)
+                if located is not None:
+                    self._match_located(located, entry)
+                else:
+                    for citation in entry:
+                        others = pages.get(normalize_url(citation.url), set()) - {citation.searched_site_id}
+                        self._match_unlocated(citation, sorted(others, key=_id_order))
         self._same_page_duplicates(pages, citations)
         return Matching(
             filings=self.filings,

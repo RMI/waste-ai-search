@@ -1,8 +1,8 @@
 """Facility names are compared as entity linkage compares them (build step 5 of the source-matching plan).
 
-facility_names.py is CJ's, from RMI/waste_data_ingestion_pipeline#225, so both repositories mean the
-same by "the same name". The one addition is the generic words this corpus needs, to be agreed with
-CJ: without them batch 1's seven "Rubbish Tip" sites each matched 68 others. What makes a match
+facility_names.py started as a copy of RMI/waste_data_ingestion_pipeline#225's name scoring, and is
+this repository's own: matching is independent of entity linkage. It adds the generic words this
+corpus needs: without them batch 1's seven "Rubbish Tip" sites each matched 68 others. What makes a match
 strong enough to file a source by is matching's, in test_match.py.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ import pytest
 from waste_ai_search.facility_names import distinctive_words, name_similarity
 
 
-def test_the_module_says_it_mirrors_entity_linkage():
+def test_the_module_says_where_it_started():
     from pathlib import Path
 
     import waste_ai_search.facility_names as names
@@ -24,6 +24,8 @@ def test_the_module_says_it_mirrors_entity_linkage():
 @pytest.mark.parametrize("name", [
     "Rubbish Tip", "Refuse Depot", "Waste Disposal Grounds", "Nuisance Grounds", "Lieu d'enfouissement technique",
     "LET", "Landfill Site", "OpenStreetMap Landfill", "Waste Management Facility",
+    # A site's state: a council's list can call every row "Closed Landfill".
+    "Closed Landfill", "Former Landfill Site", "Disused Tip",
 ])
 def test_generic_names_have_no_distinctive_words_and_cant_be_judged(name):
     assert distinctive_words(name) == set()
@@ -35,6 +37,7 @@ def test_the_added_words_leave_the_place_name():
     assert distinctive_words("Minitonas Nuisance Grounds") == {"minitonas"}
     assert distinctive_words("Lieu d'enfouissement technique de Sainte-Sophie") == {"sainte", "sophie"}
     assert distinctive_words("LET de Lachute") == {"lachute"}
+    assert distinctive_words("Wootton (Closed) Landfill") == {"wootton"}
 
 
 @pytest.mark.parametrize("name, words", [

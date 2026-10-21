@@ -1,8 +1,8 @@
-# Mirrors RMI/waste_data_ingestion_pipeline#225 (facility_etl/entity_linkage/facility_names.py, as of
-# b79aa81 on entity-linkage-precise-v1) and must stay aligned with it: entity linkage and this
-# repository's matching of sources to sites should mean the same thing by "the same name". Change
-# both together. The one difference is marked below: generic words this corpus needs, which are to
-# be agreed with CJ and added there too.
+# Started as a copy of RMI/waste_data_ingestion_pipeline#225's name scoring
+# (facility_etl/entity_linkage/facility_names.py, as of b79aa81 on entity-linkage-precise-v1), and is
+# this repository's own since. Matching sources to sites doesn't depend on entity linkage: AI search
+# rows join the facility named by the wastemap_id they carry (#264), so the two needn't agree.
+# Where this copy has moved on, the generic words this corpus needs, it is marked below.
 """
 Comparing facility names: whether two source records' names describe the same place.
 
@@ -31,12 +31,12 @@ GENERIC_NAME_WORDS = {
     "controlado", "vertedero", "relleno", "botadero", "deponie", "discarica",
     # OpenStreetMap's placeholder for a landfill with no name of its own.
     "openstreetmap",
-    # Not yet in #225: Australian and British words for a dump ("Rubbish Tip", "Waste Depot",
+    # Added here: Australian and British words for a dump ("Rubbish Tip", "Waste Depot",
     # "Waste Disposal Grounds", Manitoba's "Nuisance Grounds") and Quebec's "lieu d'enfouissement
     # technique" (LET), with the elided d' and l' of French names, which would otherwise count as
     # words. Without them, batch 1's seven "Rubbish Tip" sites each matched 68 others.
     "tip", "refuse", "depot", "grounds", "nuisance", "lieu", "enfouissement", "technique", "let", "d", "l",
-    # Also not yet in #225: the words of other kinds of site and their small words. Australia's
+    # Also added here: the words of other kinds of site and their small words. Australia's
     # "Resource Recovery Centre", which moved Noosa's page 20 km to Nambour's; Canada's "Integrated
     # Waste Management Facility" (IWMF), which kept Prairie Green's page from matching our "Prairie
     # Green IWMF"; France's "Installation de Stockage de Déchets Non Dangereux", in English
@@ -46,6 +46,9 @@ GENERIC_NAME_WORDS = {
     "resource", "recovery", "integrated", "iwmf", "installation", "stockage", "dechets", "non",
     "dangereux", "hazardous", "open", "air", "tiradero", "cielo", "abierto", "municipio", "diposit",
     "controlat", "controlled", "ditches", "trenches", "for", "in", "a", "des", "du",
+    # And words for a site's state, which say what became of it, not which one it is. A council's
+    # list can call every row "Closed Landfill", and none of them is told apart by it.
+    "closed", "former", "disused", "abandoned", "inactive", "decommissioned", "historic", "historical",
 }
 # Company suffixes, written as distinctive_words sees them: lowercase, with the dots of a
 # dotted form like "d.o.o." or "S.p.A." removed. A company form names the operator's legal

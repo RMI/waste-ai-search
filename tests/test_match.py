@@ -300,6 +300,40 @@ def test_a_registry_page_naming_several_facilities_is_several_sources():
     assert (matching.filings[("1", 1)].site_id, matching.filings[("1", 2)].site_id) == ("1", "2")
 
 
+def test_a_name_a_page_gives_to_two_places_is_two_sources():
+    """A council's list of closed landfills can call every row "Closed Landfill". Two searches citing
+    two of its rows, 10 km apart, each go to their own site, not both to the first one's."""
+    ours = [seed("101", "Smith Road Landfill", -41.0, 175.0, "NZL"), seed("102", "Jones Road Landfill", -41.09, 175.0, "NZL")]
+    page = "https://council.example.nz/closed-landfills"
+    matching = match([
+        cite("101", page, "Closed Landfill", (-41.0, 175.0)),
+        cite("102", page, "Closed Landfill", (-41.09, 175.0)),
+    ], ours)
+    assert {key: filing.site_id for key, filing in matching.filings.items()} == {("101", 1): "101", ("102", 1): "102"}
+    assert matching.counts[LOCATED] == 2
+
+
+def test_a_citation_with_no_location_joins_its_entry_only_where_the_name_is_one_place():
+    ours = [seed("101", "Smith Road Landfill", -41.0, 175.0, "NZL"), seed("102", "Jones Road Landfill", -41.09, 175.0, "NZL"),
+            seed("103", "Brown Road Landfill", -41.3, 175.0, "NZL")]
+    page = "https://council.example.nz/closed-landfills"
+    # The page's own name for a row, matching none of ours, so only joining the located row can file
+    # a citation of it elsewhere than its own search.
+    # A name that says which facility it is, placed once: a citation that gave no location joins it.
+    one = match([cite("101", page, "Hilltop Landfill", (-41.0, 175.0)), cite("103", page, "Hilltop Landfill")], ours)
+    assert (one.filings[("103", 1)].site_id, one.filings[("103", 1)].outcome) == ("101", LOCATED)
+    # A generic name may stand for rows no search located, so the citation stays with its own site.
+    generic = match([cite("101", page, "Closed Landfill", (-41.0, 175.0)), cite("103", page, "Closed Landfill")], ours)
+    assert (generic.filings[("103", 1)].site_id, generic.filings[("103", 1)].outcome) == ("103", NO_LOCATION)
+    # A name placed in two spots leaves no telling which the third search meant.
+    two = match([
+        cite("101", page, "Hilltop Landfill", (-41.0, 175.0)),
+        cite("102", page, "Hilltop Landfill", (-41.09, 175.0)),
+        cite("103", page, "Hilltop Landfill"),
+    ], ours)
+    assert (two.filings[("103", 1)].site_id, two.filings[("103", 1)].outcome) == ("103", NO_LOCATION)
+
+
 # --- a source with no location ---------------------------------------------------------------------
 def test_eastview_one_shared_word_stays_with_the_site_searched_and_names_the_namesake():
     """Brandon's page went under 14 sites in batch 1. Without a location, one shared word can't move
