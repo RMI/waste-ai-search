@@ -625,9 +625,11 @@ A source with no location can't fail that check, so names are checked too. Where
 won a value calls the facility by a name sharing no distinctive word with ours, the value's
 `researcher_notes` says *"The winning source names Beta Landfill; check it is about this
 facility."* Words that only say what kind of place it is (landfill, waste, transfer station, road)
-don't count, nor do numbers; a misspelling or a plural still counts as the same word. A generic
-name, or one in another script with no English rendering, can't be judged and is not noted. Build
-step 5's name matching replaces this.
+don't count, nor do numbers; a misspelling, a plural, or one word written as two still counts as
+the same. A generic or placeholder name, ours ("OpenStreetMap Landfill") or the source's, or one in
+another script with no English rendering, can't be judged and is not noted. On the batch-1 replay
+the note falls on 105 of 6,562 queue rows, at 33 sites. Build step 5's name matching replaces
+this.
 
 A location that matches the seed's to comparison precision (six significant digits) confirms it,
 and like any confirmation it is not queued, so nothing moves. One within 10 m of ours counts as

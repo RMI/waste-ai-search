@@ -47,7 +47,7 @@ from .payload import (
 )
 from .prompt_builder import asks_location, needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
-from .searchable_names import SKIPPED_NAME_CLASSES, describe_counts, recorded_skips, site_name_class
+from .searchable_names import NAMED, SKIPPED_NAME_CLASSES, describe_counts, name_class, recorded_skips, site_name_class
 from .snapshot import recorded_run
 from .schema import (
     canonical_attribute,
@@ -660,19 +660,20 @@ FACILITY_KIND_WORDS = {
 }
 
 
-def distinctive_words(name: Any) -> tuple[set[str], bool]:
-    """The words of a name that say which facility it is, and whether it is in Latin letters.
+def distinctive_words(name: Any) -> tuple[list[str], bool]:
+    """The words of a name that say which facility it is, in order, and whether it is in Latin
+    letters.
 
     Case and accents are ignored, "&" is "and", and kind words, numbers and words under three
     letters are dropped.
     """
     folded = unicodedata.normalize("NFKD", normalize_scalar(name).casefold().replace("&", " and "))
     folded = "".join(char for char in folded if not unicodedata.combining(char))
-    words = {
+    words = [
         word for word in re.split(r"[\W_]+", folded)
         if len(word) >= 3 and not word.isdigit() and word not in FACILITY_KIND_WORDS
-    }
-    return words, all(char.isascii() for char in folded if char.isalpha())
+    ]
+    return list(dict.fromkeys(words)), all(char.isascii() for char in folded if char.isalpha())
 
 
 def _same_word(one: str, two: str) -> bool:
@@ -701,7 +702,8 @@ def names_another_facility(source_names: list[Any], our_names: list[Any]) -> boo
             if not ours or their_script != our_script:
                 continue
             judged = True
-            if any(_same_word(one, two) for one in theirs for two in ours):
+            # One word written as two, or two as one, reads alike run together: "Peaks Nook".
+            if any(_same_word(one, two) for one in theirs for two in ours) or _same_word("".join(theirs), "".join(ours)):
                 return False
     return judged
 
@@ -716,7 +718,9 @@ def flag_other_facility_names(
     The 5 km check flags one that places the facility elsewhere; this flags one that names another,
     with or without a location. Returns how many values it noted.
     """
-    ours = [site.get("site_name"), site.get("original_site_name")]
+    # A placeholder or generic name of ours ("OpenStreetMap Landfill", "Domestic landfill") says
+    # nothing about which facility it is, so a source can't be judged against it.
+    ours = [name for name in (site.get("site_name"), site.get("original_site_name")) if name_class(name) == NAMED]
     by_id = {row["evidence_id"]: row for row in evidence_rows}
     noted = 0
     for row in resolved:

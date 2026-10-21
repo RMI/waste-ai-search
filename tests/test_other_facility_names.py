@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from waste_ai_search.arbitrate import names_another_facility, run_arbitration
+from waste_ai_search.arbitrate import flag_other_facility_names, names_another_facility, run_arbitration
 from waste_ai_search.input_loader import write_csv_records
 from waste_ai_search.run_context import PipelineConfig
 
@@ -34,6 +34,7 @@ def test_a_name_sharing_no_distinctive_word_is_another_facility(theirs, ours):
     [
         (["Thunder Bay Solid Waste & Recycling Facility"], ["Thunder Bay Landfill"]),
         (["Seaton Meadows Landfil"], ["Seaton Medows"]),  # a typo on either side
+        (["Peaks Nook"], ["Peasnook landfill site"]),  # one word written as two
         (["Lixão da Sede", "Sede Dump"], ["Headquarters dump", "Lixão Sede"]),  # the original name
         (["Relleno Sanitario Tijuana"], ["Municipal Landfill of Tijuana"]),
         # Nothing to judge by: a generic name, no name, or another script.
@@ -47,6 +48,20 @@ def test_a_name_sharing_no_distinctive_word_is_another_facility(theirs, ours):
 )
 def test_a_name_sharing_a_word_or_that_cannot_be_judged_is_not_flagged(theirs, ours):
     assert not names_another_facility(theirs, ours)
+
+
+def test_a_placeholder_or_generic_name_of_ours_is_not_judged_against():
+    """Batch 1: 227 of the 332 rows this would otherwise note are sites named "OpenStreetMap Landfill"."""
+    winner = {"evidence_id": "E1", "facility_name_in_source": "Waterloo Landfill Site", "facility_name_english": ""}
+    for name in ("OpenStreetMap Landfill", "domestic landfill", ""):
+        rows = [{"winning_evidence_id": "E1", "resolution": "Filled empty baseline", "researcher_notes": ""}]
+        assert flag_other_facility_names({"site_name": name}, rows, [winner]) == 0
+    # The original name still counts where it says which facility it is.
+    rows = [{"winning_evidence_id": "E1", "resolution": "Filled empty baseline", "researcher_notes": "Earlier note."}]
+    assert flag_other_facility_names({"site_name": "domestic landfill", "original_site_name": "Décharge Alpha"}, rows, [winner]) == 1
+    assert rows[0]["researcher_notes"] == (
+        "Earlier note. The winning source names Waterloo Landfill Site; check it is about this facility."
+    )
 
 
 REGULATOR = {
