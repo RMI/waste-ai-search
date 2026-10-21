@@ -267,3 +267,12 @@ def test_a_converted_response_keeps_its_evidence_ids_and_order():
     assert [row["attribute_name"] for row in rows][:3] == ["operator", "facility_status", "facility_status"]
     _by, rows, _sources, _warnings = extract_evidence(site, NEW, "run", "v", date(2026, 1, 1))
     assert rows[0]["evidence_id"] == "WAIEV-7-S001-001"
+
+
+def test_a_search_tool_failure_is_read_alike_in_either_shape():
+    from waste_ai_search.run_context import search_tool_failed
+
+    notes = "The search_query tool did not return usable results."
+    assert search_tool_failed({"attributes": [], "search_notes": notes})
+    assert search_tool_failed({"sources": [], "search_notes": notes})
+    assert not search_tool_failed(["not", "an", "object"])

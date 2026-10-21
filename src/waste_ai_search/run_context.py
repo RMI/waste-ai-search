@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .foundry_client import AzureFoundryAgentClient, FoundryClient, FoundryClientConfig
+from .payload import read_payload
 from .schema import normalize_scalar
 
 
@@ -152,7 +153,11 @@ SEARCH_TOOL_FAILURE_PATTERN = re.compile(
 )
 
 
-def search_tool_failed(payload: dict[str, Any]) -> bool:
-    """Whether the agent said its search tool broke, rather than that it found nothing."""
-    notes = normalize_scalar(payload.get("search_notes"))
+def search_tool_failed(payload: Any) -> bool:
+    """Whether the agent said its search tool broke, rather than that it found nothing.
+
+    Read through the one reader (payload.py), so a response of either shape, or a malformed one, is
+    judged alike.
+    """
+    notes = read_payload(payload)["search_notes"]
     return bool(notes) and bool(SEARCH_TOOL_FAILURE_PATTERN.search(notes))
