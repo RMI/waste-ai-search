@@ -131,6 +131,36 @@ def test_a_yearly_attribute_has_a_row_for_each_year_a_source_reports(tmp_path):
     assert len({queue_key(row) for row in queue}) == len(queue)
 
 
+def test_evidence_for_a_queued_year_is_kept_when_another_year_confirms_ours(tmp_path):
+    """Q8 caps the evidence of a confirmation at two rows. It counted every year of a yearly
+    attribute together, so the source winning a queued year could be dropped from evidence.csv."""
+    site = {**BRADY, "facility_status": "Active"}
+    confirming = [source(f"https://confirm{n}.example", values=[value("facility_status", "Active", "2022")]) for n in range(3)]
+    old = source("https://history.example", values=[value("facility_status", "Inactive", "2012")])
+    run_dir = arbitrate(tmp_path, [site], {"13413": [*confirming, old]})
+
+    [queued] = [row for row in rows(run_dir, "review_queue.csv") if row["attribute_name"] == "facility_status"]
+    assert (queued["value_date"], queued["winning_source_url"]) == ("2012", "https://history.example")
+    status = [row for row in rows(run_dir, "evidence.csv") if row["attribute_name"] == "facility_status"]
+    assert [row["value_date"] for row in status] == ["2022", "2022", "2012"]  # the 2022 confirmation capped at two
+
+
+def test_a_weaker_disagreement_routed_to_leads_names_the_searches_behind_it(tmp_path):
+    """resolve() routes a disagreement weaker than ours to Leads without choosing a winner, so its
+    lead named no search. It names every search whose sources it weighed."""
+    site = {**BRADY, "facility_status": "Active", "attribute_sources": "facility_status@canada_ghgrp_2021"}
+    weak = [value("facility_status", "Inactive", "2024")]
+    responses = {
+        "13413": [source("https://blog.example/brady", "Brady Road Landfill", values=weak, source_type="Blog")],
+        "13414": [source("https://forum.example/brady", "Brady Road Landfill", "49.7590, -97.2010", values=weak, source_type="Blog")],
+    }
+    run_dir = arbitrate(tmp_path, [site, NEARBY], responses)
+
+    [lead] = [row for row in rows(run_dir, "supplementary_leads.csv")
+              if row["exclusion_reason"] == "Conflict - lower credibility" and row["attribute_name"] == "facility_status"]
+    assert (lead["site_id"], lead["searched_site_id"]) == ("13413", "13413; 13414")
+
+
 def test_a_yearly_baseline_is_ours_for_its_own_year_and_else_our_latest():
     """The seed holds one row per facility, at its reference year, with a yearly field backfilled
     from the newest earlier year that had one."""
@@ -253,6 +283,24 @@ def test_not_a_waste_facility_stays_only_with_the_site_searched_where_it_was_off
     run_dir = arbitrate(tmp_path / "again", [corroborated, other], {"1": responses["1"][:1]})
     assert not [row for row in rows(run_dir, "review_queue.csv") if row["attribute_name"] == "facility_type"]
     assert "was not offered it" in rows(run_dir, "supplementary_leads.csv")[0]["exclusion_reason"]
+
+
+def test_a_not_a_waste_facility_source_far_from_our_sites_says_it_is_not_listed(tmp_path):
+    """Its other values used to say they were listed in new_facility_candidates.csv, and Run_Config
+    counted it as a new facility, though it was rightly left off the list."""
+    site = seed("600", "Hillcrest Dump", 49.70, -97.10)
+    park = source("https://city.example/park", "Hillcrest Park", "49.8012, -97.3034",
+                  values=[value("facility_type", "Not a Waste Facility", "2024"), value("operator", "City Parks")])
+    run_dir = arbitrate(tmp_path, [site], {"600": [park]})
+
+    assert rows(run_dir, "new_facility_candidates.csv") == []
+    evidence = {row["attribute_name"]: row for row in rows(run_dir, "evidence.csv")}
+    assert evidence["operator"]["exclusion_reason"].startswith("Recorded only: no site of ours is near")
+    assert "so it is not listed" in evidence["operator"]["exclusion_reason"]
+    assert evidence["operator"]["match"].startswith("Not a waste facility: by its coordinates")
+    assert "matches no site of ours" in evidence["facility_type"]["exclusion_reason"]
+    config = {row[0]: row[1] for row in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].values}
+    assert (config["match_new_facility"], config["match_not_a_waste_facility"], config["new_facility_candidates"]) == (0, 1, 0)
 
 
 def test_a_match_outside_the_runs_selection_is_listed_and_not_reviewed(tmp_path):

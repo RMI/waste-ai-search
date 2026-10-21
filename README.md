@@ -356,15 +356,17 @@ values. This is judged on the site the source is filed under, not the one search
 
 **"Not a Waste Facility"** is filed only under the site searched, and only where that site was
 offered the check (see [Not a waste facility](#not-a-waste-facility-wp-525)). A source that matching
-would file anywhere else gives its verdict to Leads, and is never a new-landfill candidate.
+would file anywhere else gives its verdict to Leads, and is never a new-landfill candidate: one
+placed more than 2 km from every site of ours is counted as `match_not_a_waste_facility`, and its
+other values are recorded in `evidence.csv` only.
 
 The 5 km identity check, a dropped map page's coordinates read for it, and the note on a value
 whose winning source named another facility are gone: matching replaces all three.
 
 Run_Config counts each outcome, a source with a location once and one without once per search
 that cited it: `match_located`, `match_named_among_several`, `match_tie`, `match_name_nearby`,
-`match_new_facility`, `match_moved_by_name`, `match_no_location` and `match_outside_run`, beside
-`new_facility_candidates` and `possible_duplicates`.
+`match_new_facility`, `match_not_a_waste_facility`, `match_moved_by_name`, `match_no_location` and
+`match_outside_run`, beside `new_facility_candidates` and `possible_duplicates`.
 
 **On the batch-1 replay**, a plumbing check since batch 1's sources rarely give a location, 85
 located sources matched one site, 2 tied, 8 matched none, 91 moved by name, and 4,650 citations had
@@ -897,7 +899,7 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 | `evidence.csv` | One row per source-backed claim, confirmations of our values included. The audit trail. Its `source_id` finds the source in `sources.csv`. Every row also gives the facility its source describes (`facility_name_in_source`, `facility_name_english`), the location it states (`stated_location`, `stated_location_kind`) and the point read from it (`location_basis`, `located_latitude`, `located_longitude`, and `location_reason` when it is not usable). A source that states a location has a `found_location` row of its own. Its `site_id` is the site the source is filed under, blank for a likely new facility; `searched_site_id` is the search that found it, and `match` says why. |
 | `source_locations.json` | Each stated location's point, keyed by its text and country (see [Locating each source](#locating-each-source)). |
 | `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below). |
-| `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. |
+| `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. `searched_site_id` is the search that found each; a weaker disagreement weighed several sources, and names every search behind them. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
 | `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
 | `new_facility_candidates.csv` | For ingestion: landfills none of our sites is. One row per group of located sources more than 2 km from every site of ours (grouped within 2 km of each other), with their URLs, names as written and in English, stated locations, the point and its basis, our nearest site and its distance, and the searches that found them. `collect-new-facilities` adds the values SMEs rejected as "New facility - not in our database" (`found_by` = `SME`); arbitrating again keeps those. |

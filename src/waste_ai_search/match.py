@@ -20,7 +20,7 @@ however many searches cited it, and a source with a location is matched once.
 | A location | 1. Exactly one of our sites within 2 km | That site, whether or not it was searched |
 | A location | 2. Two or more within 2 km | The one its name strongly matches, if exactly one does. Otherwise the site searched if it is one of them, else the nearest: a tie, listed in possible_duplicates.csv |
 | A location | 3. None within 2 km, but its name strongly matches the site searched within 5 km (25 km where our location is flagged inexact, any distance where we hold none) | The site searched; its location is a coordinate correction |
-| A location | 4. Anything else | No site: new_facility_candidates.csv, grouped within 2 km |
+| A location | 4. Anything else | No site: new_facility_candidates.csv, grouped within 2 km, unless it says the facility is "Not a Waste Facility" |
 | No location | 5. Its name strongly matches exactly one other site within 200 km of the site searched, and not the site searched | That site, moved by name |
 | No location | 6. Anything else | The site searched, flagged, naming any namesakes within 200 km |
 
@@ -84,8 +84,11 @@ NEW_FACILITY = "New facility"
 MOVED_BY_NAME = "Moved by name"
 NO_LOCATION = "No location"
 OUTCOMES = [LOCATED, NAMED_AMONG_SEVERAL, TIE, NAME_NEARBY, NEW_FACILITY, MOVED_BY_NAME, NO_LOCATION]
-# Not a rule but a destination: a source matched to a site outside the run's selection.
+# Not rules but destinations: a source matched to a site outside the run's selection, and a located
+# source that matches none of our sites but calls the facility "Not a Waste Facility". That one
+# describes no landfill, so it is no new-facility candidate, and only its verdict goes on, to Leads.
 OUTSIDE_RUN = "Outside the run"
+NOT_A_FACILITY = "Not a waste facility"
 
 NEW_FACILITY_FILE = "new_facility_candidates.csv"
 POSSIBLE_DUPLICATES_FILE = "possible_duplicates.csv"
@@ -524,17 +527,19 @@ class Matcher:
             self._file_located(cited, site, NAME_NEARBY, reason, [site])
             return
 
-        self.counts[NEW_FACILITY] += 1
-        for citation in cited:
-            self.filings[(citation.searched_site_id, citation.source_index)] = Filing(
-                "", NEW_FACILITY,
-                f"{NEW_FACILITY}: by {how}, the source places it more than {MATCH_KM:g} km from every site of "
-                f"ours. Listed in {NEW_FACILITY_FILE}.",
-                in_run=False,
-            )
         # A source calling the site "Not a Waste Facility" describes no landfill, so it is never a
         # new-landfill candidate; its verdict goes to Leads.
-        if not any(citation.not_a_waste_facility for citation in cited):
+        listed = not any(citation.not_a_waste_facility for citation in cited)
+        outcome = NEW_FACILITY if listed else NOT_A_FACILITY
+        where = f"by {how}, the source places it more than {MATCH_KM:g} km from every site of ours"
+        match = (
+            f"{NEW_FACILITY}: {where}. Listed in {NEW_FACILITY_FILE}." if listed
+            else f"{NOT_A_FACILITY}: {where}, and says it is not a waste facility, so it is not listed."
+        )
+        self.counts[outcome] += 1
+        for citation in cited:
+            self.filings[(citation.searched_site_id, citation.source_index)] = Filing("", outcome, match, in_run=False)
+        if listed:
             self.new_sources.append((source, cited))
 
     def _match_unlocated(self, citation: Citation, other_searches: list[str]) -> None:

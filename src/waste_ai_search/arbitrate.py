@@ -45,6 +45,7 @@ from .match import (
     NEW_FACILITY_FILE,
     NEW_FACILITY_HEADERS,
     NO_LOCATION,
+    NOT_A_FACILITY,
     OUTSIDE_RUN,
     OUTSIDE_RUN_FILE,
     OUTSIDE_RUN_HEADERS,
@@ -653,6 +654,11 @@ def route(
             )
         if not needs_contradiction_check(searched):
             return LEAD, f"{NOT_A_WASTE_FACILITY} is kept only where it was offered, and this site was not offered it."
+    if filing.outcome == NOT_A_FACILITY:
+        return RECORDED, (
+            "Recorded only: no site of ours is near where the source places it, and it says the facility "
+            f"is not a waste facility, so it is not listed in {NEW_FACILITY_FILE}."
+        )
     if not filing.site_id:
         return LISTED, f"No site of ours is near where the source places it: listed in {NEW_FACILITY_FILE}."
     if not filing.in_run:
@@ -734,19 +740,32 @@ def resolve_site(
     for name in names:
         items = pool.get(name, [])
         if name not in TIME_VARYING_ATTRIBUTES or not items:
-            rows.append(resolve(site, name, items))
+            rows.append(searched_by(resolve(site, name, items), items))
             continue
         by_year: dict[int, list[dict[str, Any]]] = {}
         for item in items:
             by_year.setdefault(value_year(item.get("value_date"), run_year), []).append(item)
         for year in sorted(by_year, reverse=True):
             site_then, note = site_for_year(site, name, year)
-            row = resolve(site_then, name, by_year[year])
+            row = searched_by(resolve(site_then, name, by_year[year]), by_year[year])
             if note:
                 row["resolution_rule"] = f"{row['resolution_rule']} {note}".strip()
             row["year"] = year
             rows.append(row)
     return rows
+
+
+def searched_by(row: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Name on a decided row the searches whose sources it weighed. describe_winner narrows it to
+    the one that found the winning value; a decision with no winner, such as a weaker disagreement
+    routed to leads, keeps them all."""
+    row["searched_site_id"] = "; ".join(dict.fromkeys(normalize_scalar(item.get("searched_site_id")) for item in items))
+    return row
+
+
+def decision_key(site_id: str, attribute: str, year: Any) -> tuple[str, str, Any]:
+    """(site, attribute, year): what one decision is made for, the year only for a yearly attribute."""
+    return site_id, attribute, year if attribute in TIME_VARYING_ATTRIBUTES else ""
 
 
 def describe_winner(row: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]], matching: Matching) -> None:
@@ -1015,18 +1034,24 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
 
     # Feedback 1 lets a low-tier source fill an empty baseline, so a piece of evidence the tier gate
     # marked ineligible can still end up winning. Listing it as a lead as well would show the SME
-    # the same finding twice, in two places, which feedback 3 rules out.
+    # the same finding twice, in two places, which feedback 3 rules out. Both this and the cap below
+    # go by the key each decision was made for: one year of a yearly attribute can confirm ours
+    # while another is queued, and the queued year's evidence is kept in full.
     promoted = {
-        (row["site_id"], row["attribute_name"])
+        decision_key(row["site_id"], row["attribute_name"], row.get("year", ""))
         for row in resolved_rows
         if normalize_scalar(row.get("resolved_value"))
     }
     # Q8: cap evidence rows for pure confirmations, per site they are filed under; keep everything else.
-    confirmed = {(row["site_id"], row["attribute_name"]) for row in resolved_rows if row["resolution"] == "Confirmed baseline"}
-    kept_per_attribute: dict[tuple[str, str], int] = {}
+    confirmed = {
+        decision_key(row["site_id"], row["attribute_name"], row.get("year", ""))
+        for row in resolved_rows
+        if row["resolution"] == "Confirmed baseline"
+    }
+    kept_per_attribute: dict[tuple[str, str, Any], int] = {}
     for site_id in sorted(found):
         for row in found[site_id][1]:
-            key = (row["site_id"], row["attribute_name"])
+            key = decision_key(row["site_id"], row["attribute_name"], value_year(row.get("value_date"), run_year))
             if key in confirmed:
                 kept_per_attribute[key] = kept_per_attribute.get(key, 0) + 1
                 if kept_per_attribute[key] > MAX_CONFIRMATION_EVIDENCE_ROWS:
@@ -1172,6 +1197,7 @@ MATCH_SETTINGS = [
     ("match_tie", TIE),
     ("match_name_nearby", NAME_NEARBY),
     ("match_new_facility", NEW_FACILITY),
+    ("match_not_a_waste_facility", NOT_A_FACILITY),
     ("match_moved_by_name", MOVED_BY_NAME),
     ("match_no_location", NO_LOCATION),
     ("match_outside_run", OUTSIDE_RUN),

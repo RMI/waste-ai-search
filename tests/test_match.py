@@ -20,6 +20,7 @@ from waste_ai_search.match import (
     NAMED_AMONG_SEVERAL,
     NEW_FACILITY,
     NO_LOCATION,
+    NOT_A_FACILITY,
     OUTSIDE_RUN,
     TIE,
     Citation,
@@ -282,8 +283,11 @@ def test_a_source_saying_not_a_waste_facility_is_never_a_candidate():
     ours = [seed("1", "domestic landfill", 50.0, -100.0)]
     quarry = cite("1", "https://quarry.example", "Smith Quarry", (50.2, -100.0), not_a_waste_facility=True)
     matching = match([quarry], ours)
-    assert matching.filings[("1", 1)].outcome == NEW_FACILITY
+    filing = matching.filings[("1", 1)]
+    assert (filing.site_id, filing.outcome) == ("", NOT_A_FACILITY)
+    assert filing.match.endswith("says it is not a waste facility, so it is not listed.")
     assert matching.new_facilities == []
+    assert (matching.counts[NEW_FACILITY], matching.counts[NOT_A_FACILITY]) == (0, 1)
 
 
 def test_a_registry_page_naming_several_facilities_is_several_sources():
