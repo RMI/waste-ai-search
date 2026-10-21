@@ -28,7 +28,7 @@ checks that a source is actually about that site. Batch 1 (1,931 sites):
 | # | Step | In short |
 |---|---|---|
 | 1 | **Pick sites** | Skip names that give a search nothing to look for ("domestic landfill", "OpenStreetMap Landfill"; measured in PR #23). US and Brazil stay excluded. |
-| 2 | **Search** | The agent researches the site as today, but reports each **source** with the facility name and location as the source writes them. Maptons is dropped; Mapcarta's points are used for matching only. |
+| 2 | **Search** | The agent researches the site as today, but reports each **source** with the facility name and location as the source writes them. Mapcarta and Maptons are dropped. |
 | 3 | **Locate** | Code turns each source's location into coordinates: parsed when it gives coordinates or a grid reference, geocoded when it gives an address. |
 | 4 | **Match** | Each source is filed under the site of ours it is about, by location, with the name as a check. It may be filed under the site searched, another of our sites, a likely new landfill, or the site searched with a "no location" flag. |
 | 5 | **Review** | For each (matched site, attribute), every source is pooled into one decision. **Nothing is accepted automatically.** SMEs see why each value was filed where it was, and can re-file it. |
@@ -60,18 +60,18 @@ checks that a source is actually about that site. Batch 1 (1,931 sites):
   to the prompt's coordinates counts as no location. In batch 1 the agent copied our exact OSM
   point six times and credited it to an Ontario registry.
 - **Map sites:**
-  - **mapcarta.com is kept as a weak source.** For landfills it mostly copies OpenStreetMap: all
-    319 batch-1 citations traced to the OSM way in the URL. Some pages also carry Wikipedia,
-    Wikidata or GeoNames content, which OSM lacks.
-
-    A value equal to ours is only a confirmation, so a copy of our own OSM data never reaches
-    SMEs. Its coordinates are OSM's bounding-box centre, not our centroid (median 14 m apart),
-    so they are used for matching only and never offered as a location value. Otherwise every
-    Mapcarta point would become a review row.
+  - **mapcarta.com is dropped by website.** For landfills it copies OpenStreetMap. All 319
+    batch-1 citations traced to the OSM way in its URL: coordinates to within a metre, and names
+    and operators word for word, typos included. Nothing came from anywhere else, some of it was
+    stale OSM, and 30 citations pointed at a different landfill. Some of its pages carry
+    Wikipedia, Wikidata or GeoNames content, but none of the landfills batch 1 cited did, and the
+    agent can cite those sources directly.
   - **maptons.com is dropped by website.** It is an unattributed scrape of business listings,
     probably Google's, and 27 of its 36 coordinate pairs were more than 2 km from the site
-    searched. Dropped citations are counted in `parse_warnings.csv`.
+    searched.
   - **Wikimapia** is an independent crowd-sourced map and stays as a weak source.
+
+  Dropped citations are counted in `parse_warnings.csv`.
 
   Map sites are identified by website, not by the agent's source-type label, which it applies
   unreliably: asbestossafety.gov.au was labelled a map directory 38 times.
@@ -250,7 +250,8 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 2. **The prompt gets our coordinates rounded to 2 decimals.**
 3. **The match distance is 2 km, not 1.5 km.** Landfills are big, and addresses and coordinates
    can be off.
-4. **Mapcarta is kept as a weak source.** Its coordinates are used for matching only.
+4. **Mapcarta and Maptons are dropped.** Checked against OpenStreetMap, Mapcarta added nothing in
+   batch 1.
 
 ## Risks
 
@@ -292,8 +293,7 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 
 Separate PRs, each useful for batch 2 on its own:
 
-1. Drop Maptons by website, keep Mapcarta's coordinates out of location values, and dedupe
-   sources on the exact URL.
+1. Drop Mapcarta and Maptons by website, and dedupe sources on the exact URL.
 2. Skip unsearchable names (from #23).
 3. Turn off automatic acceptance, and remove the near-coordinate rules here. Delete the
    standardized CSV. Fold in #24.
