@@ -136,3 +136,24 @@ def test_the_prompt_stays_compact():
     """About 7% longer than the attribute-first prompt it replaced (16.5k characters for this site)."""
     assert len(prompt_for(THUNDER_BAY)) < 18_500
     assert not re.search(r"\n{4,}", prompt_for(THUNDER_BAY))
+
+
+def test_status_and_closure_is_asked_only_where_status_or_the_closing_year_is_wanted():
+    # Brazil asks only where the site is; its status is government data and left alone.
+    bra = {"site_id": "7", "site_name": "Lixão de Exemplo", "country_iso3": "BRA", "is_location_exact": "FALSE",
+           "latitude": "-10.123456", "longitude": "-48.654321"}
+    assert "Status and closure" not in prompt_for(bra)
+    # The gas follow-up asks for the gas attributes alone.
+    assert "Status and closure" not in prompt_for(THUNDER_BAY, ["has_flare", "flare_efficiency"])
+    known = {**THUNDER_BAY, "facility_status": "Active", "closing_year": "2031"}
+    assert "facility_status" not in requested_attributes(known) and "Status and closure" not in prompt_for(known)
+    for asked in (["facility_status"], ["closing_year"]):
+        assert "return\n  facility_status = Inactive AND search for closing_year" in prompt_for(THUNDER_BAY, asked)
+
+
+def test_a_translated_name_is_one_facility_to_search_for_with_no_identity_to_confirm():
+    mex = {"site_id": "1", "site_name": "Municipal Landfill of Tijuana", "original_site_name": "Relleno Sanitario de Tijuana",
+           "source_language": "es", "country_iso3": "MEX", "latitude": "32.5", "longitude": "-117.0"}
+    names = section(prompt_for(mex), "Names")
+    assert "Treat them as one facility with two names, never as two\n  candidates." in names
+    assert "identity" not in names

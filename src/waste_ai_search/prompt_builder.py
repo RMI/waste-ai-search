@@ -417,7 +417,7 @@ Names:
   source_language. Search THIS name in the local language first - permits,
   municipal records and local news will use it, not the translation.
 - Search both. Treat them as one facility with two names, never as two
-  candidates: agreeing on the translated name alone is not identity confirmation.
+  candidates.
 - Return found_facility_name exactly as your source spells it, in whatever script or
   language that source uses. Do not translate it back.
 """
@@ -474,6 +474,17 @@ Names:
         wanted = (
             "No attribute values are wanted for this site, only where it is: find sources that\n"
             "state this facility's location, and report each with an empty values list."
+        )
+
+    # Only where status or the closing year is asked for: a location-only prompt (Brazil) or the gas
+    # follow-up wants neither, and arbitration resolves whatever comes back, asked or not.
+    status_and_closure = ""
+    if {"facility_status", "closing_year"} & set(values):
+        status_and_closure = (
+            "Status and closure:\n"
+            "- If your sources show the facility is closed, inactive, or no longer accepting waste, return\n"
+            "  facility_status = Inactive AND search for closing_year in the same pass. A closed site\n"
+            "  without a closure year is an incomplete answer.\n\n"
         )
 
     closure_focus = ""
@@ -559,12 +570,7 @@ Definitions:
 {json.dumps(definitions, indent=2, ensure_ascii=False)}
 
 {closure_focus}
-Status and closure:
-- If your sources show the facility is closed, inactive, or no longer accepting waste, return
-  facility_status = Inactive AND search for closing_year in the same pass. A closed site
-  without a closure year is an incomplete answer.
-
-Sources and the facility each describes:
+{status_and_closure}Sources and the facility each describes:
 - Research only this site. Report each source you use once, with the facility it describes
   as the source writes it: facility_name_in_source, facility_name_english, stated_location
   and stated_location_kind. Our code decides whether that facility is this site, so report
