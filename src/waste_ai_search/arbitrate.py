@@ -5,18 +5,26 @@ can be re-applied to a finished run for free and an interrupted search is never 
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 from .arbitration import calculated_row, date_key, needs_review, resolve, routed_to_leads
 from .credibility import TIER_BY_LABEL, assign_source_tier, dropped_source_site, is_promotable, tier_label
 from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, LinkResult, load_results
+from .payload import (
+    citation_ids,
+    citations,
+    is_empty,
+    merge_payloads,
+    normalize_url,
+    payload_urls,
+    read_payload,
+    source_id_for,
+)
 from .prompt_builder import needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
 from .searchable_names import SKIPPED_NAME_CLASSES, describe_counts, recorded_skips, site_name_class
@@ -81,42 +89,6 @@ def parse_float(value: Any) -> float | None:
         return None
 
 
-def normalize_url(url: Any) -> str:
-    """The exact URL a source is filed under: one row in sources.csv, and one source_id.
-
-    Only spellings that never change the page are cleaned: the scheme and host are lower-cased,
-    and a leading "www.", a trailing slash on the path and the fragment are dropped. The path and
-    the query string are kept as written, case included. Dropping the query string, as this once
-    did, merged 103 different Natural Resources Wales documents, which differ only in their query,
-    into one source.
-    """
-    text = normalize_scalar(url)
-    if not text:
-        return ""
-    try:
-        parts = urlsplit(text)
-        if not parts.scheme and not parts.netloc:
-            parts = urlsplit("//" + text)  # written without a scheme
-    except ValueError:
-        return text
-    netloc = parts.netloc.lower()
-    netloc = netloc[4:] if netloc.startswith("www.") else netloc
-    path = parts.path.rstrip("/")
-    return urlunsplit(((parts.scheme or "https").lower(), netloc, path, parts.query, ""))
-
-
-def source_id_for(url: Any, fallback: str) -> str:
-    """A source's id, derived from its exact URL, so it is the same wherever the URL is cited.
-
-    evidence.csv and sources.csv both carry it, so the two files join. A citation with no URL has
-    nothing to derive an id from, and keeps `fallback`, its own per-citation id.
-    """
-    exact = normalize_url(url)
-    if not exact:
-        return fallback
-    return "WAISRC-" + hashlib.sha256(exact.encode("utf-8")).hexdigest()[:12]
-
-
 # --- phase 2: arbitrate (pure, offline) -------------------------------------------------------
 def extract_evidence(
     site: dict[str, Any],
@@ -127,12 +99,13 @@ def extract_evidence(
     link_results: dict[str, LinkResult] | None = None,
     keep_broken_links: bool = False,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    """Turn one cached response into evidence items grouped by attribute.
+    """Turn one cached response, of either shape, into evidence items grouped by attribute.
 
-    `link_results` are the run's link-check verdicts (WP-533), keyed by the URL as the agent wrote
-    it. A repaired URL replaces the one the agent wrote; the original stays in the raw response. A
-    Broken link is treated like a missing one - the source cannot be promoted and goes to leads -
-    unless keep_broken_links is set. Unverified links are never touched.
+    The response is read as sources, each with its values (payload.read_payload). `link_results`
+    are the run's link-check verdicts (WP-533), keyed by the URL as the agent wrote it. A repaired
+    URL replaces the one the agent wrote; the original stays in the raw response. A Broken link is
+    treated like a missing one - the source cannot be promoted and goes to leads - unless
+    keep_broken_links is set. Unverified links are never touched.
 
     A citation of a dropped map site (DROPPED_SOURCE_SITES) is skipped before anything else, and
     counted in the warnings, one line per map site, with any of the agent's unverified_leads that
@@ -146,16 +119,37 @@ def extract_evidence(
     source_entries: list[dict[str, Any]] = []
     warnings: list[str] = []
     dropped: dict[str, int] = {}
+    only_dropped: set[str] = set()
+    kept_attributes: set[str] = set()
     order = 0
+    read = read_payload(payload)
 
-    for attr_index, attribute in enumerate(payload.get("attributes", []) or [], start=1):
-        if not isinstance(attribute, dict):
-            continue
+    for source in read["sources"]:
         # A cached response from before a rename still carries the old attribute name.
+        names = {canonical_attribute(normalize_scalar(value.get("attribute_name"))) for value in source["values"]}
+        mirror = dropped_source_site(source.get("url"))
+        if mirror:
+            dropped[mirror] = dropped.get(mirror, 0) + max(1, len(source["values"]))
+            only_dropped.update(names)
+        else:
+            kept_attributes.update(names)
+
+    for source_index, source, value_index, attribute in citations(read):
+        raw_url = normalize_scalar(source.get("url"))
+        if dropped_source_site(raw_url):
+            continue
         name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
         if name not in REQUESTABLE_ATTRIBUTES:
             warnings.append(f"Unsupported attribute_name {name!r} dropped.")
             continue
+        link = link_results.get(raw_url)
+        url = link.resolved_url if link else raw_url
+        link_status = link.verdict if link else ""
+        dead_link = link_status == BROKEN and not keep_broken_links
+        # The evidence id stays per citation; the source id is the exact URL's, shared by every
+        # citation of it, so evidence.csv joins sources.csv.
+        evidence_id, fallback_source_id = citation_ids(site_id, source_index, value_index, attribute)
+        source_id = source_id_for(url, fallback=fallback_source_id)
 
         conversion = convert_attribute_value(name, attribute.get("value"), attribute.get("unit"))
         # A failed conversion returns the value untouched in its ORIGINAL unit. Promoting that
@@ -173,10 +167,10 @@ def extract_evidence(
             mapping_note = note
             value = "" if parsed is None else ("TRUE" if parsed else "FALSE")
         elif name == "waste_depth":
-            # Bin the CONVERTED metres, not the raw value: the source may have reported feet, and
-            # the 5m boundary is only meaningful once the unit conversion above has run. A failed
-            # conversion leaves conversion.value in its original unit, so skip binning entirely
-            # there and let the conversion warning exclude the row.
+            # Bin the CONVERTED metres, not the raw value: the source may have reported feet,
+            # and the 5m boundary is only meaningful once the unit conversion above has run. A
+            # failed conversion leaves conversion.value in its original unit, so skip binning
+            # entirely there and let the conversion warning exclude the row.
             if conversion_failed:
                 value = ""
             else:
@@ -207,117 +201,82 @@ def extract_evidence(
             if numeric_note:
                 warnings.append(numeric_note)
 
-        sources = [item for item in (attribute.get("sources") or []) if isinstance(item, dict)]
-        kept = 0
-        for source_index, source in enumerate(sources, start=1):
-            raw_url = normalize_scalar(source.get("url"))
-            mirror = dropped_source_site(raw_url)
-            if mirror:
-                dropped[mirror] = dropped.get(mirror, 0) + 1
-                continue
-            kept += 1
-            order += 1
-            # The evidence id stays per citation; the source id is the exact URL's, shared by
-            # every citation of it, so evidence.csv joins sources.csv.
-            evidence_id = f"WAIEV-{site_id}-{attr_index:03d}-{source_index:03d}"
-            tier, rule = assign_source_tier(source, name)
-            link = link_results.get(raw_url)
-            url = link.resolved_url if link else raw_url
-            link_status = link.verdict if link else ""
-            dead_link = link_status == BROKEN and not keep_broken_links
-            source_id = source_id_for(url, fallback=f"WAISRC-{site_id}-{attr_index:03d}-{source_index:03d}")
+        order += 1
+        tier, rule = assign_source_tier(source, name)
 
-            item = {
+        item = {
+            "evidence_id": evidence_id,
+            "source_id": source_id,
+            "attribute_name": name,
+            "value": value,
+            "unit": conversion.unit,
+            "tier": tier,
+            "order": order,
+            "url": url,
+            "link_status": link_status,
+            "value_date": normalize_scalar(attribute.get("value_date")),
+            "confidence": normalize_scalar(attribute.get("confidence_score")),
+            "evidence_summary": normalize_scalar(attribute.get("evidence_summary")),
+        }
+        if url and not dead_link and not is_blank(value) and not numeric_note:
+            by_attribute.setdefault(name, []).append(item)
+
+        promotable = (
+            bool(url) and not dead_link and not is_blank(value) and is_promotable(tier) and not numeric_note
+        )
+        exclusion = ""
+        if not url:
+            exclusion = "No clickable source URL."
+        elif dead_link:
+            exclusion = f"Source link broken ({link.status}); not promoted."
+        elif is_blank(value):
+            exclusion = "Value empty after normalization."
+        elif numeric_note:
+            exclusion = numeric_note
+        elif not is_promotable(tier):
+            exclusion = f"{tier_label(tier)} is below the promotion floor."
+
+        evidence_rows.append(
+            {
                 "evidence_id": evidence_id,
-                "source_id": source_id,
+                "run_id": run_id,
+                "dataset_version": dataset_version,
+                "site_id": site_id,
+                "internal_facility_id": normalize_scalar(site.get("internal_facility_id") or site_id),
                 "attribute_name": name,
-                "value": value,
-                "unit": conversion.unit,
-                "tier": tier,
-                "order": order,
-                "url": url,
-                "link_status": link_status,
+                "claimed_value": conversion.original_value,
+                "claimed_unit": conversion.original_unit,
+                "normalized_value": conversion.value,
+                "normalized_unit": conversion.unit,
+                "unit_conversion_note": conversion.note,
+                "mapped_value": normalize_scalar(value),
+                "mapping_note": mapping_note,
+                "value_basis": normalize_scalar(attribute.get("value_basis")),
                 "value_date": normalize_scalar(attribute.get("value_date")),
-                "confidence": normalize_scalar(attribute.get("confidence_score")),
+                "agent_confidence": normalize_scalar(attribute.get("confidence_score")),
+                "source_id": source_id,
+                "link_status": link_status,
+                "url": url,
+                "source_tier": tier_label(tier),
+                "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
+                "tier_rule_applied": rule,
                 "evidence_summary": normalize_scalar(attribute.get("evidence_summary")),
+                "quoted_evidence_short": normalize_scalar(attribute.get("quoted_evidence_short")),
+                "search_terms_used": normalize_scalar(attribute.get("search_terms_used")),
+                "promotion_eligible": "TRUE" if promotable else "FALSE",
+                "exclusion_reason": exclusion,
+                "record_created_date": access_date.isoformat(),
             }
-            if url and not dead_link and not is_blank(value) and not numeric_note:
-                by_attribute.setdefault(name, []).append(item)
+        )
+        source_entries.append(source_entry(source, source_id, url, tier, rule, run_id, site_id))
 
-            promotable = (
-                bool(url) and not dead_link and not is_blank(value) and is_promotable(tier) and not numeric_note
-            )
-            exclusion = ""
-            if not url:
-                exclusion = "No clickable source URL."
-            elif dead_link:
-                exclusion = f"Source link broken ({link.status}); not promoted."
-            elif is_blank(value):
-                exclusion = "Value empty after normalization."
-            elif numeric_note:
-                exclusion = numeric_note
-            elif not is_promotable(tier):
-                exclusion = f"{tier_label(tier)} is below the promotion floor."
-
-            evidence_rows.append(
-                {
-                    "evidence_id": evidence_id,
-                    "run_id": run_id,
-                    "dataset_version": dataset_version,
-                    "site_id": site_id,
-                    "internal_facility_id": normalize_scalar(site.get("internal_facility_id") or site_id),
-                    "attribute_name": name,
-                    "claimed_value": conversion.original_value,
-                    "claimed_unit": conversion.original_unit,
-                    "normalized_value": conversion.value,
-                    "normalized_unit": conversion.unit,
-                    "unit_conversion_note": conversion.note,
-                    "mapped_value": normalize_scalar(value),
-                    "mapping_note": mapping_note,
-                    "value_basis": normalize_scalar(attribute.get("value_basis")),
-                    "value_date": normalize_scalar(attribute.get("value_date")),
-                    "agent_confidence": normalize_scalar(attribute.get("confidence_score")),
-                    "source_id": source_id,
-                    "link_status": link_status,
-                    "url": url,
-                    "source_tier": tier_label(tier),
-                    "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
-                    "tier_rule_applied": rule,
-                    "evidence_summary": normalize_scalar(attribute.get("evidence_summary")),
-                    "quoted_evidence_short": normalize_scalar(source.get("quoted_evidence_short")),
-                    "search_terms_used": normalize_scalar(attribute.get("search_terms_used")),
-                    "promotion_eligible": "TRUE" if promotable else "FALSE",
-                    "exclusion_reason": exclusion,
-                    "record_created_date": access_date.isoformat(),
-                }
-            )
-
-            source_entries.append(
-                {
-                    "source_id": source_id,
-                    "url_normalized": normalize_url(url),
-                    "url": url,
-                    "source_title": normalize_scalar(source.get("source_title")),
-                    "publisher": normalize_scalar(source.get("publisher")),
-                    "source_type": normalize_scalar(source.get("source_type")),
-                    "source_tier": tier_label(tier),
-                    "tier_rule_applied": rule,
-                    "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
-                    "publication_date": normalize_scalar(source.get("publication_date")),
-                    "has_publication_date": "TRUE" if normalize_scalar(source.get("publication_date")) else "FALSE",
-                    "language": normalize_scalar(source.get("language")),
-                    "paywall_flag": "TRUE" if source.get("paywall_flag") else "FALSE",
-                    "subscription_followup_needed": "TRUE" if source.get("subscription_followup_needed") else "FALSE",
-                    "first_seen_run_id": run_id,
-                    "site_id": site_id,
-                }
-            )
-        if sources and not kept:
+    for name in sorted(only_dropped - kept_attributes):
+        if name in REQUESTABLE_ATTRIBUTES:
             warnings.append(f"{name}: every source was a dropped map site; not promoted.")
 
     # The agent's own leads go to the Leads sheet (payload_leads), which skips the same map sites,
     # so they are counted with the rest.
-    for lead in payload.get("unverified_leads", []) or []:
+    for lead in read["unverified_leads"]:
         mirror = dropped_source_site(lead.get("url")) if isinstance(lead, dict) else ""
         if mirror:
             dropped[mirror] = dropped.get(mirror, 0) + 1
@@ -327,7 +286,32 @@ def extract_evidence(
             f"Dropped {count} citation(s) of {mirror}: map sites that copy OpenStreetMap or scrape "
             "listings are not used as sources."
         )
-    return by_attribute, evidence_rows, source_entries, warnings
+    # A value cited by several sources is checked once per source; one warning says it.
+    return by_attribute, evidence_rows, source_entries, list(dict.fromkeys(warnings))
+
+
+def source_entry(
+    source: dict[str, Any], source_id: str, url: str, tier: int, rule: str, run_id: str, site_id: str
+) -> dict[str, Any]:
+    """One citation's row for sources.csv, before dedupe_sources makes it one row per URL."""
+    return {
+        "source_id": source_id,
+        "url_normalized": normalize_url(url),
+        "url": url,
+        "source_title": normalize_scalar(source.get("source_title")),
+        "publisher": normalize_scalar(source.get("publisher")),
+        "source_type": normalize_scalar(source.get("source_type")),
+        "source_tier": tier_label(tier),
+        "tier_rule_applied": rule,
+        "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
+        "publication_date": normalize_scalar(source.get("publication_date")),
+        "has_publication_date": "TRUE" if normalize_scalar(source.get("publication_date")) else "FALSE",
+        "language": normalize_scalar(source.get("language")),
+        "paywall_flag": "TRUE" if source.get("paywall_flag") else "FALSE",
+        "subscription_followup_needed": "TRUE" if source.get("subscription_followup_needed") else "FALSE",
+        "first_seen_run_id": run_id,
+        "site_id": site_id,
+    }
 
 
 def dedupe_sources(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -356,26 +340,6 @@ def dedupe_sources(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def merge_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
-    """Combine every pass's response for one site into a single payload.
-
-    Attributes and leads accumulate across passes; search notes are joined so a tool failure in
-    any pass stays visible.
-    """
-    if len(payloads) == 1:
-        return payloads[0]
-    merged: dict[str, Any] = {"site_id": payloads[0].get("site_id"), "attributes": [], "unverified_leads": []}
-    notes = []
-    for payload in payloads:
-        merged["attributes"].extend(payload.get("attributes") or [])
-        merged["unverified_leads"].extend(payload.get("unverified_leads") or [])
-        note = normalize_scalar(payload.get("search_notes"))
-        if note:
-            notes.append(note)
-    merged["search_notes"] = " | ".join(notes)
-    return merged
-
-
 def cached_source_urls(run_dir: Path) -> list[str]:
     """Every source URL in a run's cached responses, read the way arbitration reads them.
 
@@ -385,16 +349,10 @@ def cached_source_urls(run_dir: Path) -> list[str]:
     urls: list[str] = []
     for path in sorted(raw_dir(run_dir).glob("site_*.json")):
         try:
-            payload = merge_payloads([load_json(path)])
+            payload = load_json(path)
         except (OSError, json.JSONDecodeError):
             continue
-        for attribute in payload.get("attributes", []) or []:
-            if not isinstance(attribute, dict):
-                continue
-            for source in attribute.get("sources") or []:
-                url = normalize_scalar(source.get("url")) if isinstance(source, dict) else ""
-                if url and not dropped_source_site(url):
-                    urls.append(url)
+        urls.extend(url for url in payload_urls(payload) if not dropped_source_site(url))
     return list(dict.fromkeys(urls))
 
 
@@ -547,20 +505,18 @@ def dropped_map_site_offset_km(site: dict[str, Any], payload: dict[str, Any]) ->
     of the source-matching plan replaces the gate, and this goes with it.
     """
     pages: dict[str, dict[str, Any]] = {}
-    for attribute in payload.get("attributes", []) or []:
-        if not isinstance(attribute, dict):
+    for source in read_payload(payload)["sources"]:
+        url = normalize_scalar(source.get("url"))
+        mirror = dropped_source_site(url)
+        if not mirror:
             continue
-        name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
-        if name not in {"found_latitude", "found_longitude"}:
-            continue
-        conversion = convert_attribute_value(name, attribute.get("value"), attribute.get("unit"))
-        value = None if conversion.warning else parse_float(conversion.value)
-        if value is None:
-            continue
-        for source in attribute.get("sources") or []:
-            url = normalize_scalar(source.get("url")) if isinstance(source, dict) else ""
-            mirror = dropped_source_site(url)
-            if mirror:
+        for attribute in source["values"]:
+            name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
+            if name not in {"found_latitude", "found_longitude"}:
+                continue
+            conversion = convert_attribute_value(name, attribute.get("value"), attribute.get("unit"))
+            value = None if conversion.warning else parse_float(conversion.value)
+            if value is not None:
                 pages.setdefault(normalize_url(url), {"site": mirror})[name] = value
 
     base_lat = parse_float(site.get("latitude"))
@@ -753,10 +709,10 @@ def payload_leads(
         site_id = site_id_from_path(path)
         site = sites_by_id.get(site_id, {})
         try:
-            payload = load_json(path)
+            payload = read_payload(load_json(path))
         except (OSError, json.JSONDecodeError):
             continue
-        for lead in payload.get("unverified_leads", []) or []:
+        for lead in payload["unverified_leads"]:
             if isinstance(lead, dict):
                 summary = normalize_scalar(lead.get("lead_summary") or lead.get("summary") or lead.get("note"))
                 url = normalize_scalar(lead.get("url"))
@@ -860,7 +816,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             continue
         payload = merge_payloads(payloads)
 
-        if not (payload.get("attributes") or []) and search_tool_failed(payload):
+        if is_empty(payload) and search_tool_failed(payload):
             retry_sites.append(
                 {
                     "site_id": site_id,

@@ -559,13 +559,17 @@ def test_run_command_skips_the_follow_up_when_nothing_was_unlocked(tmp_path, mon
 
 
 def test_merge_payloads_combines_passes():
+    """Each pass is read through the one reader, so a pass cached attribute-first merges with a
+    source-first one; the merge is source-first."""
     from waste_ai_search.arbitrate import merge_payloads
 
     merged = merge_payloads([
-        {"site_id": "1", "attributes": [{"attribute_name": "a"}], "search_notes": "first"},
-        {"site_id": "1", "attributes": [{"attribute_name": "b"}], "search_notes": "second"},
+        {"site_id": "1", "search_notes": "first",
+         "attributes": [{"attribute_name": "a", "sources": [{"url": "https://a.example"}]}]},
+        {"site_id": "1", "search_notes": "second",
+         "sources": [{"url": "https://b.example", "values": [{"attribute_name": "b"}]}]},
     ])
-    assert [a["attribute_name"] for a in merged["attributes"]] == ["a", "b"]
+    assert [value["attribute_name"] for source in merged["sources"] for value in source["values"]] == ["a", "b"]
     assert merged["search_notes"] == "first | second"
 
 

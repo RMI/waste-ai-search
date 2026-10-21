@@ -18,6 +18,7 @@ from typing import Any
 from .geocoder import enrich_sites_from_cache
 from .input_loader import resolve_sites, run_seed_path, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, check_urls
+from .payload import found_attributes, read_payload
 from .pilot_selector import select_mixed_pilot
 from .prompt_builder import build_site_prompt, coordinates_only, requested_attributes
 from .run_context import (
@@ -343,12 +344,11 @@ def search_one_site(
         if config.site_delay_seconds > 0:
             time.sleep(config.site_delay_seconds)
 
-    attribute_count = len(payload.get("attributes", []) or []) if payload else 0
-    source_count = (
-        sum(len(item.get("sources", []) or []) for item in (payload.get("attributes", []) or []))
-        if payload
-        else 0
-    )
+    # Read like arbitration reads it, so a response cached in the older attribute-first shape counts
+    # the same way: attributes found, and sources (one per exact URL).
+    read = read_payload(payload) if payload else None
+    attribute_count = len({name for _source, name in found_attributes(read)}) if read else 0
+    source_count = len(read["sources"]) if read else 0
     return {
         "run_id": config.run_id,
         "site_id": site_id,

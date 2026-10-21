@@ -646,15 +646,6 @@ FIELD_TO_DEFINITION = {
     "rejection_reason": "rejection_reason",
 }
 
-FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS = [
-    "attribute_name",
-    "value",
-    "value_basis",
-    "confidence_score",
-    "sources",
-]
-
-
 # --- scalar helpers ----------------------------------------------------------------------------
 def normalize_scalar(value: Any) -> str:
     if value is None:
@@ -732,26 +723,27 @@ def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
 
 
 def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
-    warnings: list[str] = []
-    attributes = payload.get("attributes", [])
-    if not isinstance(attributes, list):
-        return ["Payload field 'attributes' must be a list."]
+    """What is malformed in a cached response, read through the one reader (payload.py).
 
-    for idx, attribute in enumerate(attributes, start=1):
-        if not isinstance(attribute, dict):
-            warnings.append(f"attributes[{idx}] must be an object.")
+    A response from before the source-first contract is reported in its own terms, attributes[i],
+    as it always was; a source-first one as sources[i].values[j].
+    """
+    from .payload import REQUIRED_VALUE_FIELDS, is_converted, read_payload
+
+    read = read_payload(payload)
+    warnings = list(read["problems"])
+    for index, source in enumerate(read["sources"], start=1):
+        if is_converted(source):
             continue
-        for field in FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS:
-            if field not in attribute:
-                warnings.append(f"attributes[{idx}] missing required field {field!r}.")
-        # Same canonicalisation as extract_evidence, so a pre-rename cached response is not
-        # reported as unsupported by one and accepted by the other.
-        name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
-        if name and name not in REQUESTABLE_ATTRIBUTES:
-            warnings.append(f"attributes[{idx}] has unsupported attribute_name {name!r}.")
-        sources = attribute.get("sources", [])
-        if not isinstance(sources, list):
-            warnings.append(f"attributes[{idx}] sources must be a list.")
-        elif not any(isinstance(source, dict) and source.get("url") for source in sources):
-            warnings.append(f"attributes[{idx}] has no clickable source URL.")
-    return warnings
+        if not normalize_scalar(source.get("url")):
+            warnings.append(f"sources[{index}] has no clickable source URL.")
+        for value_index, value in enumerate(source["values"], start=1):
+            for field in REQUIRED_VALUE_FIELDS:
+                if field not in value:
+                    warnings.append(f"sources[{index}].values[{value_index}] missing required field {field!r}.")
+            # Same canonicalisation as extract_evidence, so a pre-rename cached response is not
+            # reported as unsupported by one and accepted by the other.
+            name = canonical_attribute(normalize_scalar(value.get("attribute_name")))
+            if name and name not in REQUESTABLE_ATTRIBUTES:
+                warnings.append(f"sources[{index}].values[{value_index}] has unsupported attribute_name {name!r}.")
+    return list(dict.fromkeys(warnings))
