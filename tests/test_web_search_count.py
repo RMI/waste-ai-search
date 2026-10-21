@@ -47,7 +47,8 @@ def test_a_retried_site_logs_the_queries_of_every_attempt(tmp_path, monkeypatch,
 
     rows = list(csv.DictReader((tmp_path / "run" / "foundry_run_log.csv").open(encoding="utf-8-sig")))
     assert rows[0]["web_searches"] == "8"
-    assert "Bing queries: 8 across 1 searched site(s)." in capsys.readouterr().out
+    # Changed on purpose: the line now prices the queries too.
+    assert "Bing queries: 8 across 1 searched site(s), ~$0.11 at $14 per 1,000." in capsys.readouterr().out
 
 
 def test_a_resumed_run_keeps_and_a_follow_up_pass_adds_to_the_count(tmp_path):
