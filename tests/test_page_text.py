@@ -96,7 +96,8 @@ def test_an_old_xls_spreadsheet_is_read_through_xlrd(monkeypatch):
     ole2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 64
     read = extract_text(ole2, "application/vnd.ms-excel", "https://sepa.example/landfill-capacity-2011.xls")
     assert read.kind == SPREADSHEET
-    assert "Avondale 1200.0" in read.text
+    # A whole number reads as the sheet shows it, without the ".0" it is stored with.
+    assert "Avondale 1200" in read.text and "1200.0" not in read.text
 
 
 def test_a_word_document_is_read():
@@ -135,9 +136,46 @@ def test_a_file_that_cant_be_read_says_so_and_never_raises():
     assert broken.text == "" and broken.note
 
 
-def test_a_cut_short_page_says_so():
-    read = extract_text(b"<html><body>" + b"<p>Smith Road</p>" * 50 + b"</body></html>", "text/html", "", truncated=True)
-    assert "only its first" in read.note
+def test_a_cut_short_page_says_why():
+    page = b"<html><body>" + b"<p>Smith Road</p>" * 50 + b"</body></html>"
+    assert "only its first 25 MB read" in extract_text(page, "text/html", "", cut="size").note
+    assert "60 seconds" in extract_text(page, "text/html", "", cut="time").note
+    assert "connection broke" in extract_text(page, "text/html", "", cut="error").note
+    # A PDF cut short usually can't be read at all; the note still says why.
+    pdf = tiny_pdf("Smith Road Landfill")
+    assert "only its first 25 MB read" in extract_text(pdf[: len(pdf) // 2], "application/pdf", "", cut="size").note
+
+
+def test_a_spreadsheets_cell_limit_is_across_its_sheets(monkeypatch):
+    import waste_ai_search.page_text as page_text
+
+    monkeypatch.setattr(page_text, "MAX_SHEET_CELLS", 10)
+    book = Workbook()
+    for index in range(5):
+        sheet = book.active if index == 0 else book.create_sheet()
+        for row in range(3):
+            sheet.append([f"s{index}r{row}a", f"s{index}r{row}b", f"s{index}r{row}c"])
+    data = io.BytesIO()
+    book.save(data)
+    read = extract_text(data.getvalue(), "", "https://x.example/register.xlsx")
+    assert "s0r0a" in read.text and "s2r0a" not in read.text
+    assert "first 10 cells read" in read.note
+
+
+def test_a_binary_file_served_as_a_web_page_is_not_read():
+    read = extract_text(b"\xff\xd8\xff\xe0\0\x10JFIF\0" + b"\0" * 100, "text/html", "https://x.example/photo")
+    assert (read.text, read.note) == ("", "not read (binary content)")
+
+
+def test_a_long_word_document_is_read_only_in_part(monkeypatch):
+    import waste_ai_search.page_text as page_text
+
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as archive:
+        archive.writestr("word/document.xml", "<w:document>" + "<w:p><w:r><w:t>Smith Road</w:t></w:r></w:p>" * 100 + "</w:document>")
+    monkeypatch.setattr(page_text, "MAX_DOCX_XML_BYTES", 500)
+    read = extract_text(data.getvalue(), "", "https://x.example/report.docx")
+    assert read.text.startswith("Smith Road") and "of its text read" in read.note
 
 
 def test_text_is_kept_gzipped_under_its_urls_source_id(tmp_path):
@@ -178,10 +216,12 @@ def test_a_page_that_loads_has_its_text_kept(tmp_path):
     assert load_results(tmp_path / LINK_CHECK_FILE)[url].text_file == result.text_file
 
 
-def test_a_repaired_url_keeps_the_text_of_the_spelling_that_loaded(tmp_path):
-    url, repaired = "https://council.example/landfills/", "https://council.example/landfills"
+def test_a_repaired_url_keeps_its_text_under_the_spelling_that_loaded(tmp_path):
+    """Evidence rows carry the repaired spelling once a URL is repaired, so the text is filed by it."""
+    url, repaired = "https://council.example/landfills%2Cclosed", "https://council.example/landfills,closed"
     result = check_urls([url], fetch=page_fetch({repaired: HTML_PAGE}), text_dir=tmp_path)[url]
-    assert (result.verdict, result.resolved_url, result.text_file) == (OK, repaired, text_file_name(url))
+    assert (result.verdict, result.resolved_url, result.text_file) == (OK, repaired, text_file_name(repaired))
+    assert text_file_name(repaired) != text_file_name(url)
 
 
 def test_an_unverified_or_broken_page_keeps_no_text(tmp_path):
@@ -200,6 +240,33 @@ def test_without_a_text_folder_nothing_is_read(tmp_path):
     fetch = page_fetch({"https://a.example": HTML_PAGE})
     result = check_urls(["https://a.example"], fetch=fetch)["https://a.example"]
     assert (result.verdict, result.text_file, result.text_note) == (OK, "", "")
+
+
+def test_reading_a_page_again_for_its_text_keeps_its_verdict(tmp_path):
+    """A run already reviewed on its verdicts keeps them: a page now refusing, or gone, stays OK."""
+    text_dir = tmp_path / "page_text"
+    urls = [f"https://{name}.example/" for name in ("ok", "now-refused", "now-gone")]
+    (tmp_path / LINK_CHECK_FILE).write_text(json.dumps({
+        url: {"url": url, "verdict": "OK", "status": "200", "resolved_url": url} for url in urls
+    }))
+    fetch = page_fetch({urls[0]: HTML_PAGE, urls[1]: (403, b"", "")})
+    results = check_urls(urls, cache_path=tmp_path / LINK_CHECK_FILE, fetch=fetch, text_dir=text_dir)
+    assert [(results[url].verdict, results[url].status, bool(results[url].text_file)) for url in urls] == [
+        ("OK", "200", True), ("OK", "200", False), ("OK", "200", False),
+    ]
+
+
+def test_a_read_that_was_interrupted_is_tried_again_and_one_cut_at_its_size_is_not(tmp_path):
+    text_dir = tmp_path / "page_text"
+    timed, broke, big = (f"https://{name}.example/" for name in ("timed", "broke", "big"))
+    (tmp_path / LINK_CHECK_FILE).write_text(json.dumps({
+        timed: {"url": timed, "verdict": "OK", "status": "200", "resolved_url": timed, "text_note": "only what arrived in 60 seconds read"},
+        broke: {"url": broke, "verdict": "OK", "status": "200", "resolved_url": broke, "text_note": "could not be read (PdfStreamError); the connection broke while it was read"},
+        big: {"url": big, "verdict": "OK", "status": "200", "resolved_url": big, "text_note": "only its first 25 MB read"},
+    }))
+    fetch = page_fetch({timed: HTML_PAGE, broke: HTML_PAGE, big: HTML_PAGE})
+    check_urls([timed, broke, big], cache_path=tmp_path / LINK_CHECK_FILE, fetch=fetch, text_dir=text_dir)
+    assert sorted(fetch.calls) == sorted([timed, broke])
 
 
 def test_a_page_checked_before_text_was_kept_is_read_again_and_nothing_else_is(tmp_path):
@@ -255,5 +322,48 @@ def test_the_real_fetch_reads_a_page_that_loads_up_to_its_limit(monkeypatch):
         cut = lc._original_fetch(session, url, lc._HostThrottle(0), keep_text=True)
     finally:
         server.shutdown()
-    assert (page.status, page.body, page.content_type, page.truncated) == (200, body, "text/html; charset=utf-8", False)
-    assert (cut.body, cut.truncated) == (body[:20], True)
+    assert (page.status, page.body, page.content_type, page.cut) == (200, body, "text/html; charset=utf-8", "")
+    assert (cut.body, cut.cut) == (body[:20], "size")
+
+
+def test_a_server_dripping_bytes_cant_hold_a_reader_past_its_deadline(monkeypatch):
+    """Waiting for whole chunks, one byte every few seconds held a worker for days."""
+    import time
+
+    import requests
+
+    import waste_ai_search.link_check as lc
+
+    class Drip(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", "1000")
+            self.end_headers()
+            try:
+                for _ in range(1000):
+                    self.wfile.write(b"x")
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Drip)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    real = lc._public_address
+    monkeypatch.setattr(lc, "_public_address", lambda host, p: "127.0.0.1" if p == port else real(host, p))
+    monkeypatch.setattr(lc, "READ_SECONDS", 1)
+    try:
+        session = requests.Session()
+        session.mount("http://", lc._pinned_adapter_class()())
+        started = time.monotonic()
+        page = lc._original_fetch(session, f"http://public.example:{port}/", lc._HostThrottle(0), keep_text=True)
+        elapsed = time.monotonic() - started
+    finally:
+        server.shutdown()
+    assert page.cut == "time" and 0 < len(page.body) < 1000
+    assert elapsed < 5

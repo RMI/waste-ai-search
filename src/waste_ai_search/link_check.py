@@ -42,7 +42,16 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
-from .page_text import MAX_PAGE_BYTES, extract_text, save_page_text
+from .page_text import (
+    CUT_BY_ERROR,
+    CUT_BY_SIZE,
+    CUT_BY_TIME,
+    MAX_PAGE_BYTES,
+    READ_SECONDS,
+    RETRIED_NOTES,
+    extract_text,
+    save_page_text,
+)
 
 
 OK = "OK"
@@ -61,11 +70,6 @@ USER_AGENT = (
 )
 
 
-# The longest a page's body may take to read, whatever the server's pace: a slow drip of bytes
-# would otherwise hold a worker past the per-request timeout.
-READ_SECONDS = 60
-
-
 @dataclass
 class LinkResult:
     url: str
@@ -82,12 +86,13 @@ class LinkResult:
 
 @dataclass
 class Fetched:
-    """A page that was read, not just its status: what keeping its text needs."""
+    """A page that was read, not just its status: what keeping its text needs. `cut` says why its
+    body was not read to the end, if it wasn't: its size, the time it took, or a broken connection."""
 
     status: Any
     body: bytes
     content_type: str = ""
-    truncated: bool = False
+    cut: str = ""
 
 
 class _HostThrottle:
@@ -196,21 +201,29 @@ def _pinned_adapter_class():
     return PinnedAdapter
 
 
-def _read_body(response: Any) -> tuple[bytes, bool]:
-    """A response's body, up to MAX_PAGE_BYTES and READ_SECONDS. True if it was cut short."""
-    import requests
+def _read_body(response: Any) -> tuple[bytes, str]:
+    """A response's body, up to MAX_PAGE_BYTES and READ_SECONDS, and why it was cut short, if it was.
 
+    Read a network read at a time, so the deadline is checked after each one: a server dripping a
+    byte at a time can't hold a worker past it, as waiting for whole chunks would.
+    """
+    raw = response.raw
+    read = getattr(raw, "read1", None) or raw.read
     chunks, size, started = [], 0, time.monotonic()
     try:
-        for chunk in response.iter_content(chunk_size=64 * 1024):
+        while True:
+            chunk = read(64 * 1024, decode_content=True)
+            if not chunk:
+                return b"".join(chunks), ""
             chunks.append(chunk)
             size += len(chunk)
-            if size >= MAX_PAGE_BYTES or time.monotonic() - started > READ_SECONDS:
-                return b"".join(chunks)[:MAX_PAGE_BYTES], True
-    except requests.RequestException:
-        # The page loaded, so its verdict stands; whatever arrived before the break is kept.
-        return b"".join(chunks), True
-    return b"".join(chunks), False
+            if size >= MAX_PAGE_BYTES:
+                return b"".join(chunks)[:MAX_PAGE_BYTES], CUT_BY_SIZE
+            if time.monotonic() - started > READ_SECONDS:
+                return b"".join(chunks), CUT_BY_TIME
+    except Exception:  # noqa: BLE001 - the page loaded, so its verdict stands
+        # Whatever arrived before the break is kept.
+        return b"".join(chunks), CUT_BY_ERROR
 
 
 def _fetch(session: Any, url: str, throttle: _HostThrottle, keep_text: bool = False) -> Any:
@@ -228,8 +241,8 @@ def _fetch(session: Any, url: str, throttle: _HostThrottle, keep_text: bool = Fa
         status = response.status_code
         try:
             if keep_text and classify(status) == OK:
-                body, truncated = _read_body(response)
-                return Fetched(status, body, response.headers.get("Content-Type", ""), truncated)
+                body, cut = _read_body(response)
+                return Fetched(status, body, response.headers.get("Content-Type", ""), cut)
             return status
         finally:
             response.close()
@@ -256,8 +269,9 @@ def _with_text(result: LinkResult, page: Fetched | None, text_dir: Path) -> Link
         result.text_note = "not read"
         return result
     try:
-        read = extract_text(page.body, page.content_type, result.resolved_url, page.truncated)
-        result.text_file = save_page_text(text_dir, result.url, read.text)
+        read = extract_text(page.body, page.content_type, result.resolved_url, page.cut)
+        # Filed under the spelling that loaded, which evidence rows carry once a URL is repaired.
+        result.text_file = save_page_text(text_dir, result.resolved_url, read.text)
         result.text_kind, result.text_chars, result.text_note = read.kind, len(read.text), read.note
     except Exception as exc:  # noqa: BLE001 - a page that can't be kept is noted, never fatal
         result.text_note = f"could not be kept ({type(exc).__name__})"
@@ -289,13 +303,25 @@ def check_url(session: Any, url: str, throttle: _HostThrottle, fetch=None, text_
 
 
 def wants_text(result: LinkResult, text_dir: Path) -> bool:
-    """A page that loaded but whose text was never kept: checked before text was kept, or its file
-    has gone since. One whose reading gave a reason for no text is not read again."""
+    """A page that loaded but whose text was never kept: checked before text was kept, its file has
+    gone since, or its read was interrupted. One that gave a lasting reason for no text, a scan say,
+    is not read again."""
     if result.verdict != OK:
         return False
+    if any(note in result.text_note for note in RETRIED_NOTES):
+        return True
     if result.text_file:
         return not (text_dir / result.text_file).exists()
     return not result.text_note or result.text_note == "not read"
+
+
+def with_new_text(previous: LinkResult, fresh: LinkResult) -> LinkResult:
+    """A page read again only for its text keeps its verdict: an SME may already have reviewed the
+    run on it. Only text that this read kept, or a reason for none, is taken from it."""
+    if fresh.verdict == OK and (fresh.text_file or fresh.text_note):
+        previous.text_file, previous.text_kind = fresh.text_file, fresh.text_kind
+        previous.text_chars, previous.text_note = fresh.text_chars, fresh.text_note
+    return previous
 
 
 def load_results(path: Path) -> dict[str, LinkResult]:
@@ -350,9 +376,14 @@ def check_urls(
         try:
             with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="link-check") as executor:
                 for result in executor.map(lambda url: check_url(session, url, throttle, fetch, text_dir), pending):
-                    results[result.url] = result
+                    previous = results.get(result.url)
+                    results[result.url] = with_new_text(previous, result) if previous else result
         finally:
             session.close()
+            # Saved even when the check is interrupted, so the verdicts it reached are kept.
+            if cache_path:
+                save_results(cache_path, results)
+        return results
     if cache_path:
         save_results(cache_path, results)
     return results

@@ -34,11 +34,16 @@ PAGE_TEXT_DIR = "page_text"
 # How much of a page is read. A permit PDF can run to hundreds of pages, but the facility's address
 # and the figures a source is cited for are nearly always near the front.
 MAX_PAGE_BYTES = 25 * 1024 * 1024
+# The longest a page's body may take to read, whatever the server's pace.
+READ_SECONDS = 60
 MAX_TEXT_CHARS = 2_000_000
 MAX_PDF_PAGES = 300
+# Cells read from a spreadsheet, across all its sheets.
 MAX_SHEET_CELLS = 500_000
 # A .xlsx or .docx is a zip, and a hostile one can unpack to far more than it downloads as.
-MAX_UNZIPPED_BYTES = 200 * 1024 * 1024
+MAX_UNZIPPED_BYTES = 100 * 1024 * 1024
+# How much of a Word document's text is read: it is markup, a few times longer than its text.
+MAX_DOCX_XML_BYTES = 4 * MAX_TEXT_CHARS
 # An HTML page with less visible text than this is probably built by JavaScript, so a quote may be
 # missing from it only because the link check can't run the page.
 LITTLE_TEXT_CHARS = 200
@@ -50,6 +55,30 @@ DOCX = "docx"
 TEXT = "text"
 
 _OLE2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+# Why the link check stopped reading a body before its end: what extract_text is told as `cut`.
+CUT_BY_SIZE, CUT_BY_TIME, CUT_BY_ERROR = "size", "time", "error"
+CUT_NOTES = {
+    CUT_BY_SIZE: f"only its first {MAX_PAGE_BYTES // (1024 * 1024)} MB read",
+    CUT_BY_TIME: f"only what arrived in {READ_SECONDS} seconds read",
+    CUT_BY_ERROR: "the connection broke while it was read",
+}
+# A page whose read was interrupted is read again by the next check; one cut at its size is not.
+RETRIED_NOTES = (CUT_NOTES[CUT_BY_TIME], CUT_NOTES[CUT_BY_ERROR])
+LITTLE_TEXT_NOTE = "little text: the page may be built by JavaScript"
+# What a note says when only part of a page was read, so a quote missing from its text may be in the
+# rest: a cut body, a long PDF or spreadsheet, a page that failed, or text cut at its length.
+PART_READ_MARKERS = (*CUT_NOTES.values(), " pages read", " cells read", "could not be read", "cut at ", " MB of its text read")
+
+
+def read_in_part(note: str) -> bool:
+    """Whether a page's note says only part of it was read."""
+    return any(marker in (note or "") for marker in PART_READ_MARKERS)
+
+
+def little_text(note: str) -> bool:
+    """Whether a page's note says it gave so little text it is probably built by JavaScript."""
+    return LITTLE_TEXT_NOTE in (note or "")
 _TEXT_TYPES = ("text/", "application/json", "application/xml", "application/csv", "+xml", "+json")
 _TEXT_SUFFIXES = (".csv", ".txt", ".json", ".xml", ".geojson", ".kml", ".tsv")
 
@@ -193,7 +222,7 @@ def pdf_text(body: bytes) -> tuple[str, str]:
         except Exception:  # noqa: BLE001 - any failure means it stays locked
             return "", "an encrypted PDF"
     pages = reader.pages
-    texts = []
+    texts, failed = [], 0
     for index, page in enumerate(pages):
         if index >= MAX_PDF_PAGES:
             break
@@ -201,23 +230,38 @@ def pdf_text(body: bytes) -> tuple[str, str]:
             texts.append(page.extract_text() or "")
         except Exception:  # noqa: BLE001 - one bad page loses that page, not the document
             texts.append("")
+            failed += 1
     text = _tidy("\n".join(texts))
-    if not text:
-        return "", "a PDF with no text layer, probably scanned"
-    note = f"its first {MAX_PDF_PAGES} of {len(pages)} pages read" if len(pages) > MAX_PDF_PAGES else ""
-    return text, note
+    notes = []
+    if failed:
+        notes.append(f"{failed} of its pages could not be read")
+    if len(pages) > MAX_PDF_PAGES:
+        notes.append(f"its first {MAX_PDF_PAGES} of {len(pages)} pages read")
+    if not text and not failed:
+        notes.append("a PDF with no text layer, probably scanned")
+    return text, "; ".join(notes)
 
 
-def _cells_text(rows) -> tuple[str, bool]:  # noqa: ANN001 - rows of cell values
+def _cell(value) -> str:  # noqa: ANN001 - any cell value
+    """A cell as its sheet shows it: a whole number without the ".0" a spreadsheet stores it with."""
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _cells_text(rows, budget: int) -> tuple[str, int]:  # noqa: ANN001 - rows of cell values
+    """A sheet's cells as lines, and how many of the workbook's cells it used."""
     lines, cells = [], 0
     for row in rows:
-        values = ["" if value is None else str(value) for value in row]
+        values = [_cell(value) for value in row]
         cells += len(values)
         if any(values):
             lines.append("\t".join(values).rstrip("\t"))
-        if cells >= MAX_SHEET_CELLS:
-            return "\n".join(lines), True
-    return "\n".join(lines), False
+        if cells >= budget:
+            break
+    return "\n".join(lines), cells
 
 
 class _TooLarge(ValueError):
@@ -231,15 +275,18 @@ def _check_unzipped_size(body: bytes) -> None:
 
 
 def spreadsheet_text(body: bytes) -> tuple[str, str]:
-    parts, cut = [], False
+    """Every cell of every sheet, up to MAX_SHEET_CELLS across the workbook."""
+    parts, budget = [], MAX_SHEET_CELLS
     if body.startswith(_OLE2):
         import xlrd
 
         book = xlrd.open_workbook(file_contents=body, on_demand=True)
-        for sheet in book.sheets():
-            text, cut = _cells_text(sheet.row_values(row) for row in range(sheet.nrows))
-            parts.append(f"{sheet.name}\n{text}")
-            if cut:
+        sheets = [(sheet.name, (sheet.row_values(row) for row in range(sheet.nrows))) for sheet in book.sheets()]
+        for name, rows in sheets:
+            text, used = _cells_text(rows, budget)
+            parts.append(f"{name}\n{text}")
+            budget -= used
+            if budget <= 0:
                 break
     else:
         from openpyxl import load_workbook
@@ -248,53 +295,68 @@ def spreadsheet_text(body: bytes) -> tuple[str, str]:
         book = load_workbook(io.BytesIO(body), read_only=True, data_only=True)
         try:
             for sheet in book.worksheets:
-                text, cut = _cells_text(sheet.iter_rows(values_only=True))
+                text, used = _cells_text(sheet.iter_rows(values_only=True), budget)
                 parts.append(f"{sheet.title}\n{text}")
-                if cut:
+                budget -= used
+                if budget <= 0:
                     break
         finally:
             book.close()
-    note = f"its first {MAX_SHEET_CELLS:,} cells read" if cut else ""
+    note = f"its first {MAX_SHEET_CELLS:,} cells read" if budget <= 0 else ""
     return _tidy("\n".join(parts)), note
 
 
-def docx_text(body: bytes) -> str:
+def docx_text(body: bytes) -> tuple[str, str]:
     _check_unzipped_size(body)
-    xml = zipfile.ZipFile(io.BytesIO(body)).read("word/document.xml").decode("utf-8", errors="replace")
+    with zipfile.ZipFile(io.BytesIO(body)).open("word/document.xml") as member:
+        raw = member.read(MAX_DOCX_XML_BYTES + 1)
+    note = ""
+    if len(raw) > MAX_DOCX_XML_BYTES:
+        raw = raw[:MAX_DOCX_XML_BYTES]
+        note = f"only its first {MAX_DOCX_XML_BYTES // (1024 * 1024)} MB of its text read"
+    xml = raw.decode("utf-8", errors="replace")
     xml = re.sub(r"<w:tab\s*/>", "\t", xml)
     xml = re.sub(r"</w:p>|<w:br\s*/>", "\n", xml)
-    return _tidy(unescape(re.sub(r"<[^>]+>", "", xml)))
+    return _tidy(unescape(re.sub(r"<[^>]+>", "", xml))), note
 
 
-def extract_text(body: bytes, content_type: str = "", url: str = "", truncated: bool = False) -> PageText:
-    """Read a page's text. Never raises: a page that can't be read gives no text and says why."""
+def _join(*notes: str) -> str:
+    return "; ".join(note for note in notes if note)
+
+
+def extract_text(body: bytes, content_type: str = "", url: str = "", cut: str = "") -> PageText:
+    """Read a page's text. Never raises: a page that can't be read gives no text and says why.
+    `cut` says why the link check stopped reading the body early, if it did (CUT_NOTES)."""
     kind = kind_of(body, content_type, url)
+    cut_note = CUT_NOTES.get(cut, "")
     note = ""
+    if kind in (HTML, TEXT) and b"\0" in body[:4096]:
+        # A binary file served as a web page or text, an image say: its bytes are no text.
+        return PageText("", "", _join("not read (binary content)", cut_note))
     try:
         if kind == HTML:
             text = html_text(body, content_type)
             if len(text) < LITTLE_TEXT_CHARS:
-                note = "little text: the page may be built by JavaScript"
+                note = LITTLE_TEXT_NOTE
         elif kind == PDF:
             text, note = pdf_text(body)
         elif kind == SPREADSHEET:
             text, note = spreadsheet_text(body)
         elif kind == DOCX:
-            text = docx_text(body)
+            text, note = docx_text(body)
         elif kind == TEXT:
             text = _tidy(decode(body, content_type))
         else:
             shown = (content_type or "").split(";")[0].strip() or _suffix(url) or "unknown type"
-            return PageText("", "", f"not read ({shown})")
+            return PageText("", "", _join(f"not read ({shown})", cut_note))
     except _TooLarge as exc:
-        return PageText("", kind, str(exc))
+        return PageText("", kind, _join(str(exc), cut_note))
     except Exception as exc:  # noqa: BLE001 - an unreadable file is recorded, never fatal
-        return PageText("", kind, f"could not be read ({type(exc).__name__})")
+        return PageText("", kind, _join(f"could not be read ({type(exc).__name__})", cut_note))
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS]
-        note = "; ".join(part for part in (note, f"cut at {MAX_TEXT_CHARS:,} characters") if part)
-    if truncated:
-        note = "; ".join(part for part in (note, f"only its first {MAX_PAGE_BYTES // (1024 * 1024)} MB read") if part)
+        note = _join(note, f"cut at {MAX_TEXT_CHARS:,} characters")
+    note = _join(note, cut_note)
     if not text and not note:
         note = "no text found"
     return PageText(text, kind, note)
