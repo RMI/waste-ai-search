@@ -17,7 +17,7 @@ import io
 import json
 from collections import Counter, defaultdict
 from contextlib import redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -33,6 +33,7 @@ SEED = "seed.csv"
 RUN_LOG = "foundry_run_log.csv"
 RESOLVED = "resolved.csv"
 REVIEW_QUEUE = "review_queue.csv"
+PARSE_WARNINGS = "parse_warnings.csv"
 MANIFEST = f"{SNAPSHOT_DIR_NAME}/{MANIFEST_NAME}"
 REVIEW_SHEET = "Review_Queue"
 
@@ -47,6 +48,10 @@ SOURCE_GROUPS = [MAP_ONLY, OTHER_SOURCES]
 # batch 1 queued only for a failed identity check and later runs never queue.
 CONFIRMED = "Confirmed baseline"
 NEW_VALUE_RESOLUTIONS = {"Filled empty baseline", "Overrides baseline"}
+# A site whose found coordinates, or a dropped map page's, lie beyond the 5 km identity gate. The
+# gate notes each of the site's values, and every run also lists the site in parse_warnings.csv.
+# Since nothing is accepted automatically a confirmation is never queued, so a site whose values
+# only confirmed ours carries the note on no row: the warning is what still flags it.
 IDENTITY_NOTE = "Identity not confirmed"
 NAME_ATTRIBUTE = "found_facility_name"
 # Run-log statuses for a site the agent actually answered; "Failed" and a failed search tool did not.
@@ -109,6 +114,8 @@ class RunFiles:
     manifest: Optional[dict[str, Any]]
     # Review_Queue rows from the reviewed workbook; None when there is no workbook to read.
     sme: Optional[list[dict[str, str]]] = None
+    # parse_warnings.csv, which a run may lack: it is read only for the identity gate's warning.
+    warnings: list[dict[str, str]] = field(default_factory=list)
 
 
 def load_run(run_id: str, read: Reader) -> RunFiles:
@@ -127,6 +134,7 @@ def load_run(run_id: str, read: Reader) -> RunFiles:
         resolved=csv_rows(data[RESOLVED]),
         review=csv_rows(data[REVIEW_QUEUE]),
         manifest=json.loads(manifest) if manifest is not None else None,
+        warnings=csv_rows(read(PARSE_WARNINGS)),
     )
 
 
@@ -192,6 +200,10 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
         _site_id(row)
         for row in [*run.resolved, *run.review]
         if IDENTITY_NOTE in normalize_scalar(row.get("researcher_notes"))
+    } | {
+        _site_id(row)
+        for row in run.warnings
+        if normalize_scalar(row.get("warning")).startswith(IDENTITY_NOTE)
     }
     decisions: dict[str, Counter] = defaultdict(Counter)
     for row in run.sme or []:
