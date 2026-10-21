@@ -9,3 +9,9 @@ data/geocode_cache.jsonl
 
 .DS_Store
 
+
+# Terraform (infra/): the state is remote; plans and provider downloads stay local.
+infra/.terraform/
+infra/*.tfplan
+infra/*.tfstate
+infra/*.tfstate.*
