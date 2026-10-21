@@ -8,6 +8,11 @@ output "model_deployment" {
   value       = azapi_resource.model.name
 }
 
+output "comparison_model_deployment" {
+  description = "The second model's deployment, for a second agent to compare with."
+  value       = one(azapi_resource.comparison_model[*].name)
+}
+
 output "account_endpoint" {
   description = "The Foundry account's endpoint."
   value       = azapi_resource.foundry.output.properties.endpoint

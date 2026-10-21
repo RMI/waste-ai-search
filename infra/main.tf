@@ -60,6 +60,32 @@ resource "azapi_resource" "model" {
   }
 }
 
+# A second model on the same account, to compare with the first on the same sites before choosing
+# one for the batches. Costs nothing unless an agent runs on it.
+resource "azapi_resource" "comparison_model" {
+  count     = var.comparison_model_name == "" ? 0 : 1
+  type      = "Microsoft.CognitiveServices/accounts/deployments@2025-06-01"
+  name      = var.comparison_model_name
+  parent_id = azapi_resource.foundry.id
+
+  body = {
+    sku = {
+      name     = "GlobalStandard"
+      capacity = var.comparison_model_capacity
+    }
+    properties = {
+      model = {
+        format  = "OpenAI"
+        name    = var.comparison_model_name
+        version = var.comparison_model_version
+      }
+      versionUpgradeOption = "NoAutoUpgrade"
+    }
+  }
+
+  depends_on = [azapi_resource.model]
+}
+
 resource "azapi_resource" "project" {
   type      = "Microsoft.CognitiveServices/accounts/projects@2025-06-01"
   name      = var.project_name
@@ -79,5 +105,5 @@ resource "azapi_resource" "project" {
   }
 
   # One change to an account at a time: Azure refuses a second while the first is in progress.
-  depends_on = [azapi_resource.model]
+  depends_on = [azapi_resource.model, azapi_resource.comparison_model]
 }

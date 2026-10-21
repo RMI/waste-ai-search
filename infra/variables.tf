@@ -52,6 +52,24 @@ variable "model_capacity" {
   default     = 2000
 }
 
+variable "comparison_model_name" {
+  description = "A second model, to compare with model_name on the same sites. Blank for none."
+  type        = string
+  default     = "gpt-5.4"
+}
+
+variable "comparison_model_version" {
+  description = "Pinned like model_version. Retires 2027-09-02."
+  type        = string
+  default     = "2026-03-05"
+}
+
+variable "comparison_model_capacity" {
+  description = "Its rate limit, in thousands of tokens a minute; also billed per token, not by this."
+  type        = number
+  default     = 1000
+}
+
 variable "tags" {
   description = "Tags on everything this creates."
   type        = map(string)

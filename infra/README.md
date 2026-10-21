@@ -8,6 +8,7 @@ Terraform. State is in the same account as RMI/terraform's wastemap module, unde
 |---|---|
 | `wastemap-ai-search` | The Foundry (AI Services) account, in East US, Entra ID sign-in only (no keys) |
 | `gpt-5.4-mini` | The model deployment, version 2026-03-17 pinned, GlobalStandard, 2,000K tokens a minute |
+| `gpt-5.4` | A second deployment (version 2026-03-05, 1,000K tokens a minute), to compare with the first on the same sites before choosing one for the batches. Set `comparison_model_name = ""` to drop it |
 | `waste-ai-search` | The Foundry project the agent lives in |
 
 All three go in **RMI-WASTEMAP-PIPELINE-RG**, beside the pipeline's translator. Our roles can create
