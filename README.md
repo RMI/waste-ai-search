@@ -21,8 +21,9 @@ PYTHONPATH=tests/stubs:src uv --cache-dir .uv-cache run pytest -q
 
 ## Configure Azure Foundry
 
-For live Foundry mode, create an Azure AI Foundry Agent with web search enabled,
-then copy `.env.example` to `.env` or export the same variables:
+For live Foundry mode, the Foundry account, project and model are created by Terraform, and the
+agent by a script: see [infra/README.md](infra/README.md). Then copy `.env.example` to `.env`, or
+export the same variables:
 
 ```bash
 cp .env.example .env
