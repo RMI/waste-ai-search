@@ -187,6 +187,27 @@ def test_coordinates_equal_to_our_own_point_are_a_location():
     assert locate_source(source("48.8438, -87.4296"), SITE).basis == COORDINATES
 
 
+@pytest.mark.parametrize("stated, copied", [
+    (("48.843368376131856", "-87.42962607259884"), True),  # Thunder Bay's, to every digit
+    (("48.84336849", "-87.4296291"), True),                 # with fewer digits, as Sudbury's was
+    (("48.8438", "-87.4296"), False),                       # 50 m away
+])
+def test_in_a_response_from_before_the_rounding_our_own_point_is_the_prompts(stated, copied):
+    """Batch 1's prompts carried our full point, and the agent copied it six times, each within a
+    few metres, and credited it to Ontario's registry. An attribute-first response came from such
+    a prompt, so there a point within 10 m of ours is copied. A source-first one, above, is not."""
+    from waste_ai_search.payload import read_payload
+
+    registry = {"url": "https://files.ontario.ca/opendata/large_landfills.csv", "source_type": "Permit or registry"}
+    old = read_payload({"attributes": [
+        {"attribute_name": "found_latitude", "value": stated[0], "value_basis": "Direct", "confidence_score": "High", "sources": [registry]},
+        {"attribute_name": "found_longitude", "value": stated[1], "value_basis": "Direct", "confidence_score": "High", "sources": [registry]},
+    ]})
+    [converted] = old["sources"]
+    located = locate_source(converted, SITE)
+    assert (located.basis, located.reason) == ((NONE, "copied from the prompt") if copied else (COORDINATES, ""))
+
+
 def test_wastebooks_coordinates_are_never_a_location():
     located = locate_source(source("52.1234, -1.2345", url="https://www.wastebook.co.uk/site/123"), SITE)
     assert (located.basis, located.reason) == (NONE, "wastebook.co.uk's coordinates are postcode centroids")

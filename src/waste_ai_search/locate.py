@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+from .payload import is_converted
 from .schema import normalize_scalar
 
 
@@ -72,6 +73,11 @@ MIN_DECIMALS = 3
 # copied. One equal to our own point is not: the prompt no longer carries it, so a source stating
 # it agrees with us, as the regulator our seed came from does.
 PROMPT_DECIMALS = 2
+# A response from before the rounding, attribute-first (payload.py converts it), came from a prompt
+# carrying our full point, so there a point this close to ours is the prompt's. Batch 1's six
+# copies were each within a few metres, some written with fewer digits. Left in, one search's copy
+# filed every search's citation of Ontario's registry entry for Thunder Bay under the copier's site.
+COPIED_WITHIN_METRES = 10.0
 # Coordinates win over an address in the same source, but an address this far from them makes
 # the pair doubtful. A landfill's address marks its gate, which can be well away from its middle.
 DOUBTFUL_ADDRESS_KM = 2.0
@@ -956,11 +962,17 @@ def _host_is(url: Any, sites: tuple[str, ...]) -> bool:
     return any(host == site or host.endswith("." + site) for site in sites)
 
 
-def _copied(located: Located, site: dict[str, Any]) -> bool:
-    """Whether stated coordinates are the prompt's rounded point."""
+def _copied(located: Located, site: dict[str, Any], source: dict[str, Any]) -> bool:
+    """Whether stated coordinates are the prompt's: its rounded point, or for a response from before
+    the rounding, our own point to within COPIED_WITHIN_METRES."""
     point = located.point
+    if point is None:
+        return False
     rounded = prompt_point(site)
-    return point is not None and rounded is not None and all(abs(a - b) < 1e-9 for a, b in zip(point, rounded))
+    if rounded is not None and all(abs(a - b) < 1e-9 for a, b in zip(point, rounded)):
+        return True
+    ours = seed_point(site)
+    return is_converted(source) and ours is not None and haversine_km(*ours, *point) * 1000 <= COPIED_WITHIN_METRES
 
 
 # Text the agent labelled a street address that is really a facility's name: no civic number, and
@@ -1061,7 +1073,7 @@ def locate_source(
     if point is not None and point.point is not None:
         if point.basis in {COORDINATES, GRID_REFERENCE, HINT} and _host_is(source.get("url"), POSTCODE_CENTROID_SITES):
             point = Located(reason="wastebook.co.uk's coordinates are postcode centroids")
-        elif point.basis in {COORDINATES, HINT} and _copied(point, site):
+        elif point.basis in {COORDINATES, HINT} and _copied(point, site, source):
             point = Located(reason="copied from the prompt")
     located_address = address is not None and address.basis in MATCHING_BASES
     if point is not None and point.point is not None:

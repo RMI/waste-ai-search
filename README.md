@@ -212,8 +212,10 @@ Three guards throw a location out, with the reason in `evidence.csv`:
   whose prompts carried our full point, the agent credited our exact OSM centroid to an Ontario
   registry six times. The prompt no longer carries that point, so a source stating it exactly is
   not a copy but a source that agrees with us, such as the regulator our seed came from, and it is
-  matched and confirms our location. (Until build step 5, a point within 10 m of ours counted as
-  copied too.)
+  matched and confirms our location. A response cached before build step 4, attribute-first, came
+  from a prompt with our full point, so there a point within 10 m of ours is still copied: batch 1's
+  six copies were each within a few metres. Left in, one search's copy of Thunder Bay's registry
+  entry filed every other search's citation of it under the copier's site.
 - **wastebook.co.uk.** Its coordinates are postcode centroids.
 - **A doubtful pair.** Where a source gives coordinates and an address, the coordinates win; if the
   address lands more than 2 km from them, neither is used. Coarse coordinates (a hint) give way to
@@ -363,15 +365,17 @@ that cited it: `match_located`, `match_named_among_several`, `match_tie`, `match
 `match_new_facility`, `match_moved_by_name`, `match_no_location` and `match_outside_run`, beside
 `new_facility_candidates` and `possible_duplicates`.
 
-**On the batch-1 replay**, a plumbing check since batch 1's sources rarely give a location, 91
-located sources matched one site, 2 tied, 8 matched none, 76 moved by name, and 4,656 citations had
-no location. The queue has 6,432 rows (6,562 before), never two for one site, attribute and year.
-86 of them are filed under a site other than the one searched, at 26 sites: Thunder Bay's 15 rows,
-moved by name from searches of nearby "domestic landfill" sites, Otter Lake, Fredericton, Prairie
-Green, Moose Jaw and Benaraby among them. 11 rows go to two Ontario "domestic landfill" sites
-located at 0.0 km, because batch 1's prompts carried our full point and the agent copied it; new
-runs' prompts don't. 41 pairs are possible duplicates, Cowpen Bewley's and Foxhall's E-PRTR records
-among them.
+**On the batch-1 replay**, a plumbing check since batch 1's sources rarely give a location, 85
+located sources matched one site, 2 tied, 8 matched none, 90 moved by name, and 4,651 citations had
+no location. The queue has 6,416 rows (6,562 before), never two for one site, attribute and year.
+80 of them are filed under a site other than the one searched, at 25 sites: Thunder Bay's 15 rows,
+moved by name from searches of nearby "domestic landfill" sites, Fredericton, Otter Lake, Sault
+Ste. Marie, North Bay (the SME's Merrick example), Prairie Green, Moose Jaw and Benaraby among
+them. The six points batch 1's agent copied from our own count as no location. Rule 6 leaves some
+known cases with the site searched, flagged: Prairie Green's pages at two sites 283 and 311 km from
+it, West Perth's page at 14 "domestic landfill" sites, and Brandon's Eastview pages at 12 Manitoba
+sites and at Guelph's Eastview; `corrected_site_id` offers the sites whose searches cited each
+page. 41 pairs are possible duplicates, Cowpen Bewley's and Foxhall's E-PRTR records among them.
 
 ## Storage and sharing
 
