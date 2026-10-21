@@ -83,6 +83,11 @@ def date_key(value: Any) -> tuple[int, int, int]:
     return tuple(int(part) if part else 0 for part in match.groups())
 
 
+def source_key(item: dict[str, Any], index: int) -> str:
+    """Which source a piece of evidence came from: its exact URL's `source_id`, else itself."""
+    return normalize_scalar(item.get("source_id")) or f"#{index}"
+
+
 def source_counts(evidence: list[dict[str, Any]], attribute_name: str) -> Counter:
     """How many distinct sources give each value.
 
@@ -91,7 +96,7 @@ def source_counts(evidence: list[dict[str, Any]], attribute_name: str) -> Counte
     counts once per item.
     """
     cited = {
-        (comparable(item.get("value"), attribute_name), normalize_scalar(item.get("source_id")) or f"#{index}")
+        (comparable(item.get("value"), attribute_name), source_key(item, index))
         for index, item in enumerate(evidence)
     }
     return Counter(value for value, _source in cited)
@@ -201,10 +206,11 @@ def resolve(
 
     if not candidates:
         # Non-empty baseline and nothing above the floor: a weaker contradiction, so it goes to
-        # the leads sheet rather than consuming review time.
+        # the leads sheet rather than consuming review time. Sources are counted, not citations.
+        found = len({source_key(item, index) for index, item in enumerate(evidence)})
         row["resolution"] = "Conflict - lower credibility"
         row["resolution_rule"] = (
-            f"{len(evidence)} source(s) found, best {tier_label(min(tiers))}, against a "
+            f"{found} source(s) found, best {tier_label(min(tiers))}, against a "
             f"{tier_label(base_tier)} baseline; routed to leads."
         )
         row["validation_status"] = "Routed to leads"

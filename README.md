@@ -570,7 +570,8 @@ baseline is filled at any tier — a sourced value beats no value — but only T
 auto-validate. Once a baseline value exists, only Tier 1-2 may override it.
 
 Corroboration counts sources, not citations. A page cited twice for one attribute counts once in
-`agreeing_source_count`, and once when the most-corroborated value breaks a tie.
+`agreeing_source_count`, once when the most-corroborated value breaks a tie, and once in the
+"N source(s) found" a weaker finding carries to Leads.
 
 **Two map sites are dropped.** Citations of `mapcarta.com` and `maptons.com`, any subdomain
 included (`ca.maptons.com`), are dropped before arbitration. Mapcarta's landfill pages copy

@@ -166,3 +166,17 @@ def test_a_page_cited_twice_does_not_outvote_two_pages():
     row = resolve(site(), "facility_status", by_attribute["facility_status"])
     assert row["resolved_value"] == "Inactive"
     assert (row["agreeing_source_count"], row["dissenting_source_count"]) == (2, 1)
+
+
+def test_the_leads_route_counts_sources_not_citations():
+    """Its rule reaches the Leads sheet as the lead's summary, so it counts as agreeing_source_count does."""
+    wiki = {"source_title": "Landfill", "publisher": "Wikipedia", "source_type": "Wiki",
+            "publication_date": "2023-01-01", "url": "https://en.wikipedia.org/wiki/Landfill"}
+    with_operator = dict(site(), operator="Old Operator Ltd")
+    by_attribute, _evidence, _sources, _warnings = extract_evidence(
+        with_operator, {"site_id": "1", "attributes": [attribute("operator", "New Operator Ltd", wiki, wiki)]},
+        "r", "v", date(2026, 1, 1),
+    )
+    row = resolve(with_operator, "operator", by_attribute["operator"])
+    assert row["resolution"] == "Conflict - lower credibility"
+    assert row["resolution_rule"].startswith("1 source(s) found")
