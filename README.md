@@ -321,7 +321,9 @@ place: "3610 Victoria Avenue East" alone is not, since another town may have one
 test runs, it gave a point to 5 more of gpt-5.4's 42 sources stating a location (11 to 16), and 12
 more of mini's 39 (6 to 18). Both answers are kept, so a re-run asks neither again. Most of these
 points are on the street, not the building: where a geocoder has no house numbers for a road, it
-returns a point somewhere along it, which can be a kilometre or more from the address.
+returns a point somewhere along it, which can be a kilometre or more from the address. So such a
+point places a source only within 2 km of a site of ours (see
+[Matching each source to a site](#matching-each-source-to-a-site)).
 
 ### Geocoder
 
@@ -377,7 +379,11 @@ how entity linkage's `precise_v1` measures it (RMI/waste_data_ingestion_pipeline
 
 **A location** is one the locate step read as coordinates, a grid reference, or an address placed
 on its building or its street. A hint, a location copied from the prompt and a doubtful one count
-as none.
+as none. So does an address placed only on its street more than 2 km from every site of ours: a
+geocoder with no house numbers for a road returns a point anywhere along it, so that far out it
+can't tell a new facility from one of ours. The source stays with the site searched, and `match`
+says how far its street put it. Brandon's Eastview licence gives "3610 Victoria Avenue East";
+Nominatim put that 2.4 km from the site, and it would otherwise have been listed as a new facility.
 
 | The source has | Rule | Filed under |
 |---|---|---|
