@@ -302,6 +302,7 @@ def extract_evidence(
         tier, rule = assign_source_tier(source, LOCATION_ATTRIBUTE)
         value = place.value() if place.basis in VALUE_BASES else ""
         published = normalize_scalar(source.get("publication_date"))
+        summary = f"Read as {place.basis} from the location the source states: {normalize_scalar(source.get('stated_location'))}"
         order += 1
         if url and not dead_link and value:
             by_attribute.setdefault(LOCATION_ATTRIBUTE, []).append(
@@ -318,7 +319,7 @@ def extract_evidence(
                     # A location has no date of its own; the newest source wins a tie of tiers.
                     "value_date": published,
                     "confidence": "",
-                    "evidence_summary": "",
+                    "evidence_summary": summary,
                 }
             )
         exclusion = ""
@@ -356,7 +357,7 @@ def extract_evidence(
                 "source_tier": tier_label(tier),
                 "agent_proposed_tier": normalize_scalar(source.get("source_tier")),
                 "tier_rule_applied": rule,
-                "evidence_summary": "",
+                "evidence_summary": summary,
                 "quoted_evidence_short": "",
                 "search_terms_used": "",
                 "promotion_eligible": "TRUE" if not exclusion else "FALSE",

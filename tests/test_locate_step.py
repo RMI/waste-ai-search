@@ -177,3 +177,17 @@ def test_search_and_run_take_the_flags():
     args = cli.build_parser().parse_args(["run"])
     config = cli.make_config(args)
     assert (config.locate, config.geocoder) == (True, "")
+
+
+def test_a_geocoder_configured_wrongly_stops_the_search_before_anything_is_paid_for(tmp_path, monkeypatch):
+    import pytest
+
+    called = []
+    monkeypatch.setattr(search, "get_client", lambda _config: called.append(1) or Client(response(ADDRESS)))
+    monkeypatch.setenv("AZURE_MAPS_SUBSCRIPTION_KEY", "")
+    monkeypatch.setenv("AZURE_MAPS_CLIENT_ID", "")
+    config = PipelineConfig(input_csv=seed(tmp_path), run_dir=tmp_path / "run", run_id="run",
+                            site_delay_seconds=0, geocoder="azure-maps")
+    with pytest.raises(ValueError, match="AZURE_MAPS_SUBSCRIPTION_KEY"):
+        search.run_search(config)
+    assert called == []

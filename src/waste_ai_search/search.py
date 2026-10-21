@@ -183,7 +183,13 @@ class _CountingGeocoder:
         return self.geocoder.geocode(address, iso2)
 
 
-def locate_run(config: PipelineConfig, sites: list[dict[str, Any]] | None = None) -> list[Located]:
+# locate_run's default: the geocoder the run's configuration names.
+_CONFIGURED = object()
+
+
+def locate_run(
+    config: PipelineConfig, sites: list[dict[str, Any]] | None = None, geocoder: Any = _CONFIGURED
+) -> list[Located]:
     """Locate where every source in a run's cached responses says its facility is.
 
     Coordinates and grid references are parsed; an address goes to the configured geocoder, unless
@@ -194,8 +200,9 @@ def locate_run(config: PipelineConfig, sites: list[dict[str, Any]] | None = None
     if sites is None:
         sites, _headers = resolve_sites(config, allow_database=False)
     sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
-    configured = make_geocoder(config.geocoder)
-    geocoder = _CountingGeocoder(configured) if configured is not None else None
+    if geocoder is _CONFIGURED:
+        geocoder = make_geocoder(config.geocoder)
+    geocoder = _CountingGeocoder(geocoder) if geocoder is not None else None
     path = config.run_dir / SOURCE_LOCATIONS_FILE
     cache = load_locations(path)
     by_site: dict[str, list[Path]] = {}
@@ -289,6 +296,9 @@ def run_search(
         print(f"Geocode cache: {hits}/{len(selected)} sites enriched with admin context")
 
     raw_dir(config.run_dir).mkdir(parents=True, exist_ok=True)
+    # Built before any search is paid for, so a geocoder configured wrongly stops the run here,
+    # not after it.
+    geocoder = make_geocoder(config.geocoder) if config.locate else None
     agent = agent_identity(get_client(config))
 
     coordinate_only_sites = sum(1 for site in selected if coordinates_only(site))
@@ -364,7 +374,7 @@ def run_search(
     # Then where each source says its facility is. Like the link check, the cache means a resumed
     # search or the follow-up pass only looks up what is new.
     if config.locate:
-        locate_run(config, sites)
+        locate_run(config, sites, geocoder)
     if failures:
         ids = " ".join(row["site_id"] for row in failures)
         print(f"\n!! {len(failures)} site(s) still failing after retries. Try again later:")
