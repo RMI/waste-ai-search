@@ -177,11 +177,13 @@ def test_coordinates_equal_to_the_prompts_count_as_copied():
     assert (located.basis, located.reason) == (NONE, "copied from the prompt")
 
 
-def test_coordinates_within_10_m_of_ours_count_as_copied():
-    # Batch 1: Ontario's registry credited with our own OSM centroid, to every digit.
-    copied = locate_source(source("48.843368376131856, -87.42962607259884"), SITE)
-    assert (copied.basis, copied.reason) == (NONE, "copied from the prompt")
-    # About 50 m away is a real location.
+def test_coordinates_equal_to_our_own_point_are_a_location():
+    """Reversed on purpose for build step 5. Batch 1's prompts carried our full point, and the agent
+    copied it to every digit and credited it to Ontario's registry, so a point within 10 m of ours
+    counted as copied. The prompt now carries only the rounded point, so a source stating our exact
+    point agrees with us - the regulator our seed came from, say - and is matched and confirmed."""
+    located = locate_source(source("48.843368376131856, -87.42962607259884"), SITE)
+    assert (located.basis, located.reason) == (COORDINATES, "")
     assert locate_source(source("48.8438, -87.4296"), SITE).basis == COORDINATES
 
 
@@ -295,7 +297,7 @@ def test_a_located_address_beats_coarse_coordinates():
 
 def test_copied_coordinates_leave_the_address():
     geocoder = FakeGeocoder({"Gate Road": GeocodeMatch(48.4500, -89.3700, ROOFTOP, "")})
-    stated = source("48.843368376131856, -87.42962607259884 | Gate Road", "coordinates | street address")
+    stated = source("48.84, -87.43 | Gate Road", "coordinates | street address")  # the prompt's point
     assert locate_source(stated, SITE, {}, geocoder, live=True).basis == ROOFTOP
 
 
@@ -661,3 +663,38 @@ def test_a_name_is_taken_off_only_where_it_ends_at_a_separator():
     assert address_to_send("Hartland Avenue 1, Victoria", ["Hart"]) == "Hartland Avenue 1, Victoria"
     assert address_to_send("Eastview Road 18499, Guelph", ["Eastview"]) == "Eastview Road 18499, Guelph"
     assert address_to_send("Brady Road Landfill 1777 Brady Road", ["Brady Road Landfill"]) == "1777 Brady Road"
+
+
+# --- a facility's name written as an address (build step 5) --------------------------------------
+@pytest.mark.parametrize(
+    "stated",
+    [
+        "Mapleward Road Landfill",
+        "Highway 16 Transfer Station",
+        "Croydon Rubbish Tip",
+        "Main Street Recycling Centre",
+        "Lot 5, Concession 3, Smith Waste Disposal Site",
+        "Old Mill Road Dump.",
+    ],
+)
+def test_an_address_with_no_civic_number_ending_in_a_facility_word_is_a_name(stated):
+    """Agreed for step 5: a geocoder would find such text by name in OpenStreetMap, or place it on
+    the road it names, so it is never sent."""
+    geocoder = FakeGeocoder()
+    located = locate_source(source(stated, "street address"), SITE, {}, geocoder, live=True)
+    assert (located.reason, geocoder.calls) == ("the stated location is the facility's name, which is never geocoded", [])
+
+
+@pytest.mark.parametrize(
+    "stated",
+    [
+        "5405 Mapleward Road Landfill",          # a civic number: an address after all
+        "Unit 3, 12 Tip Lane",                   # a facility word that is not at the end
+        "1777 Brady Road, Winnipeg MB",
+        "Mapleward Road, Thunder Bay",
+    ],
+)
+def test_an_address_with_a_civic_number_or_no_facility_word_at_its_end_is_sent(stated):
+    geocoder = FakeGeocoder()
+    locate_source(source(stated, "street address"), SITE, {}, geocoder, live=True)
+    assert len(geocoder.calls) == 1

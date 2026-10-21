@@ -310,10 +310,15 @@ def test_a_location_equal_to_ours_at_comparison_precision_confirms_it():
     assert (location["resolution"], location["validation_status"]) == ("Confirmed baseline", NOTHING_TO_REVIEW)
 
 
-def test_a_location_copied_from_ours_is_no_location():
+def test_a_location_equal_to_ours_is_a_location_and_confirms_it():
+    """Reversed on purpose for build step 5: a point within 10 m of ours no longer counts as copied,
+    since the prompt carries only our rounded point. One equal to the prompt's still does."""
     s = site(latitude="6.5123456", longitude="3.3123456")
     by_attr, rows, _sources, _warn = extract(s, located_by("6.5123456, 3.3123456"))
-    assert "found_location" not in by_attr
+    assert rows[0]["location_basis"] == "coordinates"
+    location = resolve(s, "found_location", by_attr["found_location"])
+    assert location["resolution"] == "Confirmed baseline"
+    _by, rows, _sources, _warn = extract(s, located_by("6.510, 3.310"))
     assert (rows[0]["location_basis"], rows[0]["exclusion_reason"]) == ("none", "No location: copied from the prompt.")
 
 
