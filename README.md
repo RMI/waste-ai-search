@@ -552,6 +552,12 @@ site closed, the likeliest misreading, the row's `evidence_summary` says so.
 Facilities with any other source, or any corroborating attribute, are never offered the value, so
 the other 10,928 prompts carry the ordinary values and none of this guidance.
 
+**Rule 4 narrows this a lot.** It skips OSM polygons with no name (`OpenStreetMap Landfill`, all of
+them OSM-only), many of the sites this check was aimed at, along with any OSM or GPW site whose name
+is only a generic label. So the verdict can now come only from named OSM and GPW sites, and the
+8,564 and 10,928 above predate the rule. Whether the skipped sites are landfills is left to the
+Climate TRACE review.
+
 ### Transfer stations and recycling centres
 
 `facility_type` also offers **`Transfer Station`** and **`Recycling Center`**, both pending upstream
