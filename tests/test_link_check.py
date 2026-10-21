@@ -240,10 +240,19 @@ def test_the_search_phase_checks_links_and_can_be_told_not_to(tmp_path, monkeypa
 
     monkeypatch.setattr(pl, "get_client", lambda config: _Client())
     checked = []
-    monkeypatch.setattr(pl, "check_urls", lambda urls, cache_path: checked.append(list(urls)) or {})
+    monkeypatch.setattr(
+        pl, "check_urls",
+        lambda urls, cache_path, text_dir=None: checked.append((list(urls), text_dir and text_dir.name)) or {},
+    )
 
     pl.run_search(pl.PipelineConfig(input_csv=seed, run_dir=tmp_path / "run", run_id="a", site_delay_seconds=0))
-    assert checked == [["https://x.org/a"]]
+    # The pages that load have their text kept, in page_text/, unless told not to.
+    assert checked == [(["https://x.org/a"], "page_text")]
+
+    checked.clear()
+    pl.run_search(pl.PipelineConfig(input_csv=seed, run_dir=tmp_path / "run3", run_id="c",
+                                    site_delay_seconds=0, keep_page_text=False))
+    assert checked == [(["https://x.org/a"], None)]
 
     checked.clear()
     pl.run_search(pl.PipelineConfig(input_csv=seed, run_dir=tmp_path / "run2", run_id="b",

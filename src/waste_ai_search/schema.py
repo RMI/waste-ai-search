@@ -540,6 +540,9 @@ EVIDENCE_HEADERS = [
     # site_id is the site a source is filed under (match.py), blank for a likely new facility, and
     # searched_site_id the site whose search found it; match says which rule filed it there.
     "searched_site_id", "match",
+    # Whether the source's quote, and the location it states, are on its page, as the link check
+    # kept its text (on_page.py): found, partly found, not found, or no page text.
+    "quote_on_page", "location_on_page",
 ]
 
 # resolved.csv is written with this header and no rows. Nothing is accepted automatically, so every

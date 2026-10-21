@@ -61,6 +61,7 @@ from .match import (
     match_sources,
     run_selection,
 )
+from .on_page import NOT_FOUND, PARTLY, PageChecker, describe_results
 from .payload import (
     citation_ids,
     citations,
@@ -553,8 +554,32 @@ def closure_reported(resolved: list[dict[str, Any]]) -> dict[str, list[str]]:
     return closure
 
 
+# What the queue says of a winning source whose quote or stated location isn't on its page.
+QUOTE_CHECKS = {
+    NOT_FOUND: "its quote is not on the source's page",
+    PARTLY: "its quote is only partly on the source's page",
+}
+LOCATION_CHECKS = {
+    NOT_FOUND: "the location the source states is not on its page",
+    PARTLY: "the location the source states is only partly on its page",
+}
+
+
+def page_checks(row: dict[str, Any]) -> list[str]:
+    """What the queue flags of a row's winning source, from the text the link check kept of its page.
+
+    The location is flagged where it counted: on a found_location row, and wherever the source was
+    filed by it."""
+    checks = [QUOTE_CHECKS[row["_quote_on_page"]]] if row.get("_quote_on_page") in QUOTE_CHECKS else []
+    location_counted = row["attribute_name"] == LOCATION_ATTRIBUTE or row.get("_located_by") in MATCHING_BASES
+    if location_counted and row.get("_location_on_page") in LOCATION_CHECKS:
+        checks.append(LOCATION_CHECKS[row["_location_on_page"]])
+    return checks
+
+
 def review_summary(row: dict[str, Any], closure: dict[str, list[str]]) -> str:
-    """The evidence_summary a review row shows: the rule applied, plus the closure check."""
+    """The evidence_summary a review row shows: the rule applied, plus the closure check and what
+    the source's own page doesn't bear out."""
     summary = row.get("resolution_rule", "")
     reported = closure.get(row["site_id"], [])
     if row["attribute_name"] == "facility_type" and row.get("resolved_value") == NOT_A_WASTE_FACILITY and reported:
@@ -562,6 +587,8 @@ def review_summary(row: dict[str, Any], closure: dict[str, list[str]]) -> str:
             f" CHECK: this run also found {'; '.join(reported)} - is this a closed landfill "
             "misread as never a waste site?"
         )
+    for check in page_checks(row):
+        summary += f" CHECK: {check}."
     return summary
 
 
@@ -783,6 +810,10 @@ def describe_winner(row: dict[str, Any], evidence_by_id: dict[str, dict[str, Any
     row["facility_name_in_source"] = winner.get("facility_name_in_source", "")
     row["stated_location"] = winner.get("stated_location", "")
     row["location_basis"] = winner.get("location_basis", "") if row["attribute_name"] == LOCATION_ATTRIBUTE else ""
+    # Whether its quote, and the location it states, are on its page, for the queue's CHECK notes.
+    row["_quote_on_page"] = winner.get("quote_on_page", "")
+    row["_location_on_page"] = winner.get("location_on_page", "")
+    row["_located_by"] = winner.get("location_basis", "")
     # The sites an SME might re-file it under, offered where there is more than one.
     row["_site_choices"] = filing.choices if len(filing.choices) > 1 else []
 
@@ -899,6 +930,11 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     # Read only: the search phase did the fetching and the geocoding, so arbitration stays offline.
     link_results = load_results(config.run_dir / LINK_CHECK_FILE)
     locations = load_locations(config.run_dir / SOURCE_LOCATIONS_FILE)
+    # The text the link check kept of each page that loaded: each quote and stated location is
+    # checked against it, and one that isn't there is flagged for the SME (on_page.py).
+    pages = PageChecker(
+        config.run_dir, {result.text_file: result.text_note for result in link_results.values() if result.text_file}
+    )
 
     # A site may have several cached responses - one per pass - and all of them count as evidence.
     by_site: dict[str, list[Path]] = {}
@@ -986,6 +1022,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                 }
             )
 
+        for row in site_evidence:
+            pages.check(row)
         found[site_id] = (by_attribute, site_evidence)
 
     # Each source is filed under the site of ours it is about (match.py), and only the sites this
@@ -1191,6 +1229,10 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "not_a_waste_facility", "value": not_a_waste_facility},
             *match_settings(matching),
             {"setting": "datasets_found", "value": len(datasets)},
+            # Counted by file: two spellings of one URL share one.
+            {"setting": "page_text_kept", "value": len({result.text_file for result in link_results.values() if result.text_file})},
+            {"setting": "quotes_on_page", "value": describe_results([row.get("quote_on_page", "") for row in evidence_rows])},
+            {"setting": "locations_on_page", "value": describe_results(stated_on_page(evidence_rows))},
         ],
         review_queue=review_queue,
         leads=leads,
@@ -1213,6 +1255,16 @@ MATCH_SETTINGS = [
     ("match_no_location", NO_LOCATION),
     ("match_outside_run", OUTSIDE_RUN),
 ]
+
+
+def stated_on_page(evidence_rows: list[dict[str, Any]]) -> list[str]:
+    """Whether each source's stated location is on its page, once per source as each search cited
+    it: every row of a source carries the same location."""
+    seen: dict[tuple[str, Any], str] = {}
+    for row in evidence_rows:
+        if row.get("location_on_page"):
+            seen.setdefault((row.get("searched_site_id") or row.get("site_id"), row.get("source_index")), row["location_on_page"])
+    return list(seen.values())
 
 
 def match_settings(matching: Matching) -> list[dict[str, Any]]:

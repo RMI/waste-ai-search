@@ -19,6 +19,7 @@ from .credibility import dropped_source_site
 from .geocoder import enrich_sites_from_cache
 from .input_loader import resolve_sites, run_seed_path, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, check_urls
+from .page_text import PAGE_TEXT_DIR
 from .locate import (
     MATCHING_BASES,
     SOURCE_LOCATIONS_FILE,
@@ -154,14 +155,17 @@ def add_searches(total: int | None, client: Any) -> int | None:
 
 
 # --- phase 1: search --------------------------------------------------------------------------
-def check_run_links(run_dir: Path) -> dict:
-    """Fetch every source URL in a run's cached responses once, and record the verdicts."""
+def check_run_links(run_dir: Path, keep_text: bool = True) -> dict:
+    """Fetch every source URL in a run's cached responses once, and record the verdicts. With
+    keep_text, the text of each page that loads is kept in page_text/ too."""
     from .arbitrate import cached_source_urls
 
-    results = check_urls(cached_source_urls(run_dir), cache_path=run_dir / LINK_CHECK_FILE)
+    text_dir = run_dir / PAGE_TEXT_DIR if keep_text else None
+    results = check_urls(cached_source_urls(run_dir), cache_path=run_dir / LINK_CHECK_FILE, text_dir=text_dir)
     broken = sum(1 for r in results.values() if r.verdict == BROKEN)
     repaired = sum(1 for r in results.values() if r.resolved_url != r.url)
-    print(f"Links: {len(results)} checked, {broken} broken, {repaired} repaired -> {LINK_CHECK_FILE}")
+    kept = f"; text kept for {sum(1 for r in results.values() if r.text_file)} page(s) -> {PAGE_TEXT_DIR}/" if keep_text else ""
+    print(f"Links: {len(results)} checked, {broken} broken, {repaired} repaired{kept} -> {LINK_CHECK_FILE}")
     return results
 
 
@@ -370,7 +374,7 @@ def run_search(
     # the run's cached responses is passed, but the sidecar is a cache, so a resumed search or the
     # pass-2 follow-up only fetches URLs not already checked.
     if config.check_links:
-        check_run_links(config.run_dir)
+        check_run_links(config.run_dir, keep_text=config.keep_page_text)
     # Then where each source says its facility is. Like the link check, the cache means a resumed
     # search or the follow-up pass only looks up what is new.
     if config.locate:

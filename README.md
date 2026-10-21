@@ -172,6 +172,74 @@ uv run waste-ai-search arbitrate --keep-broken-link-evidence ...  # let dead sou
 Run_Config records `links_checked`, `links_broken`, `links_repaired` and `broken_link_route`, so
 every workbook states which policy produced it.
 
+### The text of each page that loads
+
+**A page that loads is also read, and its text kept** in `page_text/` in the run folder: one gzip file
+per exact URL, named by its `source_id`. The text comes from the same response the verdict does, so
+it costs no extra request. Up to 25 MB and 60 seconds of each page are read.
+
+| Page | What is kept |
+|---|---|
+| HTML | Its visible text, without scripts and styles. A page with little text is noted: it may be built by JavaScript, which the check can't run. |
+| PDF | Its text layer, up to 300 pages. A scanned PDF has none, and says so. |
+| Spreadsheet (`.xlsx`, `.xls`, `.csv`) | Every cell, up to 500,000 across the workbook. |
+| Word `.docx`, plain text | All of it, up to 8 MB of a document's markup. |
+| Anything else, or binary content served as a web page | Nothing; `link_check.json` says why. |
+
+`link_check.json` records, beside each verdict, the text file and what kind of page it was, or why
+no text was kept, or why it was cut short (its size, the 60 seconds, or a broken connection). The
+next `check-links` reads a page again where it was checked before text was kept, its text file has
+gone, or its read was interrupted, and keeps its verdict as it was, since a run may already have been
+reviewed on it. Nothing else is fetched twice. `--no-page-text` on `search`, `run` and `check-links`
+keeps verdicts only.
+
+**Arbitration checks each source against its page, offline** (`on_page.py`). The agent quotes each
+source and copies where it puts the facility, but both are its own report; the prompt asks for each
+quote word for word, in the source's own language. Both sides are compared in plain form:
+- lower case, no accents or invisible characters;
+- punctuation and line breaks as spaces;
+- a word a PDF hyphenated across a line read whole.
+
+They are compared again with numbers whole ("45,000" is "45000") and units apart ("10ha" is "10
+ha"), "%" read as "percent", and road abbreviations written out ("Rd" is "road"). Scripts written
+without spaces, such as Chinese, Japanese and Thai, are matched anywhere in the text.
+
+| Result | Means |
+|---|---|
+| `found` | Every part of the quote, split at an ellipsis, is on the page as written. A stated coordinate counts where the page gives it to as many decimals or more, trailing zeros aside, or puts a point within 250 m of it in any form; a grid reference is compared without its spaces. |
+| `partly found` | Not as written, but 80% of its words and every number in it are on the page, or one of its two coordinates is. A quote with a figure the page doesn't have is `not found`, however many of its words are there. |
+| `not found` | Neither. |
+| `not in the part read` | Not found, but only part of the page was read (a long PDF or spreadsheet, a cut body), so it may be in the rest. Not flagged. |
+| `no page text` | No text was kept: the page didn't load, refuses automated reading, is a scan, is built by JavaScript, or wasn't checked. Not flagged. |
+
+A quote of fewer than three words ("Open", "Status Operational") is not checked: finding it would
+say nothing. Where a source states both coordinates and an address, the one its point was read from
+is checked, since an address on the page says nothing of coordinates beside it that aren't.
+
+`evidence.csv` records both results for every row, in `quote_on_page` and `location_on_page`. In the
+review queue, a winning source whose quote is not on its page, or only partly, gets a **CHECK** note
+in `evidence_summary`, and the cell is shaded. So does one whose stated location isn't on its page,
+where that location counted: on a `found_location` row, and wherever the source was filed by it.
+Nothing is dropped or downgraded for it, since a page can say something in a way the check can't
+follow, in an image or a map, say. Run_Config counts `page_text_kept`, `quotes_on_page` and
+`locations_on_page`.
+
+**Is a page-reading agent worth adding?** The search agent sees only what Bing hands it, which may be
+part of a page. A second pass, a model reading each kept page for the facility's address or
+coordinates, would recover what the agent left out. This read-only script measures how often there
+is something to recover:
+
+```bash
+uv run python scripts/measure_missed_locations.py --run-id <run id> --out missed.csv
+```
+
+It looks in each kept page for coordinates or a grid reference within 5 km of a site whose search
+cited the page, or a street address (a civic number before capitalised words and a road word, or a
+road's name before its number). It counts the pages where the agent stated no location although the
+page has one. A point 5 to 300 km away is counted apart, as another facility's, since a regional
+register lists many, and so is a page with only a postcode. The count is an upper bound, since an
+address may be an office's, so spot-check `missed.csv` before deciding.
+
 ## Locating each source
 
 The agent reports where each source puts the facility, copied as the source writes it (see
@@ -919,6 +987,7 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 | `resolved.csv` | A header and no rows. Nothing is accepted automatically, and ingestion accepts it empty. Runs from before (batch 1) wrote the values they accepted here. |
 | `evidence.csv` | One row per source-backed claim, confirmations of our values included. The audit trail. Its `source_id` finds the source in `sources.csv`. Every row also gives the facility its source describes (`facility_name_in_source`, `facility_name_english`), the location it states (`stated_location`, `stated_location_kind`) and the point read from it (`location_basis`, `located_latitude`, `located_longitude`, and `location_reason` when it is not usable). A source that states a location has a `found_location` row of its own. Its `site_id` is the site the source is filed under, blank for a likely new facility; `searched_site_id` is the search that found it, and `match` says why. |
 | `source_locations.json` | Each stated location's point, keyed by its text and country (see [Locating each source](#locating-each-source)). |
+| `page_text/` | The text of each page that loaded, one gzip file per exact URL named by its `source_id` (see [The text of each page that loads](#the-text-of-each-page-that-loads)). `evidence.csv`'s `quote_on_page` and `location_on_page` say whether each source's quote and stated location are on it. |
 | `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below). |
 | `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. `searched_site_id` is the search that found each; a weaker disagreement weighed several sources, and names every search behind them. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
@@ -1057,7 +1126,7 @@ The five columns that decide your judgement:
 | `winning_source_tier` vs `baseline_tier` | Whose claim is more credible |
 | `baseline_source` | Which dataset supplied the value we already had (blank if there was none) |
 | `winning_source_url` | The actual source. **Open it.** |
-| `evidence_summary` | The pipeline's one-line explanation of the decision |
+| `evidence_summary` | The pipeline's one-line explanation of the decision. A shaded **CHECK** note says the winning source's quote, or the location it states, isn't on its page, as the link check read it: open the page and look |
 | `match` | Why the value is filed under this site: where its source places the facility, and how far from the site searched |
 
 Every site column (`site_id`, the names, `country_iso3`, `baseline_coordinates` and the `baseline_`

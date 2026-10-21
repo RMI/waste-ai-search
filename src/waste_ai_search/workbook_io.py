@@ -154,7 +154,10 @@ REVIEW_INSTRUCTIONS = [
             "source filed under the site pooled into it. Ingestion reads your decisions from this tab."
         ),
         "sme_action": (
-            "Work top to bottom. To see where the database puts the site, paste "
+            "Work top to bottom. A shaded CHECK note in evidence_summary means the source's own page, as the "
+            "link check read it, doesn't show its quote or the location it states: open the page and look before "
+            "deciding, since a page can say something in an image or a map the check can't read. To see where the "
+            "database puts the site, paste "
             "baseline_coordinates into Google Maps. Compare site_name with original_site_name - the source's own "
             "spelling - and note any translation problem in translation_note. Open "
             "winning_source_url and check the source says this, about THIS facility. A found_location row is one point, "
@@ -390,6 +393,8 @@ MATCH_FILLS = {
     "no location": "BDD7EE",
     "tie": "FFD966",
 }
+# An evidence_summary flagging that the winning source's own page doesn't bear it out.
+NOT_ON_PAGE_FILL = "F8CBAD"
 
 
 def add_conditionals(ws) -> None:
@@ -412,6 +417,15 @@ def add_conditionals(ws) -> None:
             ws.conditional_formatting.add(
                 cells, FormulaRule(formula=[formula], fill=PatternFill("solid", fgColor=MATCH_FILLS[name]))
             )
+    if "evidence_summary" in headers:
+        summary = get_column_letter(headers["evidence_summary"])
+        ws.conditional_formatting.add(
+            f"{summary}2:{summary}{last}",
+            FormulaRule(
+                formula=[f'ISNUMBER(SEARCH("on the source\'s page",${summary}2))+ISNUMBER(SEARCH("on its page",${summary}2))'],
+                fill=PatternFill("solid", fgColor=NOT_ON_PAGE_FILL),
+            ),
+        )
     if "resolution" not in headers:
         return
     letter = get_column_letter(headers["resolution"])
