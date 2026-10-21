@@ -16,12 +16,15 @@ from waste_ai_search.on_page import (
     FOUND,
     NO_PAGE_TEXT,
     NOT_FOUND,
+    NOT_IN_PART_READ,
     PARTLY,
     Page,
+    PageChecker,
     describe_results,
     location_on_page,
     phrase_on_page,
     plain,
+    quote_on_page,
 )
 from waste_ai_search.page_text import PAGE_TEXT_DIR, save_page_text
 from waste_ai_search.run_context import PipelineConfig
@@ -88,6 +91,87 @@ def test_of_a_stated_pair_the_better_counts_and_an_address_is_a_phrase():
     assert location_on_page("Otaihanga Road", "street address", None) == NO_PAGE_TEXT
 
 
+def test_numbers_and_units_count_however_they_are_spaced():
+    page = Page("It took 45000 tonnes a year over 10ha, 95% of it household waste, 1234.5 t in 2019.")
+    assert phrase_on_page("took 45,000 tonnes a year", page) == FOUND
+    assert phrase_on_page("over 10 ha", page) == FOUND
+    assert phrase_on_page("95 per cent of it household waste", page) == FOUND
+    assert phrase_on_page("1,234.5 t in 2019", page) == FOUND
+    spaced = Page("It took 45 000 tonnes a year.")
+    assert phrase_on_page("took 45,000 tonnes a year", spaced) == FOUND
+
+
+def test_invisible_characters_and_a_pdfs_line_break_hyphen_dont_matter():
+    assert phrase_on_page("the landfill closed", Page("The land\u00adfill closed in 2007.")) == FOUND
+    assert phrase_on_page("the landfill closed", Page("The land\u2060fill closed in 2007.")) == FOUND
+    assert phrase_on_page("the Otaihanga landfill closed", Page("The Otaihanga land-\nfill closed in 2007.")) == FOUND
+
+
+def test_scripts_written_without_spaces_are_found_anywhere_in_the_text():
+    page = Page("该垃圾填埋场位于北京市朝阳区。最終処分場は閉鎖された。หลุมฝังกลบแห่งนี้ปิดแล้ว")
+    assert phrase_on_page("垃圾填埋场位于北京", page) == FOUND
+    assert phrase_on_page("最終処分場", page) == FOUND
+    assert phrase_on_page("หลุมฝังกลบ", page) == FOUND
+    assert phrase_on_page("垃圾焚烧厂位于上海", page) == NOT_FOUND
+
+
+def test_a_quote_with_a_number_the_page_doesnt_have_is_not_found():
+    """A wrong figure is the error that matters most, so it is never only partly found."""
+    page = Page("The approved capacity of 1,500,000 tonnes. The landfill closed in 2007.")
+    assert phrase_on_page("approved capacity of 2,500,000 tonnes", page) == NOT_FOUND
+    assert phrase_on_page("The landfill finally closed in 2011", page) == NOT_FOUND
+    assert phrase_on_page("the landfill finally closed in 2007", page) == PARTLY
+
+
+def test_a_quote_too_short_to_mean_anything_is_not_checked():
+    page = Page("Our offices are closed on Sundays.")
+    assert quote_on_page("closed", page) == ""
+    assert quote_on_page("Status Operational", page) == ""
+    assert quote_on_page("offices are closed on Sundays", page) == FOUND
+
+
+def test_an_address_written_slightly_differently_still_counts():
+    page = Page("Find us at 12 Foo Rd, Barton OX1 2AB.")
+    assert location_on_page("12 Foo Road, Barton", "street address", page) == FOUND
+    assert location_on_page("12 Foo Road, Barton, Oxon OX1 2AB, United Kingdom", "street address", page) == PARTLY
+
+
+def test_the_part_of_a_location_its_point_was_read_from_is_the_one_that_counts():
+    """An address on the page says nothing of coordinates beside it that aren't."""
+    page = Page("Otaihanga Landfill, 12 Otaihanga Road, Paraparaumu.")
+    stated, kinds = "-40.8870, 175.0290 | 12 Otaihanga Road, Paraparaumu", "coordinates | street address"
+    assert location_on_page(stated, kinds, page, basis="coordinates") == NOT_FOUND
+    assert location_on_page(stated, kinds, page, basis="rooftop") == FOUND
+    # With no usable point, the better of the two counts.
+    assert location_on_page(stated, kinds, page) == FOUND
+
+
+def test_a_point_the_page_gives_in_another_form_counts_within_250_m():
+    page = Page("Site location: 40°53'01\"S 175°01'40\"E.")
+    assert location_on_page("-40.8836, 175.0277", "coordinates", page, "coordinates", (-40.8836, 175.0277)) == FOUND
+    assert location_on_page("-40.9000, 175.0277", "coordinates", page, "coordinates", (-40.9000, 175.0277)) == NOT_FOUND
+
+
+def test_a_page_built_by_javascript_is_no_text_and_one_read_in_part_isnt_flagged(tmp_path):
+    from waste_ai_search.page_text import PAGE_TEXT_DIR, save_page_text, text_file_name
+
+    shell, long = "https://app.example/landfill", "https://register.example/permit.pdf"
+    save_page_text(tmp_path / PAGE_TEXT_DIR, shell, "Loading...")
+    save_page_text(tmp_path / PAGE_TEXT_DIR, long, "Permit for the Otaihanga landfill, first 300 pages.")
+    notes = {
+        text_file_name(shell): "little text: the page may be built by JavaScript",
+        text_file_name(long): "its first 300 of 412 pages read",
+    }
+    checker = PageChecker(tmp_path, notes)
+    rows = [
+        {"source_id": text_file_name(url).removesuffix(".txt.gz"), "quoted_evidence_short": "capacity of 1,500,000 tonnes", "stated_location": ""}
+        for url in (shell, long)
+    ]
+    for row in rows:
+        checker.check(row)
+    assert [row["quote_on_page"] for row in rows] == [NO_PAGE_TEXT, NOT_IN_PART_READ]
+
+
 def test_counts_for_run_config():
     assert describe_results([FOUND, FOUND, NOT_FOUND, "", NO_PAGE_TEXT]) == "found 2, not found 1, no page text 1"
     assert describe_results([]) == "none checked"
@@ -134,7 +218,7 @@ def test_the_queue_flags_a_winning_source_its_own_page_doesnt_bear_out(tmp_path)
         source(news, [value("closing_year", "2011", "The landfill finally closed in 2011")],
                location="-40.8900, 175.0300", kind="coordinates"),
         # The link check kept no text of this one.
-        source(blocked, [value("facility_status", "Inactive", "closed")]),
+        source(blocked, [value("facility_status", "Inactive", "The site closed to all waste in 2007")]),
     ]}))
     save_page_text(run_dir / PAGE_TEXT_DIR, council, PAGE.plain)
     save_page_text(run_dir / PAGE_TEXT_DIR, news, "Coastal news. The Otaihanga site is now a park.")

@@ -932,7 +932,9 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     locations = load_locations(config.run_dir / SOURCE_LOCATIONS_FILE)
     # The text the link check kept of each page that loaded: each quote and stated location is
     # checked against it, and one that isn't there is flagged for the SME (on_page.py).
-    pages = PageChecker(config.run_dir)
+    pages = PageChecker(
+        config.run_dir, {result.text_file: result.text_note for result in link_results.values() if result.text_file}
+    )
 
     # A site may have several cached responses - one per pass - and all of them count as evidence.
     by_site: dict[str, list[Path]] = {}
@@ -1227,7 +1229,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "not_a_waste_facility", "value": not_a_waste_facility},
             *match_settings(matching),
             {"setting": "datasets_found", "value": len(datasets)},
-            {"setting": "page_text_kept", "value": sum(1 for result in link_results.values() if result.text_file)},
+            # Counted by file: two spellings of one URL share one.
+            {"setting": "page_text_kept", "value": len({result.text_file for result in link_results.values() if result.text_file})},
             {"setting": "quotes_on_page", "value": describe_results([row.get("quote_on_page", "") for row in evidence_rows])},
             {"setting": "locations_on_page", "value": describe_results(stated_on_page(evidence_rows))},
         ],
