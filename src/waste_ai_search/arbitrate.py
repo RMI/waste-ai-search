@@ -5,6 +5,7 @@ can be re-applied to a finished run for free and an interrupted search is never 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from datetime import date, datetime
@@ -13,7 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .arbitration import calculated_row, needs_review, resolve, routed_to_leads
-from .credibility import assign_source_tier, is_promotable, tier_label
+from .credibility import assign_source_tier, dropped_source_site, is_promotable, tier_label
 from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, LinkResult, load_results
 from .prompt_builder import needs_contradiction_check, requested_attributes
@@ -85,13 +86,39 @@ def parse_float(value: Any) -> float | None:
 
 
 def normalize_url(url: Any) -> str:
+    """The exact URL a source is filed under: one row in sources.csv, and one source_id.
+
+    Only spellings that never change the page are cleaned: the scheme and host are lower-cased,
+    and a leading "www.", a trailing slash on the path and the fragment are dropped. The path and
+    the query string are kept as written, case included. Dropping the query string, as this once
+    did, merged 103 different Natural Resources Wales documents, which differ only in their query,
+    into one source.
+    """
     text = normalize_scalar(url)
     if not text:
         return ""
-    parts = urlsplit(text.lower())
-    netloc = parts.netloc[4:] if parts.netloc.startswith("www.") else parts.netloc
+    try:
+        parts = urlsplit(text)
+        if not parts.scheme and not parts.netloc:
+            parts = urlsplit("//" + text)  # written without a scheme
+    except ValueError:
+        return text
+    netloc = parts.netloc.lower()
+    netloc = netloc[4:] if netloc.startswith("www.") else netloc
     path = parts.path.rstrip("/")
-    return urlunsplit((parts.scheme or "https", netloc, path, "", ""))
+    return urlunsplit(((parts.scheme or "https").lower(), netloc, path, parts.query, ""))
+
+
+def source_id_for(url: Any, fallback: str) -> str:
+    """A source's id, derived from its exact URL, so it is the same wherever the URL is cited.
+
+    evidence.csv and sources.csv both carry it, so the two files join. A citation with no URL has
+    nothing to derive an id from, and keeps `fallback`, its own per-citation id.
+    """
+    exact = normalize_url(url)
+    if not exact:
+        return fallback
+    return "WAISRC-" + hashlib.sha256(exact.encode("utf-8")).hexdigest()[:12]
 
 
 # --- phase 2: arbitrate (pure, offline) -------------------------------------------------------
@@ -106,10 +133,15 @@ def extract_evidence(
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Turn one cached response into evidence items grouped by attribute.
 
-    `link_results` are the run's link-check verdicts (WP-533). A repaired URL replaces the one the
-    agent wrote; the original stays in the raw response. A Broken link is treated like a missing
-    one - the source cannot be promoted and goes to leads - unless keep_broken_links is set.
-    Unverified links are never touched.
+    `link_results` are the run's link-check verdicts (WP-533), keyed by the URL as the agent wrote
+    it. A repaired URL replaces the one the agent wrote; the original stays in the raw response. A
+    Broken link is treated like a missing one - the source cannot be promoted and goes to leads -
+    unless keep_broken_links is set. Unverified links are never touched.
+
+    A citation of a dropped map site (DROPPED_SOURCE_SITES) is skipped before anything else, and
+    counted in the warnings, one line per map site, with any of the agent's unverified_leads that
+    point at one. An attribute whose every source was one is left with none, so, like a value
+    given with no source, it is not promoted.
     """
     link_results = link_results or {}
     site_id = normalize_scalar(site.get("site_id"))
@@ -117,6 +149,7 @@ def extract_evidence(
     evidence_rows: list[dict[str, Any]] = []
     source_entries: list[dict[str, Any]] = []
     warnings: list[str] = []
+    dropped: dict[str, int] = {}
     order = 0
 
     for attr_index, attribute in enumerate(payload.get("attributes", []) or [], start=1):
@@ -179,19 +212,28 @@ def extract_evidence(
                 warnings.append(numeric_note)
 
         sources = [item for item in (attribute.get("sources") or []) if isinstance(item, dict)]
+        kept = 0
         for source_index, source in enumerate(sources, start=1):
-            order += 1
-            evidence_id = f"WAIEV-{site_id}-{attr_index:03d}-{source_index:03d}"
-            source_id = f"WAISRC-{site_id}-{attr_index:03d}-{source_index:03d}"
-            tier, rule = assign_source_tier(source, name)
             raw_url = normalize_scalar(source.get("url"))
+            mirror = dropped_source_site(raw_url)
+            if mirror:
+                dropped[mirror] = dropped.get(mirror, 0) + 1
+                continue
+            kept += 1
+            order += 1
+            # The evidence id stays per citation; the source id is the exact URL's, shared by
+            # every citation of it, so evidence.csv joins sources.csv.
+            evidence_id = f"WAIEV-{site_id}-{attr_index:03d}-{source_index:03d}"
+            tier, rule = assign_source_tier(source, name)
             link = link_results.get(raw_url)
             url = link.resolved_url if link else raw_url
             link_status = link.verdict if link else ""
             dead_link = link_status == BROKEN and not keep_broken_links
+            source_id = source_id_for(url, fallback=f"WAISRC-{site_id}-{attr_index:03d}-{source_index:03d}")
 
             item = {
                 "evidence_id": evidence_id,
+                "source_id": source_id,
                 "attribute_name": name,
                 "value": value,
                 "unit": conversion.unit,
@@ -274,15 +316,33 @@ def extract_evidence(
                     "site_id": site_id,
                 }
             )
+        if sources and not kept:
+            warnings.append(f"{name}: every source was a dropped map site; not promoted.")
 
+    # The agent's own leads go to the Leads sheet (payload_leads), which skips the same map sites,
+    # so they are counted with the rest.
+    for lead in payload.get("unverified_leads", []) or []:
+        mirror = dropped_source_site(lead.get("url")) if isinstance(lead, dict) else ""
+        if mirror:
+            dropped[mirror] = dropped.get(mirror, 0) + 1
+
+    for mirror, count in sorted(dropped.items()):
+        warnings.append(
+            f"Dropped {count} citation(s) of {mirror}: map sites that copy OpenStreetMap or scrape "
+            "listings are not used as sources."
+        )
     return by_attribute, evidence_rows, source_entries, warnings
 
 
 def dedupe_sources(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse the per-citation source entries into one row per normalized URL."""
+    """Collapse the per-citation source entries into one row per exact URL.
+
+    The source_id is derived from the exact URL, so it is the key. The first citation's title,
+    publisher and tier stand for the row.
+    """
     grouped: dict[str, dict[str, Any]] = {}
     for entry in entries:
-        key = entry["url_normalized"] or entry["url"] or entry["source_id"]
+        key = entry["source_id"]
         row = grouped.get(key)
         if row is None:
             row = {header: entry.get(header, "") for header in SOURCES_HEADERS}
@@ -321,7 +381,11 @@ def merge_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def cached_source_urls(run_dir: Path) -> list[str]:
-    """Every source URL in a run's cached responses, read the way arbitration reads them."""
+    """Every source URL in a run's cached responses, read the way arbitration reads them.
+
+    URLs are returned as the agent wrote them, since that is what gets fetched and what the
+    verdicts are keyed by. A dropped map site is never used, so it is not fetched either.
+    """
     urls: list[str] = []
     for path in sorted(raw_dir(run_dir).glob("site_*.json")):
         try:
@@ -332,8 +396,9 @@ def cached_source_urls(run_dir: Path) -> list[str]:
             if not isinstance(attribute, dict):
                 continue
             for source in attribute.get("sources") or []:
-                if isinstance(source, dict) and normalize_scalar(source.get("url")):
-                    urls.append(normalize_scalar(source.get("url")))
+                url = normalize_scalar(source.get("url")) if isinstance(source, dict) else ""
+                if url and not dropped_source_site(url):
+                    urls.append(url)
     return list(dict.fromkeys(urls))
 
 
@@ -480,6 +545,50 @@ def single_axis_offset_km(site: dict[str, Any], resolved: list[dict[str, Any]]) 
     return max(offsets) if offsets else None
 
 
+def dropped_map_site_offset_km(site: dict[str, Any], payload: dict[str, Any]) -> tuple[float | None, str]:
+    """How far a dropped map site's own coordinates put the facility from the seed, and which site.
+
+    Dropping Mapcarta and Maptons as sources also took most of what the identity gate measures: in
+    batch 1 they gave the only found coordinates at 34 of the 46 sites it flagged, each a map page
+    more than 5 km from our site. So their coordinates are still read here, for the gate alone.
+    They are never evidence or a value. A page's latitude and longitude are paired; a lone one is
+    judged by its axis offset, as single_axis_offset_km does. The farthest page counts. Build step 3
+    of the source-matching plan replaces the gate, and this goes with it.
+    """
+    pages: dict[str, dict[str, Any]] = {}
+    for attribute in payload.get("attributes", []) or []:
+        if not isinstance(attribute, dict):
+            continue
+        name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
+        if name not in {"found_latitude", "found_longitude"}:
+            continue
+        conversion = convert_attribute_value(name, attribute.get("value"), attribute.get("unit"))
+        value = None if conversion.warning else parse_float(conversion.value)
+        if value is None:
+            continue
+        for source in attribute.get("sources") or []:
+            url = normalize_scalar(source.get("url")) if isinstance(source, dict) else ""
+            mirror = dropped_source_site(url)
+            if mirror:
+                pages.setdefault(normalize_url(url), {"site": mirror})[name] = value
+
+    base_lat = parse_float(site.get("latitude"))
+    base_lon = parse_float(site.get("longitude"))
+    farthest: float | None = None
+    farthest_site = ""
+    for page in pages.values():
+        lat, lon = page.get("found_latitude"), page.get("found_longitude")
+        if None not in (lat, lon, base_lat, base_lon):
+            km = haversine_km(base_lat, base_lon, lat, lon)
+        elif lat is not None:
+            km = axis_offset_km(site, "found_latitude", lat)
+        else:
+            km = axis_offset_km(site, "found_longitude", lon)
+        if km is not None and (farthest is None or km > farthest):
+            farthest, farthest_site = km, page["site"]
+    return farthest, farthest_site
+
+
 def settle_near_coordinates(site: dict[str, Any], resolved: list[dict[str, Any]]) -> int:
     """Stop sending sub-threshold coordinate differences to review (pilot feedback 5)."""
     settled = 0
@@ -501,16 +610,21 @@ def settle_near_coordinates(site: dict[str, Any], resolved: list[dict[str, Any]]
     return settled
 
 
-def flag_identity_mismatch(resolved: list[dict[str, Any]], km: float | None) -> bool:
+def flag_identity_mismatch(
+    resolved: list[dict[str, Any]],
+    km: float | None,
+    coordinates: str = "source-backed coordinates are",
+) -> bool:
     """Revoke auto-validation for a site whose found coordinates are too far from the seed.
 
     Tier cannot detect a credible source describing the wrong facility. Distance can, so a large
-    mismatch withdraws the identity assumption that auto-validation depends on.
+    mismatch withdraws the identity assumption that auto-validation depends on. `coordinates` says
+    in the note where the distance came from.
     """
     if km is None or km <= IDENTITY_DISTANCE_KM_THRESHOLD:
         return False
     note = (
-        f"Identity not confirmed: source-backed coordinates are {km:.1f} km from the seed "
+        f"Identity not confirmed: {coordinates} {km:.1f} km from the seed "
         f"location (threshold {IDENTITY_DISTANCE_KM_THRESHOLD:g} km). Auto-validation withdrawn."
     )
     for row in resolved:
@@ -528,7 +642,11 @@ def payload_leads(
     sites_by_id: dict[str, dict[str, Any]],
     run_id: str,
 ) -> list[dict[str, Any]]:
-    """Carry the agent's own unverified_leads through to the leads sheet."""
+    """Carry the agent's own unverified_leads through to the leads sheet.
+
+    A lead pointing at a dropped map site is skipped, like a citation of one; extract_evidence
+    counts it in the site's parse warnings.
+    """
     out: list[dict[str, Any]] = []
     for path in cached:
         site_id = site_id_from_path(path)
@@ -541,6 +659,8 @@ def payload_leads(
             if isinstance(lead, dict):
                 summary = normalize_scalar(lead.get("lead_summary") or lead.get("summary") or lead.get("note"))
                 url = normalize_scalar(lead.get("url"))
+                if dropped_source_site(url):
+                    continue
                 attribute = normalize_scalar(lead.get("attribute_name"))
                 value = normalize_scalar(lead.get("value"))
             else:
@@ -677,13 +797,22 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         if km is None:
             km = single_axis_offset_km(site, site_resolved)
         settle_near_coordinates(site, site_resolved)
-        if flag_identity_mismatch(site_resolved, km):
+        coordinates, found = "source-backed coordinates are", "found coordinates"
+        # A dropped map site is not a source, but its page still shows the agent looking at
+        # another landfill, so its coordinates can withdraw auto-validation too.
+        map_km, map_site = dropped_map_site_offset_km(site, payload)
+        kept_far = km is not None and km > IDENTITY_DISTANCE_KM_THRESHOLD
+        if not kept_far and map_km is not None and map_km > IDENTITY_DISTANCE_KM_THRESHOLD:
+            km = map_km
+            coordinates = f"coordinates on a {map_site} page the agent cited (dropped as a source) are"
+            found = f"{map_site} page's coordinates"
+        if flag_identity_mismatch(site_resolved, km, coordinates):
             parse_warnings.append(
                 {
                     "run_id": config.run_id,
                     "site_id": site_id,
                     "site_name": normalize_scalar(site.get("site_name")),
-                    "warning": f"Identity not confirmed: found coordinates {km:.1f} km from seed location.",
+                    "warning": f"Identity not confirmed: {found} {km:.1f} km from seed location.",
                 }
             )
         resolved_rows.extend(site_resolved)
