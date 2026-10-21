@@ -246,7 +246,7 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 | waste-ai-search#24 | Fold in: keep the single `found_location` row and `corrected_value_date`; drop the 0.5 km rule |
 | waste-ai-search#23 | `name_yield` counts rejection reasons by prefix ("Wrong facility…") and credits findings to `searched_site_id` |
 | waste-ai-search#26 | Treat the new Review_Queue columns as optional; re-key `searched_site_id`, `corrected_site_id` and the two lists |
-| ingestion #261 | Add the new Review_Queue columns as optional, in the loader and in `create_raw_tables.sql`. Add the two rejection reasons. Read `corrected_site_id` and `location_basis`. Note that confirmations no longer load. Leave `CONFIRMING_KM` as it is: it only affects batch 1's two-row layout, and batch 1 is out of scope. |
+| ingestion #261 | Add the new Review_Queue columns as optional, in the loader and in `create_raw_tables.sql`. Add the two rejection reasons. Read `corrected_site_id` and `location_basis`. Note that confirmations no longer load. Leave `CONFIRMING_KM` as it is: it only affects batch 1's two-row layout, and batch 1 is out of scope. A corrected value with no `corrected_value_date` lands in the run's year, and one re-filed with `corrected_site_id` lands on another site: check both against the (facility, attribute, year) rows already there, and name the rows that collide, since an SME can make either collide with a row of its own. |
 | ingestion #262, #264 | None |
 
 ## Decisions (Hugh, 20 October 2026)

@@ -1090,13 +1090,24 @@ Edit only these columns; everything else is read-only:
 | `validation_status` | `Validated` or `Rejected` (dropdown) |
 | `rejection_reason` | For a rejection: `Wrong facility - another site in our database`, `New facility - not in our database`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Plain `Wrong facility` stays for batch 1's workbook. Counted by cause to find where the AI errs |
 | `corrected_value` | If you know the right value: enter it here. For categorical fields (site type, status, waste type, depth, yes/no fields, cover and gas-project types) it is a dropdown of the allowed values for that row's attribute; multi-value fields also accept a typed combination. A location is `lat, lon`. Never edit `resolved_value` — it keeps the AI's own answer, which is how its error rate is measured |
-| `corrected_value_date` | Only if your corrected value is for a different date than `value_date`, such as a current figure replacing one you rejected as `Outdated`: that date, as `YYYY`, `YYYY-MM` or `YYYY-MM-DD` |
-| `corrected_site_id` | Only if the value belongs to another of our sites: that site's id. A dropdown of the candidates where there were several |
+| `corrected_value_date` | Only if your corrected value is for a different date than `value_date`: that date, as `YYYY`, `YYYY-MM` or `YYYY-MM-DD`. Never a year that has its own row for the site and attribute (see below) |
+| `corrected_site_id` | Only if the value belongs to another of our sites: that site's id. A dropdown of the candidates where there were several. First filter `site_id` to that site: if it already has a row for the same attribute and year, reject one of the two |
 | `reviewer` | Your name |
 | `reviewed_date` | The date |
 | `researcher_notes` | Why, especially for a rejection |
 
 `Validated` means the value is correct and may be merged. `Rejected` means the search's value must not be; a `corrected_value` you give is merged instead. Ingestion reads these decisions straight from this tab.
+
+**One value per site, attribute and year.** Ingestion takes one value for each, and stops on two.
+Each row of a yearly attribute (status, waste received, waste in place, depth, cover types, gas
+figures) is that year's value: the year of `value_date`, or the run's year where `value_date` is
+blank. So an older year's value is not `Outdated`: validate it if it was right for its year, and
+put a current figure on the newest year's row instead. A 2024 status rejected as `Outdated` with a
+current `Active` and no `corrected_value_date` lands in the run's year, and where the run's year
+has a status row of its own, ingestion stops on the two. For the same reason, a
+`corrected_value_date` never names a year that has its own row, and before re-filing a value with
+`corrected_site_id`, check that site has no row of its own for the same attribute and year; if it
+has, reject one of the two.
 
 Once the review is done, `collect-new-facilities --run-id <run_id>` adds the values rejected as `New facility - not in our database` to the run's `new_facility_candidates.csv`, once each, for the ingestion team. It reads the workbook in the SharePoint folder, else the run folder's, or the one `--workbook` names.
 

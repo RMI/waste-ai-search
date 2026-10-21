@@ -166,9 +166,11 @@ REVIEW_INSTRUCTIONS = [
             "facility), and yellow where several of our sites tied. facility_name_in_source and stated_location are "
             "the facility as the source writes it. If the value is right but belongs to another of our sites, put that "
             "site's id in corrected_site_id (a dropdown where there were several candidates; any site id may be typed) "
-            "and validate it. If it is about another of our sites and you can't tell which, reject it with 'Wrong "
+            "and validate it, but first filter site_id to that site: if it already has a row for the same attribute "
+            "(and, for a yearly attribute, the same year), reject one of the two, since ingestion takes one value per "
+            "site, attribute and year. If it is about another of our sites and you can't tell which, reject it with 'Wrong "
             "facility - another site in our database'; if it is about a landfill we don't hold, with 'New facility - "
-            "not in our database', which collect-new-facilities lists for ingestion. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields; for a location, lat, lon) - never edit resolved_value. If your corrected value is for a different date than value_date, a current figure replacing an outdated one say, put that date in corrected_value_date (YYYY, YYYY-MM or YYYY-MM-DD). Put your name in "
+            "not in our database', which collect-new-facilities lists for ingestion. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields; for a location, lat, lon) - never edit resolved_value. Each row of a yearly attribute is that year's value: the year of value_date, or this run's year where value_date is blank. So an older year's value is not Outdated: validate it if it was right for its year, and put a current figure on the newest year's row instead. If your corrected value is for a different date than value_date, put that date in corrected_value_date (YYYY, YYYY-MM or YYYY-MM-DD), but never a year that has its own row for the site and attribute. Put your name in "
             "reviewer and the date in reviewed_date, and say why in researcher_notes. An empty "
             "queue means nothing needs you."
         ),
