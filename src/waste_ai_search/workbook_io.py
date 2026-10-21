@@ -140,18 +140,23 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": "Review_Queue",
         "purpose": (
-            "YOUR WORKLIST. Every value the search found for an empty field, whatever the "
-            "source's tier, and every value that disagrees with the database's from a Tier 1-3 "
-            "source at least as credible as the database's own (for status, a Tier 1-3 source at "
-            "least 3 years newer). Nothing is accepted without review. A weaker disagreement, a "
-            "source whose link is dead and a unit that could not be converted are on the Leads tab "
-            "instead. A source that only confirms the database's value is not shown, and nothing "
-            "from it is loaded. Each value is filed under the site of ours its source is about, "
-            "which may not be the site searched: every site column describes that site, "
-            "searched_site_id is the search that found it, and match says why it is filed there. "
-            "There is one row per site and attribute, and for a yearly attribute (status, waste "
-            "received, waste in place, depth, cover types, gas figures) one per year, with every "
-            "source filed under the site pooled into it. Ingestion reads your decisions from this tab."
+            "YOUR WORKLIST. It holds every value the search found for a field that is empty in our "
+            "database, whatever the source's tier, and every value that disagrees with the "
+            "database's, as long as the new value is from a Tier 1-3 source at least as credible as "
+            "the database's own (for status, a Tier 1-3 source at least 3 years newer). Nothing is "
+            "accepted without SME review. A value that disagrees with the database's but is from "
+            "a Tier 4-5 source, or from a source less credible than the database's own, is on the "
+            "Leads tab instead, as is a value whose source link is dead or whose unit could not be "
+            "converted. A source that only confirms the database's value is not shown, and nothing "
+            "from it is loaded. Each value "
+            "is matched, as a best guess, to the "
+            "one of our sites its source seems to be about, which may not be the site that was "
+            "searched. The site columns (site_id, the names, baseline_coordinates and the baseline_ "
+            "columns) describe the matched site, searched_site_id is the site whose search found "
+            "the source, and match says why the value was matched to this site. There is one row "
+            "per site and attribute, and for a yearly attribute (status, waste received, waste in "
+            "place, depth, cover types, gas figures) one per year, with every source matched to the "
+            "site pooled into that row. Ingestion reads your decisions from this tab."
         ),
         "sme_action": (
             "Work top to bottom. A shaded CHECK note in evidence_summary means the source's own page, as the "
@@ -237,10 +242,10 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": "Leads",
         "purpose": (
-            "Findings that lost: a disagreement with the database's value from a source below the "
-            "credibility floor (Tier 4-5) or weaker than the database's, a source whose link is "
-            "dead, a unit that could not be converted, a 'Not a Waste Facility' verdict about a site it "
-            "was not offered for; plus the agent's own unverified leads."
+            "Findings that lost: a value that disagrees with the database's but is from a Tier 4-5 "
+            "source or from a source less credible than the database's own, a value whose source "
+            "link is dead or whose unit could not be converted, a 'Not a Waste Facility' verdict about "
+            "a site it was not offered for; plus the agent's own unverified leads."
         ),
         "sme_action": "Read only. Promote something by hand if you judge the source good enough.",
         "editable": "nothing",

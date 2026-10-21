@@ -146,7 +146,7 @@ def test_a_disagreement_below_the_floor_goes_to_leads_as_the_workbook_says(tmp_p
     leads = [r for r in read(run_dir / "supplementary_leads.csv") if r["attribute_name"] == "facility_type"]
     assert "Conflict - lower credibility" in {r["exclusion_reason"] for r in leads}
     [queue_tab] = [tab for tab in REVIEW_INSTRUCTIONS if tab["tab_name"] == "Review_Queue"]
-    assert "A weaker disagreement" in queue_tab["purpose"] and "Leads tab" in queue_tab["purpose"]
+    assert "Tier 4-5 source, or from a source less credible than the database's own, is on the Leads tab" in queue_tab["purpose"]
 
 
 def test_a_confirmation_is_kept_as_evidence_but_not_queued(tmp_path):
