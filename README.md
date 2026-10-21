@@ -351,6 +351,13 @@ the sites the run itself searched. A source filed under a site outside it, in an
 country say, goes on `outside_run_matches.csv` instead of the review queue, since ingestion #261
 stops on a facility with values from two runs.
 
+**A page listing many landfills is read one entry at a time.** A search reports only the entry it
+used, under the name the page gives it, so a regulator's list of twelve landfills can be several
+sources, one per entry, each matched by its own location or name. A name the page gives to places
+more than 2 km apart, a list of "Closed Landfill"s say, is one source per place, and a citation of
+it with no location stays with its own search. The rest of such a page goes unread, so arbitration
+lists it in `datasets_found.csv` for ingestion to load once, as a source of its own.
+
 **A site's trust still decides what is asked of SMEs.** Where the name or coordinates of the site a
 source is filed under come from a Tier 1–2 source, the source's name and location still match it,
 but they are recorded in `evidence.csv`, not queued as `found_facility_name` or `found_location`
@@ -917,8 +924,9 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
 | `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
 | `new_facility_candidates.csv` | For ingestion: landfills none of our sites is. One row per group of located sources more than 2 km from every site of ours (grouped within 2 km of each other), with their URLs, names as written and in English, stated locations, the point and its basis, our nearest site and its distance, and the searches that found them. `collect-new-facilities` adds the values SMEs rejected as "New facility - not in our database" (`found_by` = `SME`); arbitrating again keeps those. |
-| `possible_duplicates.csv` | For ingestion (CJ's #225 tackles E-PRTR re-registrations): pairs of our sites, with names, distance apart, the sources that hit both and why: one source placed within 2 km of both that its name couldn't settle, or one page cited by both sites' searches where they lie within 2 km. |
+| `possible_duplicates.csv` | For ingestion (entity linkage's #225 tackles E-PRTR re-registrations): pairs of our sites, with names, distance apart, the sources that hit both and why: one source placed within 2 km of both that its name couldn't settle, or one page cited by both sites' searches where they lie within 2 km. |
 | `outside_run_matches.csv` | Sources filed under a site outside the run's selection: the source, the site, its country, and the search that found it. Not reviewed. |
+| `datasets_found.csv` | For ingestion: pages that look like datasets, such as a regulator's list of its landfills. A search reports only the entry it used, so the rest of such a page goes unread, and every site on it pays its own search to find it again; loaded once through ingestion, as E-PRTR is, it would cover them all. Listed when it names or places 2 or more facilities, or when a regulator, registry or statistics publisher's page is found by 3 or more searches (a town's landfill page is found by every nearby search too). Names count apart by their distinctive words, and a facility placed being a site of ours the page was filed under by its own location or name, or one of its new-landfill entries. It gives the page, its publisher, type and tier, the counts, the searches, the sites it placed, the names it gave, and why it is listed. |
 
 **Nothing is loaded from this repository.** It used to write a standardized table and a `.load.sql`
 beside it, built before review. Ingestion now builds the AI search's table itself, from the values

@@ -341,6 +341,25 @@ def test_the_lists_for_ingestion_are_written_at_arbitration(tmp_path):
     assert operators == {("18572", "Augean"), ("19041", "Augean")}
     config = {row[0]: row[1] for row in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].values}
     assert (config["new_facility_candidates"], config["possible_duplicates"], config["match_new_facility"]) == (1, 1, 1)
+    # No page here is found by three searches or names two facilities.
+    assert rows(run_dir, "datasets_found.csv") == []
+    assert config["datasets_found"] == 0
+
+
+def test_a_page_listing_several_landfills_is_listed_for_ingestion(tmp_path):
+    council = [seed("101", "Smith Road Landfill", -41.0, 175.0, "NZL"), seed("102", "Jones Road Landfill", -41.09, 175.0, "NZL")]
+    register = "https://council.example.nz/closed-landfills"
+    responses = {
+        "101": [source(register, "Smith Road Landfill", "-41.0031, 175.0041", values=[value("operator", "Council")])],
+        "102": [source(register, "Jones Road Landfill", "-41.0931, 175.0041", values=[value("operator", "Council")])],
+    }
+    run_dir = arbitrate(tmp_path, council, responses)
+    [page] = rows(run_dir, "datasets_found.csv")
+    assert (page["source_url"], page["searches"], page["placed_site_ids"], page["why"]) == (
+        register, "2", "101; 102", "names 2 facilities; places 2 facilities",
+    )
+    config = {row[0]: row[1] for row in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].values}
+    assert config["datasets_found"] == 1
 
 
 # --- the gas follow-up --------------------------------------------------------------------------

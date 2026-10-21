@@ -213,6 +213,16 @@ REVIEW_INSTRUCTIONS = [
         "editable": "nothing",
     },
     {
+        "tab_name": "(file) datasets_found.csv",
+        "purpose": (
+            "Pages that look like datasets, such as a regulator's list of its landfills: naming or placing "
+            "2 or more facilities, or from a publisher of datasets and found by 3 or more searches. A search "
+            "reads only the entry it used, so ingestion can load the rest of the page once, as a source of its own."
+        ),
+        "sme_action": "Read only.",
+        "editable": "nothing",
+    },
+    {
         "tab_name": "(file) outside_run_matches.csv",
         "purpose": (
             "Sources this run filed under a site outside its selection: another batch's country, or an "

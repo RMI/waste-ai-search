@@ -232,12 +232,17 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 - **The AI search ranks below every regulator and above Waste Atlas, GPW and OSM** (#264). A
   permit's coordinates 0.3 km from OSM's are therefore a value like any other, and win once
   validated.
-- **Two lists go to the ingestion team,** since ingestion has no path for them:
+- **Three lists go to the ingestion team,** since ingestion has no path for them:
   - `new_facility_candidates.csv`: sources that matched none of our sites, plus rows an SME marked
     "New facility". Each has the URL, name, stated location and derived coordinates, our nearest site
     and its distance, and the search that found it.
   - `possible_duplicates.csv`: pairs of our sites that one source fits equally well, or that two
-    searches both cited for one page. It goes to CJ, whose #225 tackles E-PRTR re-registrations.
+    searches both cited for one page. Entity linkage's #225 tackles E-PRTR re-registrations.
+  - `datasets_found.csv`: pages that look like datasets, such as a regulator's list of its
+    landfills: naming or placing 2 or more facilities, or from a publisher of datasets and found
+    by 3 or more searches. A search
+    reads only the entry it used, so the rest of such a page goes unread, and every site on it
+    pays its own search to find it. Loaded once through ingestion, it would cover them all.
 
 ## Changes to Hugh's open PRs
 

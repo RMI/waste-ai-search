@@ -94,6 +94,7 @@ NOT_A_FACILITY = "Not a waste facility"
 NEW_FACILITY_FILE = "new_facility_candidates.csv"
 POSSIBLE_DUPLICATES_FILE = "possible_duplicates.csv"
 OUTSIDE_RUN_FILE = "outside_run_matches.csv"
+DATASETS_FOUND_FILE = "datasets_found.csv"
 
 NEW_FACILITY_HEADERS = [
     "candidate_id", "found_by", "country_iso3", "source_urls", "facility_names_in_source",
@@ -108,6 +109,23 @@ OUTSIDE_RUN_HEADERS = [
     "source_url", "facility_name_in_source", "facility_name_english", "stated_location",
     "matched_site_id", "matched_site_name", "country_iso3", "searched_site_id", "match",
 ]
+DATASETS_FOUND_HEADERS = [
+    "source_url", "source_title", "publisher", "source_type", "source_tier", "publication_date",
+    "searches", "facilities_named", "facilities_placed", "searched_site_ids", "placed_site_ids",
+    "facility_names_in_source", "why",
+]
+# A page that several searches found, or that names or places several facilities, is probably a
+# dataset: a regulator's list of its landfills, say. A search reports only the entry it used, so
+# the rest of such a page goes unread, and every site on it pays its own search to find it again.
+# It is better loaded once, through ingestion, as a source of its own, as E-PRTR is.
+DATASET_MIN_SEARCHES = 3
+DATASET_MIN_FACILITIES = 2
+# Being found by several searches marks a dataset only from a publisher of them. A town's landfill
+# page is found by every nearby search too: batch 1's Brandon page by fourteen.
+DATASET_SOURCE_TYPES = {"regulator", "permit or registry", "government statistics", "intergovernmental dataset"}
+# How many names a datasets_found row lists before it says "and N more".
+MAX_DATASET_NAMES = 12
+
 # Who listed a new-facility candidate: arbitration, or an SME's rejection, which
 # collect-new-facilities appends and a later arbitration keeps.
 FOUND_BY_ARBITRATION = "arbitration"
@@ -755,6 +773,75 @@ def finish_duplicates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "reason": "; ".join(sorted(row["_reasons"])),
         })
     return out
+
+
+def datasets_found(citations: list[Citation], matching: Matching, sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pages that look like datasets, for ingestion to load once: naming or placing
+    DATASET_MIN_FACILITIES or more facilities, or, from a publisher of datasets, found by
+    DATASET_MIN_SEARCHES or more searches.
+
+    Names are told apart by their distinctive words, so "Solid Waste & Recycling Facility" and
+    "Solid Waste and Recycling Facility" are one. A facility a page placed is a site of ours it was
+    filed under by its own location or name, or one of its new-landfill entries. One it stayed with
+    only for want of a location, as Brandon's landfill page did under twelve unnamed searches, says
+    nothing about what the page lists.
+    """
+    by_url = {normalize_scalar(row.get("url_normalized")): row for row in sources}
+    by_page: dict[str, list[Citation]] = {}
+    for citation in citations:
+        url = normalize_url(citation.url)
+        if url:
+            by_page.setdefault(url, []).append(citation)
+
+    rows: list[dict[str, Any]] = []
+    for url, cited in by_page.items():
+        searches = sorted({citation.searched_site_id for citation in cited}, key=_id_order)
+        names = list(dict.fromkeys(
+            normalize_scalar(citation.name_in_source or citation.name_english)
+            for citation in cited if _plain(citation.name_in_source or citation.name_english)
+        ))
+        named = len({frozenset(distinctive_words(name)) or _plain(name) for name in names})
+        placed: set[str] = set()
+        new_entries: set[tuple[float, float]] = set()
+        for citation in cited:
+            filing = matching.filings.get((citation.searched_site_id, citation.source_index))
+            if filing is None or filing.outcome == NO_LOCATION:
+                continue
+            if filing.site_id:
+                placed.add(filing.site_id)
+            elif filing.outcome == NEW_FACILITY and citation.point is not None:
+                new_entries.add((round(citation.point[0], 3), round(citation.point[1], 3)))
+        facilities = len(placed) + len(new_entries)
+        source = by_url.get(url, {})
+        why = []
+        publishes = normalize_scalar(source.get("source_type")).lower() in DATASET_SOURCE_TYPES
+        if len(searches) >= DATASET_MIN_SEARCHES and publishes:
+            why.append(f"found by {len(searches)} searches")
+        if named >= DATASET_MIN_FACILITIES:
+            why.append(f"names {named} facilities")
+        if facilities >= DATASET_MIN_FACILITIES:
+            why.append(f"places {facilities} facilities")
+        if not why:
+            continue
+        shown = names[:MAX_DATASET_NAMES]
+        more = len(names) - len(shown)
+        rows.append({
+            "source_url": normalize_scalar(source.get("url")) or cited[0].url,
+            "source_title": normalize_scalar(source.get("source_title")),
+            "publisher": normalize_scalar(source.get("publisher")),
+            "source_type": normalize_scalar(source.get("source_type")),
+            "source_tier": normalize_scalar(source.get("source_tier")),
+            "publication_date": normalize_scalar(source.get("publication_date")),
+            "searches": len(searches),
+            "facilities_named": named,
+            "facilities_placed": facilities,
+            "searched_site_ids": "; ".join(searches),
+            "placed_site_ids": "; ".join(sorted(placed, key=_id_order)),
+            "facility_names_in_source": "; ".join(shown) + (f"; and {more} more" if more else ""),
+            "why": "; ".join(why),
+        })
+    rows.sort(key=lambda row: (-row["searches"], -max(row["facilities_named"], row["facilities_placed"]), row["source_url"]))
+    return rows
 
 
 def match_sources(citations: list[Citation], sites: list[dict[str, Any]], selection: set[str]) -> Matching:

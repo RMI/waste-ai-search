@@ -26,6 +26,7 @@ from waste_ai_search.match import (
     Citation,
     Site,
     compare_names,
+    datasets_found,
     judged_name,
     match_sources,
     run_selection,
@@ -491,3 +492,42 @@ def test_a_match_outside_the_selection_is_listed_not_filed():
     assert (row["matched_site_id"], row["country_iso3"], row["searched_site_id"], row["source_url"]) == (
         "2", "USA", "1", "https://nd.example/pembina",
     )
+
+
+# --- pages that look like datasets ---------------------------------------------------------------
+REGISTRY = "https://council.example.nz/closed-landfills.csv"
+COUNCIL = [seed("101", "Smith Road Landfill", -41.0, 175.0, "NZL"), seed("102", "Jones Road Landfill", -41.09, 175.0, "NZL"),
+           seed("103", "Brown Road Landfill", -41.3, 175.0, "NZL")]
+
+
+def test_a_page_three_searches_found_is_listed_as_a_dataset():
+    cited = [cite(sid, REGISTRY, name, point) for sid, name, point in (
+        ("101", "Smith Road Landfill", (-41.0, 175.0)), ("102", "Jones Road Landfill", (-41.09, 175.0)),
+        ("103", "Brown Road Landfill", (-41.3, 175.0)),
+    )]
+    sources = [{"url_normalized": REGISTRY, "url": REGISTRY, "source_title": "Closed landfills", "publisher": "Council",
+                "source_type": "Regulator", "source_tier": "Tier 1", "publication_date": "2024-01-01"}]
+    [row] = datasets_found(cited, match(cited, COUNCIL), sources)
+    assert (row["source_url"], row["publisher"], row["searches"], row["facilities_named"], row["facilities_placed"]) == (
+        REGISTRY, "Council", 3, 3, 3,
+    )
+    assert row["placed_site_ids"] == "101; 102; 103"
+    assert row["why"] == "found by 3 searches; names 3 facilities; places 3 facilities"
+
+
+def test_one_search_naming_two_of_a_pages_facilities_lists_it_and_its_new_entries_count():
+    cited = [
+        cite("101", REGISTRY, "Smith Road Landfill", (-41.0, 175.0), index=1),
+        # A row none of our sites is: a new-landfill entry of the page.
+        cite("101", REGISTRY, "Hilltop Landfill", (-41.6, 175.0), index=2),
+    ]
+    [row] = datasets_found(cited, match(cited, COUNCIL), [])
+    assert (row["searches"], row["facilities_named"], row["facilities_placed"], row["placed_site_ids"]) == (1, 2, 2, "101")
+    assert row["facility_names_in_source"] == "Smith Road Landfill; Hilltop Landfill"
+
+
+def test_a_page_staying_with_searches_only_for_want_of_a_location_places_nothing():
+    """Brandon's landfill page stayed with twelve unnamed searches: that says nothing about what it lists."""
+    cited = [cite(sid, BRANDON_PAGE, "Eastview Landfill") for sid in ("13339", "13340")]
+    sites = [BRANDON, NEAR_BRANDON, seed("13340", "domestic landfill", 49.95, -99.6)]
+    assert datasets_found(cited, match(cited, sites), []) == []

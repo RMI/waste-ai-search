@@ -42,6 +42,8 @@ from .match import (
     NAME_NEARBY,
     NAMED_AMONG_SEVERAL,
     NEW_FACILITY,
+    DATASETS_FOUND_FILE,
+    DATASETS_FOUND_HEADERS,
     NEW_FACILITY_FILE,
     NEW_FACILITY_HEADERS,
     NO_LOCATION,
@@ -55,6 +57,7 @@ from .match import (
     Citation,
     Filing,
     Matching,
+    datasets_found,
     match_sources,
     run_selection,
 )
@@ -989,7 +992,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     # run selected get values. Everything filed under one site, from any search, is decided
     # together: one review row per site and attribute, and per year for a yearly attribute.
     selection = run_selection(sites, set(found))
-    matching = match_sources(citations_for(found), sites, selection)
+    found_citations = citations_for(found)
+    matching = match_sources(found_citations, sites, selection)
     pools = file_evidence(found, matching, sites_by_id)
     evidence_by_id = {
         row["evidence_id"]: row for _by_attribute, rows in found.values() for row in rows
@@ -1129,6 +1133,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         "new_facilities": out / NEW_FACILITY_FILE,
         "possible_duplicates": out / POSSIBLE_DUPLICATES_FILE,
         "outside_run": out / OUTSIDE_RUN_FILE,
+        "datasets_found": out / DATASETS_FOUND_FILE,
     }
     # The new-facility candidates SMEs marked, which collect-new-facilities added, stay listed.
     new_facilities = matching.new_facilities + read_listed_candidates(paths["new_facilities"])
@@ -1136,7 +1141,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     # Header only: nothing is accepted automatically. Ingestion reads the SMEs' decisions from the
     # workbook, and accepts an empty resolved.csv beside it.
     write_csv_records(paths["resolved"], [], RESOLVED_HEADERS)
-    write_csv_records(paths["sources"], dedupe_sources(source_entries), SOURCES_HEADERS)
+    sources = dedupe_sources(source_entries)
+    write_csv_records(paths["sources"], sources, SOURCES_HEADERS)
     write_csv_records(paths["review_queue"], review_queue, REVIEW_QUEUE_HEADERS)
     write_csv_records(paths["leads"], leads, SUPPLEMENTARY_LEADS_HEADERS)
     write_csv_records(paths["warnings"], parse_warnings, PARSE_WARNING_HEADERS)
@@ -1148,6 +1154,10 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     write_csv_records(paths["new_facilities"], new_facilities, NEW_FACILITY_HEADERS)
     write_csv_records(paths["possible_duplicates"], matching.duplicates, POSSIBLE_DUPLICATES_HEADERS)
     write_csv_records(paths["outside_run"], matching.outside, OUTSIDE_RUN_HEADERS)
+    # Pages that look like datasets, better loaded once through ingestion than found again by every
+    # search that needs one of their rows.
+    datasets = datasets_found(found_citations, matching, sources)
+    write_csv_records(paths["datasets_found"], datasets, DATASETS_FOUND_HEADERS)
 
     paths["workbook"] = write_review_workbook(
         out / f"{config.run_id}_review.xlsx",
@@ -1180,6 +1190,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "contradiction_checks", "value": contradiction_checks},
             {"setting": "not_a_waste_facility", "value": not_a_waste_facility},
             *match_settings(matching),
+            {"setting": "datasets_found", "value": len(datasets)},
         ],
         review_queue=review_queue,
         leads=leads,
