@@ -301,7 +301,7 @@ as none.
 |---|---|---|
 | A location | 1. Exactly one of our sites within 2 km | That site, whether or not it was the one searched |
 | A location | 2. Two or more within 2 km | The one its name strongly matches, if exactly one does. Otherwise a **tie**: the site searched if it is one of them, else the nearest (among those its name fits, where it fits several). The pairs go on `possible_duplicates.csv`. |
-| A location | 3. None within 2 km, but its name strongly matches the site searched, within 5 km of it (25 km where our location is flagged inexact) | The site searched. Its location is reviewed as a coordinate correction. Where we hold no location for the site searched, the name alone decides. |
+| A location | 3. None within 2 km, but its name strongly matches the site searched, within 5 km of it (25 km where our location is flagged inexact) | The site searched. Its location is reviewed as a coordinate correction. Where we hold no location for the site searched, the name alone decides. A name with fewer than two distinctive words never matches strongly, which leaves most of Brazil's sites without this rule (see Brazil, under [What is actually searched](#what-is-actually-searched--read-this-before-a-full-run)). |
 | A location | 4. Anything else | No site. Listed in `new_facility_candidates.csv`. |
 | No location | 5. Its name strongly matches exactly one other site of ours within 200 km of the site searched, and not the site searched | That site, **moved by name** |
 | No location | 6. Anything else | The site searched, flagged **no location**. The flag names any site of ours within 200 km that the name also fits, ties included, and says if the same page was cited for other searches. `corrected_site_id` offers those sites, and the sites whose searches cited the page. |
@@ -619,6 +619,18 @@ likelier fix. Opting in to Brazil does not lift rule 4, and many of SINIR's name
 labels such as `Dump`, so pass `--include-unsearchable-names` too to search those.
 
 Unknown is **not** treated as inexact: only an explicit FALSE triggers a coordinate search.
+
+**Since build step 5, few of Brazil's found coordinates reach review.** A source's location is
+filed under the site searched only where it falls within 2 km of it, or its name strongly matches
+the site's within 25 km (rules 1 and 3 of [matching](#matching-each-source-to-a-site)). SINIR's
+point is the municipality's centre, so a dump's own coordinates usually lie farther than 2 km
+from it, and 1,484 of the 2,657 searchable inexact sites have names with fewer than two
+distinctive words ("Aterro Controlado", "Lixão de Itapipoca", "Jeremoabo dump"), which can never
+match strongly. A source placing such a dump 8 km from the municipality's centre goes to
+`new_facility_candidates.csv`, not to review as the site's `found_location`, as it did before. This
+is open: one option is to file a located source within 25 km of a site with an inexact location
+under it unless its name strongly fits another of our sites, so that the name vetoes a match
+rather than being needed for one.
 
 **3. Everywhere else: gap-fill, plus the gas-capture gate.**
 
