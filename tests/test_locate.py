@@ -478,3 +478,21 @@ def test_no_geocoder_is_the_default(monkeypatch):
 
 def test_country_codes():
     assert (iso2("GBR"), iso2("irl"), iso2("NZL"), iso2("XXX")) == ("GB", "IE", "NZ", "")
+
+
+def test_in_prose_the_first_precise_pair_is_the_location():
+    located = parse_coordinates("The site is 1.5 km north of town, at 48.8434, -87.4296.")
+    assert (located.latitude, located.longitude, located.basis) == (48.8434, -87.4296, COORDINATES)
+
+
+def test_a_leading_name_is_taken_off_whatever_its_case():
+    geocoder = FakeGeocoder()
+    stated = source("BRADY ROAD LANDFILL - 1777 Brady Road", "street address", facility_name_english="Brady Road Landfill")
+    locate_source(stated, SITE, {}, geocoder, live=True)
+    assert geocoder.calls == [("1777 Brady Road", "CA")]
+
+
+def test_saving_leaves_no_temporary_file(tmp_path):
+    path = tmp_path / "source_locations.json"
+    save_locations(path, {"CAN|x": {"basis": "none"}})
+    assert [p.name for p in tmp_path.iterdir()] == ["source_locations.json"]

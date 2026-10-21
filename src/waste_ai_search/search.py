@@ -165,8 +165,22 @@ def check_run_links(run_dir: Path) -> dict:
     return results
 
 
-# The locate step saves its answers this often, so an interrupted run keeps what it paid for.
+# The locate step saves its answers after this many lookups, so an interrupted run keeps what it
+# paid for without rewriting the file for every source.
 LOCATE_SAVE_EVERY = 25
+
+
+class _CountingGeocoder:
+    """A geocoder that counts its lookups, so the locate step knows when it has paid for some."""
+
+    def __init__(self, geocoder: Any) -> None:
+        self.geocoder = geocoder
+        self.name = geocoder.name
+        self.calls = 0
+
+    def geocode(self, address: str, iso2: str) -> Any:
+        self.calls += 1
+        return self.geocoder.geocode(address, iso2)
 
 
 def locate_run(config: PipelineConfig, sites: list[dict[str, Any]] | None = None) -> list[Located]:
@@ -180,7 +194,8 @@ def locate_run(config: PipelineConfig, sites: list[dict[str, Any]] | None = None
     if sites is None:
         sites, _headers = resolve_sites(config, allow_database=False)
     sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
-    geocoder = make_geocoder(config.geocoder)
+    configured = make_geocoder(config.geocoder)
+    geocoder = _CountingGeocoder(configured) if configured is not None else None
     path = config.run_dir / SOURCE_LOCATIONS_FILE
     cache = load_locations(path)
     by_site: dict[str, list[Path]] = {}
@@ -189,7 +204,7 @@ def locate_run(config: PipelineConfig, sites: list[dict[str, Any]] | None = None
 
     located: list[Located] = []
     failures: list[str] = []
-    unsaved = 0
+    saved_at = 0
     try:
         for site_id, paths in sorted(by_site.items()):
             site = sites_by_id.get(site_id)
@@ -204,16 +219,14 @@ def locate_run(config: PipelineConfig, sites: list[dict[str, Any]] | None = None
             for source in merge_payloads(payloads)["sources"] if payloads else []:
                 if dropped_source_site(source.get("url")) or not states_location(source):
                     continue
-                before = len(cache)
                 try:
                     located.append(locate_source(source, site, cache, geocoder, live=True))
                 except GeocoderError as exc:
                     failures.append(str(exc))
                     continue
-                unsaved += len(cache) - before
-                if unsaved >= LOCATE_SAVE_EVERY:
+                if geocoder is not None and geocoder.calls - saved_at >= LOCATE_SAVE_EVERY:
                     save_locations(path, cache)
-                    unsaved = 0
+                    saved_at = geocoder.calls
     finally:
         save_locations(path, cache)
 

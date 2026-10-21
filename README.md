@@ -228,7 +228,8 @@ Every answer is kept in `source_locations.json` in the run folder, keyed by the 
 country, never by site. So an address is looked up once however many sources state it, and a
 resumed search or the follow-up pass looks up only what is new. An address kept as "no geocoder
 configured" is looked up once a geocoder is set; a failed lookup is not kept, and is tried again
-next time. The file is saved as the step goes, so an interrupted run keeps what it paid for.
+next time. Any other answer is kept, so to look addresses up again with another geocoder, delete
+the file first. It is saved as the step goes, so an interrupted run keeps what it paid for.
 
 Arbitration only reads it, so it stays offline. It parses coordinates and grid references itself,
 which needs no network, so a run's coordinates are read even before it is located; an address

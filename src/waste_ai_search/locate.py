@@ -179,7 +179,7 @@ _DMS = re.compile(
 # Decimal degrees: 48.8434, -87.4296, or 48.8434°N 87.4296°W. A decimal point is required.
 _DECIMAL = re.compile(
     r"(?<![A-Za-z\d.])(?P<pre>[NSEW](?![A-Za-z]))?\s*(?P<sign>[-+−–])?\s*"
-    r"(?P<deg>\d{1,3}\.\d+)(?![\d.])\s*[°º˚]?\s*(?(pre)|(?P<post>[NSEW](?![A-Za-z]))?)"
+    r"(?P<deg>\d{1,3}\.\d+)(?!\d|\.\d)\s*[°º˚]?\s*(?(pre)|(?P<post>[NSEW](?![A-Za-z]))?)"
 )
 _LAT_LABEL = re.compile(r"\blat(?:itude)?\b", re.IGNORECASE)
 _LON_LABEL = re.compile(r"\b(?:lon|long|lng|longitude)\b", re.IGNORECASE)
@@ -263,6 +263,12 @@ def parse_coordinates(text: str, strict: bool = False) -> Located | None:
     first, second = components[0], components[1]
     if strict and (len(components) > 2 or not _only_labels(text, [first.span, second.span])):
         return None
+    # In prose ("1.5 km north of 48.8434, -87.4296"), the first pair precise enough to be a
+    # location is the one meant.
+    for one, two in zip(components, components[1:]):
+        if one.fine and two.fine:
+            first, second = one, two
+            break
 
     if first.hemisphere in {"E", "W"} or second.hemisphere in {"N", "S"}:
         latitude, longitude = second, first
@@ -673,8 +679,9 @@ def address_to_send(text: str, names: list[str]) -> str:
     for name in sorted({normalize_scalar(n) for n in names if normalize_scalar(n)}, key=len, reverse=True):
         if _plain(address) == _plain(name):
             return ""
-        if address.casefold().startswith(name.casefold()):
-            rest = address[len(name):].lstrip(" ,;:-–")
+        leading = re.match(re.escape(name), address, re.IGNORECASE)
+        if leading:
+            rest = address[leading.end():].lstrip(" ,;:-–")
             if rest:
                 address = rest
     return address
@@ -698,9 +705,16 @@ def load_locations(path: Path) -> dict[str, dict[str, Any]]:
 
 
 def save_locations(path: Path, entries: dict[str, dict[str, Any]]) -> None:
+    """Write under a hidden temporary name, then rename: a hard stop never leaves half a file, which
+    would read as nothing located and send every address again."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = dict(sorted(entries.items()))
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(json.dumps(dict(sorted(entries.items())), indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def _record(cache: dict[str, dict[str, Any]], text: str, iso3: Any, located: Located, match: str = "") -> None:
