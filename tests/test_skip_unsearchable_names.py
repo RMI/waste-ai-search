@@ -15,10 +15,12 @@ from waste_ai_search.run_context import PipelineConfig
 from waste_ai_search.searchable_names import (
     GENERIC,
     MINING,
+    NAMED,
     NO_NAME,
     NOT_A_NAME,
     SKIPPED_SITES_FILE,
     describe_counts,
+    name_class,
 )
 
 # (site_id, site_name, original_site_name): one of each class, then a site named after a mining
@@ -138,6 +140,45 @@ def test_the_measurement_still_sees_the_sites_the_rule_skips():
     with contextlib.redirect_stdout(io.StringIO()):
         selections = ny.batch_selections(sites)
     assert [s["site_id"] for s in selections[1]] == ["1", "2"]
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        # Initials and route codes say which site it is (local 15 Oct scan: AUS 10836, USA 3525,
+        # 5141, 5846, 1574).
+        ("K & W Landfill", NAMED),
+        ("R & B Landfill", NAMED),
+        ("Sr 85 Landfill", NAMED),
+        ("Gb Landfill", NAMED),
+        ("Bj Landfill", NAMED),
+        # Numbers, lone letters, roman numerals and "no" only number a site or cell.
+        ("Dump 1", GENERIC),
+        ("Landfill No 2", GENERIC),
+        ("Landfill A", GENERIC),
+        ("Landfill II", GENERIC),
+        ("Garbage dump", GENERIC),
+    ],
+)
+def test_initials_and_route_codes_count_as_a_name(name, expected):
+    assert name_class(name) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "original", "expected"),
+    [
+        # The translation lost a name the source recorded; the agent searches the original first.
+        ("", "Свалка у деревни Ивановка", NAMED),
+        ("OpenStreetMap Landfill", "Hartland", NAMED),
+        ("OpenStreetMap Landfill", "", NO_NAME),
+        ("", "Отвал Северный", NO_NAME),  # the original is a spoil heap, so still skipped
+        # Known limitation: the generic check knows only English words, so it can't tell a
+        # distinctive original from a generic one such as Полигон ТБО, and reads the English name.
+        ("Solid Waste Landfill", "Полигон ТБО «Новосёлки»", GENERIC),
+    ],
+)
+def test_an_empty_english_name_with_a_source_spelling_is_named(name, original, expected):
+    assert name_class(name, original) == expected
 
 
 @pytest.mark.parametrize(

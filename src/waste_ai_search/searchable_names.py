@@ -66,10 +66,18 @@ def name_reason(name: Any, original_name: Any = "") -> tuple[str, str]:
     """(class, the rule that put it there): one of NAME_CLASSES, and "" for a named site.
 
     `name` is the English name the search sees; `original_name` the source's own spelling, where
-    it differs, which only the mining check reads.
+    it differs. The mining check reads both. Where the English name is empty or filler, a source
+    spelling that is itself named keeps the site named: the translation lost a name the source
+    recorded, and the agent searches that spelling first. The generic check reads only the English
+    name: it knows only English words, so it would pass a generic original such as `Полигон ТБО`
+    ("MSW landfill") as named.
     """
     text = normalize_scalar(name)
     lowered = text.casefold()
+    if not text or lowered in PLACEHOLDER_NAMES:
+        original = normalize_scalar(original_name)
+        if original and name_class(original, original) == NAMED:
+            return NAMED, ""
     if not text:
         return NO_NAME, "empty name"
     if lowered in PLACEHOLDER_NAMES:

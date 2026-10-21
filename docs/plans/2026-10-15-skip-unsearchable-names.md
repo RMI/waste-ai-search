@@ -104,7 +104,12 @@ What it shows:
 Open questions this raises:
 
 1. Should the generic test also catch description-only names like `Sanitary Landfill`,
-   `Controlled Landfill` and `Municipal Landfill`?
+   `Controlled Landfill` and `Municipal Landfill`? The test reads only the English name, since it
+   knows only English words: a site whose English name is a generic translation is skipped even
+   when its original names it (`Solid Waste Landfill` for `Полигон ТБО «Новосёлки»`), because the
+   test can't tell that original from a generic one such as `Полигон ТБО`. An empty English name
+   with a source spelling does count as named. Initials and route codes (`K & W Landfill`,
+   `SR 85 Landfill`) count as a name too; at first they were classed as generic labels.
 2. Is skipping about three quarters of Turkey and Russia right? Batch 1 included sites with no
    name (New Zealand had 44 in this list), so the measurement can show whether searching them
    found anything.

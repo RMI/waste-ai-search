@@ -362,14 +362,20 @@ facility nearby. Four classes of name are skipped
 
 | Class | What it is | Examples |
 |---|---|---|
-| No name | An empty name, or the filler ingestion gives an OSM polygon with no name | `OpenStreetMap Landfill` |
+| No name | An empty name, or the filler ingestion gives an OSM polygon with no name, unless the source's own spelling is a name | `OpenStreetMap Landfill` |
 | Not a name | A URL, a bare number or a survey note that ended up as the name | `update the tag landuse after survey`, `4000` |
-| Generic label | Only says what kind of site it is (`is_generic_site_name`) | `domestic landfill`, `Landfill`, `Municipal Dump` |
+| Generic label | Only says what kind of site it is (`is_generic_site_name`). Initials and route codes count as a name: `K & W Landfill` and `SR 85 Landfill` are searched | `domestic landfill`, `Landfill`, `Municipal Dump`, `Landfill II` |
 | Mining feature | A spoil heap or similar, matched in the English name or the original (отвал, террикон, відвал) | `Overburden Blade`, `Terrikon` |
 
 Nothing in the database changes: a skipped site stays in WasteMAP and Climate TRACE. It just isn't
 web-searched until it has a name worth searching for. The test leaves some description-only names
 in, such as `Sanitary Landfill` and `Controlled Landfill`, and names still in Cyrillic.
+
+The generic test knows only English words, so it reads the English name, not the source's own
+spelling. It can't tell a generic original such as `Полигон ТБО` ("MSW landfill") from a
+distinctive one, so a site whose English name is a generic translation is skipped even when its
+original, which the agent would search first, names it. How often that happens can't be measured
+from data in this repo.
 
 It works like the country rules. The run prints how many sites it skipped in each class, and an
 explicit request wins:
