@@ -9,6 +9,11 @@ location listed as a lead) are gone on purpose. A cached attribute-first respons
 its found coordinates become the location stated by the sources cited for both.
 
 A location that differs from ours, by however little, goes to review like any other value.
+
+Changed on purpose for build step 5: a source is filed under the site it is about by where it
+says the facility is (match.py), so El Hongo now has a location of ours, and a source more than
+2 km from it is a new-facility candidate, not one of its values. Brazil's municipality-centre site
+takes a location up to 25 km away only where the source's name matches it.
 """
 from __future__ import annotations
 
@@ -63,14 +68,15 @@ REGULATOR = {**NEWS, "publisher": "SEMARNAT", "source_type": "Regulator", "url":
 
 
 def arbitrate_el_hongo(tmp_path, response, **seed):
-    """Arbitrate one site, with no seed coordinates unless given, against one cached response."""
+    """Arbitrate one site, at OSM's point unless given another, against one cached response."""
     from waste_ai_search.seed_source import seed_headers
 
     run_dir = tmp_path / "run"
     site = {
         "facility_id": "21", "site_id": "21", "internal_facility_id": "21", "year": "2016",
         "site_name": "EL HONGO", "facility_name": "EL HONGO", "country_iso3": "MEX", "iso3c_plus": "MEX",
-        "contributing_data_sources": "osm_2022", "reference_year": "2016", **seed,
+        "contributing_data_sources": "osm_2022", "reference_year": "2016",
+        "latitude": "32.5163", "longitude": "-116.2141", **seed,
     }
     write_csv_records(run_dir / "seed.csv", [site], seed_headers())
     raw = run_dir / "raw_foundry_responses"
@@ -106,10 +112,10 @@ def rows(run_dir, name):
 def test_an_older_response_still_gives_one_location_row(tmp_path):
     run_dir = arbitrate_el_hongo(tmp_path, old_response([("found_latitude", "32.5122"), ("found_longitude", "-116.2134")]))
 
-    # A Tier 3 source fills an empty location, so the point waits for review as one row.
+    # A Tier 3 source disagrees with OSM's point, so the point waits for review as one row.
     queue = rows(run_dir, "review_queue.csv")
     assert [(row["attribute_name"], row["resolved_value"], row["resolution"]) for row in queue] == [
-        (LOCATION_ATTRIBUTE, "32.5122, -116.2134", "Filled empty baseline")
+        (LOCATION_ATTRIBUTE, "32.5122, -116.2134", "Conflict - needs review")
     ]
     [evidence] = rows(run_dir, "evidence.csv")
     assert (evidence["stated_location"], evidence["location_basis"]) == ("32.5122, -116.2134", "coordinates")
@@ -142,6 +148,9 @@ def test_the_most_credible_source_wins_then_the_newest(tmp_path):
     [location] = rows(run_dir, "review_queue.csv")
     assert (location["resolved_value"], location["winning_source_url"]) == ("32.52, -116.22", newer_permit["url"])
     assert location["value_date"] == "2021-01-01"
+    # The news story places it 12 km away, where none of our sites is: a new-facility candidate.
+    [candidate] = rows(run_dir, "new_facility_candidates.csv")
+    assert (candidate["source_urls"], candidate["nearest_site_id"]) == (newest_news["url"], "21")
 
 
 def test_coarse_coordinates_are_not_a_location_value_nor_a_lead(tmp_path):
@@ -222,21 +231,26 @@ def test_a_value_row_carries_its_sources_facility_and_location(tmp_path):
 
 
 def test_a_coordinates_only_site_gets_its_found_location_from_a_source(tmp_path):
-    """Brazil's inexact SINIR sites are searched for sources that say where the dump is."""
+    """Brazil's inexact SINIR sites are searched for sources that say where the dump is. The permit
+    places it 8 km from the municipality centre we hold, beyond the 2 km match but within the 25 km
+    an inexact location allows a source whose name matches."""
     from waste_ai_search.seed_source import seed_headers
 
     run_dir = tmp_path / "run"
-    site = {"facility_id": "9", "site_id": "9", "internal_facility_id": "9", "year": "2024", "site_name": "Lixão",
-            "facility_name": "Lixão", "country_iso3": "BRA", "iso3c_plus": "BRA", "is_location_exact": "FALSE",
+    name = "Lixão de Porto Nacional"
+    site = {"facility_id": "9", "site_id": "9", "internal_facility_id": "9", "year": "2024", "site_name": name,
+            "facility_name": name, "country_iso3": "BRA", "iso3c_plus": "BRA", "is_location_exact": "FALSE",
             "contributing_data_sources": "sinir_2024", "reference_year": "2024",
             "latitude": "-10.1800", "longitude": "-48.3300"}
     write_csv_records(run_dir / "seed.csv", [site], seed_headers())
     raw = run_dir / "raw_foundry_responses"
     raw.mkdir(parents=True)
-    permit = {**REGULATOR, "publisher": "NATURATINS", "url": "https://naturatins.example.br/licenca/123"}
+    permit = {**REGULATOR, "publisher": "NATURATINS", "url": "https://naturatins.example.br/licenca/123",
+              "facility_name_in_source": "Lixão Municipal de Porto Nacional"}
     (raw / "site_9.json").write_text(json.dumps({"site_id": "9", **stated((permit, "-10.2481, -48.3612", "coordinates"))}))
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
-    assert [(row["attribute_name"], row["resolved_value"]) for row in rows(run_dir, "review_queue.csv")] == [
-        (LOCATION_ATTRIBUTE, "-10.2481, -48.3612")
-    ]
+    [location] = rows(run_dir, "review_queue.csv")
+    assert (location["attribute_name"], location["resolved_value"]) == (LOCATION_ATTRIBUTE, "-10.2481, -48.3612")
+    assert location["match"].startswith("Name nearby:") and "coordinate correction" in location["match"]
+    assert location["location_basis"] == "coordinates"

@@ -89,6 +89,10 @@ def test_refresh_seed_prints_a_search_narrowed_to_the_unlocked_sites(tmp_path, c
           "resolution": "Filled empty baseline", "winning_source_tier": "Tier 1"}],
         RESOLVED_HEADERS,
     )
+    # Only a site in the run's selection is followed up, and the selection is the countries the run
+    # searched (build step 5), so the run needs a cached response.
+    (config.run_dir / "raw_foundry_responses").mkdir()
+    (config.run_dir / "raw_foundry_responses" / "site_1.json").write_text('{"sources": []}')
 
     assert run_refresh_seed(config, config.run_dir / "refreshed_seed.csv", merge_identity=False) == 0
     out = capsys.readouterr().out

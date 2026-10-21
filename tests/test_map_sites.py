@@ -4,8 +4,10 @@ Mapcarta's landfill pages copy OpenStreetMap, where most of our sites came from,
 unattributed scrape of business listings. A citation of either is dropped when evidence is
 extracted, whatever source_type the agent gave it, and counted in parse_warnings.csv per site and
 website; so is a lead of the agent's that points at one. The agent is also told not to cite them,
-and to cite the government source where a directory republishes one. Until build step 3 replaces
-the identity gate, a dropped page's coordinates still feed it, though never as a value.
+and to cite the government source where a directory republishes one.
+
+Changed on purpose for build step 5: a dropped page's coordinates no longer feed the 5 km identity
+gate, which matching each source to the site it is about replaced. The tests of that went with it.
 """
 from __future__ import annotations
 
@@ -15,12 +17,7 @@ from datetime import date
 
 import pytest
 
-from waste_ai_search.arbitrate import (
-    cached_source_urls,
-    dropped_map_site_offset_km,
-    extract_evidence,
-    run_arbitration,
-)
+from waste_ai_search.arbitrate import cached_source_urls, extract_evidence, run_arbitration
 from waste_ai_search.arbitration import resolve
 from waste_ai_search.credibility import DROPPED_SOURCE_SITES, dropped_source_site
 from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
@@ -190,102 +187,6 @@ def test_a_run_counts_its_drops_in_parse_warnings_and_cites_none_of_them(tmp_pat
         text = (run_dir / name).read_text()
         assert "mapcarta" not in text and "maptons" not in text, name
     assert [lead["url"] for lead in out["supplementary_leads"]] == [NEWS_LEAD["url"]]
-
-
-# --- the identity gate still reads a map site's coordinates -----------------------------------
-# Until build step 5 replaces the 5 km identity gate, a dropped map page's coordinates still say
-# whether the agent researched another landfill. In batch 1 they were the only found coordinates at
-# 34 of the 46 sites the gate flagged, among them three "domestic landfill" sites that each got East
-# Prince Waste Management Facility's values.
-FAR = ("50.55", "-99.95")  # about 78 km north of the site
-NEAR = ("49.851", "-99.951")
-
-
-def map_page(lat, lon, url="https://mapcarta.com/W9"):
-    return [
-        attribute("found_latitude", lat, cite(url), unit="decimal degrees"),
-        attribute("found_longitude", lon, cite(url), unit="decimal degrees"),
-    ]
-
-
-def test_a_far_map_page_still_flags_the_sites_values(tmp_path):
-    """The East Prince pattern: a map page of another landfill, and a Tier 1 operator from its register."""
-    operator = attribute("operator", "Island Waste Management Corporation", REGULATOR)
-    out = arbitrate(build_run(tmp_path, attributes=[*map_page(*FAR), operator], leads=[]))
-
-    assert [row["attribute_name"] for row in out["resolved"]] == []
-    [queued] = [row for row in out["review_queue"] if row["attribute_name"] == "operator"]
-    assert queued["resolution"] == "Filled empty baseline"
-    assert queued["validation_status"] == "Needs review"
-    note = queued["researcher_notes"]
-    assert "Identity not confirmed: coordinates on a mapcarta.com page the agent cited" in note
-    assert "77.8 km from the seed location" in note
-    assert "Identity not confirmed: mapcarta.com page's coordinates 77.8 km from seed location." in [
-        row["warning"] for row in out["parse_warnings"]
-    ]
-    # Still never a source or a value.
-    assert not any(row["attribute_name"].startswith("found_l") for row in out["review_queue"])
-
-
-def test_a_near_map_page_adds_no_identity_note(tmp_path):
-    operator = attribute("operator", "City of Brandon", REGULATOR)
-    out = arbitrate(build_run(tmp_path, attributes=[*map_page(*NEAR), operator], leads=[]))
-    [queued] = [row for row in out["review_queue"] if row["attribute_name"] == "operator"]
-    assert "Identity" not in queued["researcher_notes"]
-    assert not any("Identity" in row["warning"] for row in out["parse_warnings"])
-
-
-def test_a_far_map_page_counts_even_beside_near_kept_coordinates(tmp_path):
-    """The agent looked at another landfill's page, so which values came from it is unknown."""
-    kept = [
-        attribute("found_latitude", NEAR[0], REGULATOR, unit="decimal degrees"),
-        attribute("found_longitude", NEAR[1], REGULATOR, unit="decimal degrees"),
-    ]
-    operator = attribute("operator", "City of Brandon", REGULATOR)
-    out = arbitrate(build_run(tmp_path, attributes=[*kept, *map_page(*FAR), operator], leads=[]))
-    [queued] = [row for row in out["review_queue"] if row["attribute_name"] == "operator"]
-    assert queued["researcher_notes"].startswith("Identity not confirmed: coordinates on a mapcarta.com page")
-    warnings = [row["warning"] for row in out["parse_warnings"]]
-    assert any(warning.startswith("Identity not confirmed: mapcarta.com page's") for warning in warnings)
-
-
-def test_a_far_kept_location_is_reported_as_a_sources(tmp_path):
-    """Changed on purpose for build step 4: the gate reads where each kept source states the site is,
-    and two decimals is only a hint, so this kept source states four."""
-    kept = [
-        attribute("found_latitude", "50.5500", REGULATOR, unit="decimal degrees"),
-        attribute("found_longitude", "-99.9500", REGULATOR, unit="decimal degrees"),
-    ]
-    out = arbitrate(build_run(tmp_path, attributes=[*kept, *map_page(*FAR)], leads=[]))
-    assert "Identity not confirmed: a source's stated location 77.8 km from seed location." in [
-        row["warning"] for row in out["parse_warnings"]
-    ]
-
-
-def test_a_map_page_is_measured_by_its_own_pair_and_the_farthest_page_counts():
-    payload = {"attributes": [
-        *map_page(*NEAR, url="https://mapcarta.com/W1"),
-        *map_page(*FAR, url="https://ca.maptons.com/p/2"),
-        attribute("found_latitude", "10.0", REGULATOR, unit="decimal degrees"),  # kept: not read here
-    ]}
-    km, map_site = dropped_map_site_offset_km(site(), payload)
-    assert km == pytest.approx(77.8, abs=0.1) and map_site == "maptons.com"
-
-
-def test_half_a_map_location_is_no_location():
-    """Changed on purpose for build step 4: a page cited for one coordinate states no location, so the
-    gate no longer judges a lone axis."""
-    payload = {"attributes": [attribute("found_longitude", "-98.95", cite("https://mapcarta.com/W1"),
-                                        unit="decimal degrees")]}
-    assert dropped_map_site_offset_km(site(), payload) == (None, "")
-
-
-def test_no_map_coordinates_means_no_distance():
-    payload = {"attributes": [
-        attribute("found_latitude", "not a number", cite("https://mapcarta.com/W1"), unit="decimal degrees"),
-        attribute("operator", "City of Brandon", cite("https://mapcarta.com/W1")),
-    ]}
-    assert dropped_map_site_offset_km(site(), payload) == (None, "")
 
 
 # --- the prompt -------------------------------------------------------------------------------

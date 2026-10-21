@@ -517,6 +517,9 @@ EVIDENCE_HEADERS = [
     # (locate.py): every row of a source carries them. location_reason says why a stated location
     # is not a usable point.
     *SOURCE_FACILITY_COLUMNS,
+    # site_id is the site a source is filed under (match.py), blank for a likely new facility, and
+    # searched_site_id the site whose search found it; match says which rule filed it there.
+    "searched_site_id", "match",
 ]
 
 # resolved.csv is written with this header and no rows. Nothing is accepted automatically, so every
@@ -544,28 +547,36 @@ SOURCES_HEADERS = [
     "first_seen_run_id", "times_cited", "cited_site_count",
 ]
 
-# The filtered queue an SME actually works through (Q31).
+# The filtered queue an SME actually works through (Q31). One row per (site, attribute), the key
+# ingestion loads by.
 REVIEW_QUEUE_HEADERS = [
     # translation_note sits beside the names it is about: the SME compares the two spellings and
     # records a translation problem there, separately from researcher_notes.
     # baseline_coordinates is "lat, lon" as Google Maps accepts it pasted into its search box.
+    # Every site column describes the site the value is filed under (match.py). searched_site_id
+    # is the one column about the search that found it, and match says why it is filed here.
     "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "baseline_coordinates",
+    "searched_site_id", "match",
     "attribute_name", "resolution",
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
-    "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
-    "agreeing_source_count",
+    "winning_source_tier", "winning_source_url", "winning_link_status",
+    # The facility the winning source describes, as it writes it. location_basis says how a
+    # found_location was read: coordinates, a grid reference or a rooftop address.
+    "facility_name_in_source", "stated_location", "location_basis",
+    "value_date", "agreeing_source_count",
     # corrected_value is the right value when the found one is wrong. resolved_value is never
     # edited, so the AI's own answer survives for measuring its error rate. corrected_value_date
     # is the date a correction applies to, where that isn't the source's value_date - a current
-    # figure replacing one rejected as outdated, say.
+    # figure replacing one rejected as outdated, say. corrected_site_id re-files the value under
+    # another of our sites.
     "evidence_summary", "validation_status", "rejection_reason", "corrected_value",
-    "corrected_value_date", "reviewer", "reviewed_date",
+    "corrected_value_date", "corrected_site_id", "reviewer", "reviewed_date",
     "researcher_notes",
 ]
 
 SUPPLEMENTARY_LEADS_HEADERS = [
-    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name", "lead_value",
-    "source_tier", "lead_summary", "url", "exclusion_reason",
+    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "searched_site_id", "attribute_name",
+    "lead_value", "source_tier", "lead_summary", "url", "exclusion_reason",
 ]
 
 FOUNDRY_RUN_LOG_HEADERS = [

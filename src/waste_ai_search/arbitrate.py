@@ -5,16 +5,20 @@ can be re-applied to a finished run for free and an interrupted search is never 
 """
 from __future__ import annotations
 
+import csv
 import json
-import re
-import unicodedata
 from datetime import date, datetime
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
 from .arbitration import needs_review, resolve, routed_to_leads
-from .credibility import assign_source_tier, dropped_source_site, is_promotable, tier_label
+from .credibility import (
+    assign_source_tier,
+    dropped_source_site,
+    is_promotable,
+    tier_label,
+    trusted_baseline_name,
+)
 from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, LinkResult, load_results
 from .locate import (
@@ -27,12 +31,31 @@ from .locate import (
     count_bases,
     describe_geocoders,
     format_coordinate,
-    haversine_km,
     load_locations,
     locate_source,
-    parse_point,
-    seed_point,
     states_location,
+)
+from .match import (
+    FOUND_BY_SME,
+    LOCATED,
+    MOVED_BY_NAME,
+    NAME_NEARBY,
+    NAMED_AMONG_SEVERAL,
+    NEW_FACILITY,
+    NEW_FACILITY_FILE,
+    NEW_FACILITY_HEADERS,
+    NO_LOCATION,
+    OUTSIDE_RUN,
+    OUTSIDE_RUN_FILE,
+    OUTSIDE_RUN_HEADERS,
+    POSSIBLE_DUPLICATES_FILE,
+    POSSIBLE_DUPLICATES_HEADERS,
+    TIE,
+    Citation,
+    Filing,
+    Matching,
+    match_sources,
+    run_selection,
 )
 from .payload import (
     citation_ids,
@@ -47,7 +70,7 @@ from .payload import (
 )
 from .prompt_builder import asks_location, needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
-from .searchable_names import NAMED, SKIPPED_NAME_CLASSES, describe_counts, name_class, recorded_skips, site_name_class
+from .searchable_names import SKIPPED_NAME_CLASSES, describe_counts, recorded_skips, site_name_class
 from .snapshot import recorded_run
 from .schema import (
     canonical_attribute,
@@ -78,15 +101,6 @@ from .workbook_io import write_review_workbook
 
 
 MAX_CONFIRMATION_EVIDENCE_ROWS = 2
-
-
-# Whether the agent found the right facility (Q34). Distance from the seed location to where the
-# sources put the facility measures that directly. Beyond this threshold the identity is not
-# established, and every value from that site's search says so to the SME who reviews it. A
-# landfill footprint spans at most a couple of km and seed coordinates are polygon centroids, so
-# 5 km is generous. Build step 5 of the source-matching plan replaces this check with matching each
-# source by location.
-IDENTITY_DISTANCE_KM_THRESHOLD = 5.0
 
 
 def parse_float(value: Any) -> float | None:
@@ -125,9 +139,13 @@ def extract_evidence(
 
     Each source's stated location is read into a point (locate.py), with geocoded addresses taken
     from `locations`, the run's source_locations.json; nothing here reaches the network. Every row
-    of a source carries the facility it describes and that point. A source that states a location
-    also gets a found_location row, and where the point is coordinates, a grid reference or a
-    rooftop address, it is evidence for the site's found location.
+    of a source carries the facility it describes and that point, and its number in the response
+    (source_index), by which matching files it. A source that states a location also gets a
+    found_location row, and where the point is coordinates, a grid reference or a rooftop address,
+    it is evidence for the found location of the site it is filed under.
+
+    Everything here is about the site searched; run_arbitration then files each source under the
+    site it is about (match.py), and decides there what is reviewed.
     """
     link_results = link_results or {}
     site_id = normalize_scalar(site.get("site_id"))
@@ -231,6 +249,7 @@ def extract_evidence(
         item = {
             "evidence_id": evidence_id,
             "source_id": source_id,
+            "source_index": source_index,
             "attribute_name": name,
             "value": value,
             "unit": conversion.unit,
@@ -291,13 +310,13 @@ def extract_evidence(
                 "exclusion_reason": exclusion,
                 "record_created_date": access_date.isoformat(),
                 **location_columns(source, located[source_index]),
+                "source_index": source_index,
             }
         )
         source_entries.append(source_entry(source, source_id, url, tier, rule, run_id, site_id))
 
-    # Where each source puts the facility. Only a site whose coordinates are asked for (and so not
-    # from a Tier 1-2 source) has a found location reviewed; elsewhere the locations are recorded.
-    asked = asks_location(site)
+    # Where each source puts the facility. Whether it is reviewed as the found location depends on
+    # the site the source is filed under, so run_arbitration decides that after matching.
     for source_index, place in located.items():
         source = cited_source(read["sources"][source_index - 1])
         if not states_location(source):
@@ -315,6 +334,7 @@ def extract_evidence(
                 {
                     "evidence_id": evidence_id,
                     "source_id": source_id,
+                    "source_index": source_index,
                     "attribute_name": LOCATION_ATTRIBUTE,
                     "value": value,
                     "unit": "decimal degrees",
@@ -335,8 +355,6 @@ def extract_evidence(
             exclusion = f"Source link broken ({link.status}); not promoted."
         elif not value:
             exclusion = location_exclusion(place)
-        elif not asked:
-            exclusion = "Recorded only: our location comes from a Tier 1-2 source, so it is not reviewed."
         elif not is_promotable(tier):
             exclusion = f"{tier_label(tier)} is below the promotion floor."
         evidence_rows.append(
@@ -370,6 +388,7 @@ def extract_evidence(
                 "exclusion_reason": exclusion,
                 "record_created_date": access_date.isoformat(),
                 **location_columns(source, place),
+                "source_index": source_index,
             }
         )
         source_entries.append(source_entry(source, source_id, url, tier, rule, run_id, site_id))
@@ -571,174 +590,183 @@ def cover_consistency_warnings(resolved: list[dict[str, Any]]) -> list[str]:
     return []
 
 
-def farthest_location_km(site: dict[str, Any], evidence_rows: list[dict[str, Any]]) -> float | None:
-    """How far from the seed the farthest of a site's sources puts it, where its point can be used.
+# --- filing each source under the site it is about (build step 5) -----------------------------
+def citations_for(found: dict[str, tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]]) -> list[Citation]:
+    """Every source each search cited, as matching sees it, read from the search's evidence rows.
 
-    A hint is too coarse to judge by, and a location copied from the prompt is not one at all.
+    Every row of a source carries the facility it describes and where it was located, so any of
+    its rows will do. A source that gives no value and states no location has no row, and nothing
+    to file.
     """
-    seed = seed_point(site)
-    if seed is None:
-        return None
-    distances = [
-        haversine_km(*seed, float(row["located_latitude"]), float(row["located_longitude"]))
-        for row in evidence_rows
-        if row.get("attribute_name") == LOCATION_ATTRIBUTE and row.get("location_basis") in MATCHING_BASES
-    ]
-    return max(distances, default=None)
-
-
-def dropped_map_site_offset_km(site: dict[str, Any], payload: dict[str, Any]) -> tuple[float | None, str]:
-    """How far a dropped map site's own location puts the facility from the seed, and which site.
-
-    Dropping Mapcarta and Maptons as sources also took most of what the identity gate measures: in
-    batch 1 they gave the only found coordinates at 34 of the 46 sites it flagged, each a map page
-    more than 5 km from our site. So the location such a page states is still read here, for the
-    gate alone, never as evidence or a value. The farthest page counts. Build step 5 of the
-    source-matching plan replaces the gate, and this goes with it.
-    """
-    seed = seed_point(site)
-    iso3 = normalize_scalar(site.get("country_iso3"))
-    farthest: float | None = None
-    farthest_site = ""
-    if seed is None:
-        return farthest, farthest_site
-    for source in read_payload(payload)["sources"]:
-        mirror = dropped_source_site(source.get("url"))
-        if not mirror:
-            continue
-        stated = normalize_scalar(source.get("stated_location")).split("|")[0]
-        place = parse_point(stated, iso3) if stated else None
-        if place is None or place.point is None:
-            continue
-        km = haversine_km(*seed, *place.point)
-        if farthest is None or km > farthest:
-            farthest, farthest_site = km, mirror
-    return farthest, farthest_site
-
-
-def flag_identity_mismatch(
-    resolved: list[dict[str, Any]],
-    km: float | None,
-    coordinates: str = "a source's stated location is",
-) -> bool:
-    """Warn the SME about every value from a site whose sources put it too far from the seed.
-
-    Tier cannot detect a credible source describing the wrong facility. Distance can, so a large
-    mismatch is noted on each of the site's values. Nothing is accepted automatically, so the note
-    is all it changes. `coordinates` says in the note where the distance came from.
-    """
-    if km is None or km <= IDENTITY_DISTANCE_KM_THRESHOLD:
-        return False
-    note = (
-        f"Identity not confirmed: {coordinates} {km:.1f} km from the seed "
-        f"location (threshold {IDENTITY_DISTANCE_KM_THRESHOLD:g} km). Check the source is about this facility."
-    )
-    for row in resolved:
-        if row.get("resolution") in {"Not found", "Calculated"}:
-            continue
-        existing = normalize_scalar(row.get("researcher_notes"))
-        row["researcher_notes"] = f"{existing} {note}".strip() if existing else note
-    return True
-
-
-# Words that say what kind of place a facility is, or what sort of road it is on, not which one it
-# is: "Beta Landfill" and our "Alpha Landfill" share only "landfill", which says nothing.
-FACILITY_KIND_WORDS = {
-    "landfill", "landfills", "landfil", "sanitary", "waste", "wastes", "management", "facility",
-    "facilities", "site", "sites", "dump", "dumps", "dumpsite", "dumping", "tip", "refuse", "depot",
-    "grounds", "ground", "solid", "municipal", "msw", "disposal", "recycling", "recovery", "resource",
-    "resources", "centre", "center", "transfer", "station", "garbage", "rubbish", "trash", "the",
-    "and", "for", "city", "town", "county", "district", "regional", "region", "shire", "council",
-    "borough", "township", "village", "closed", "former", "old", "new", "ltd", "limited", "inc",
-    "llc", "plc", "gmbh", "company", "corporation", "corp", "integrated", "environmental", "eco",
-    "park", "area", "cell", "cells", "works", "plant", "yard", "household", "domestic",
-    "industrial", "hazardous", "inert", "organic", "organics", "compost", "composting",
-    "construction", "demolition", "road", "street", "avenue", "highway", "lane", "drive", "route",
-    "des", "del", "los", "las", "les", "aterro", "sanitario",
-    "controlado", "lixao", "vertedero", "relleno", "botadero", "tiradero", "deponie", "decharge",
-    "enfouissement", "technique", "lieu", "discarica", "полигон", "свалка", "тбо", "тко",
-}
-
-
-def distinctive_words(name: Any) -> tuple[list[str], bool]:
-    """The words of a name that say which facility it is, in order, and whether it is in Latin
-    letters.
-
-    Case and accents are ignored, "&" is "and", and kind words, numbers and words under three
-    letters are dropped.
-    """
-    folded = unicodedata.normalize("NFKD", normalize_scalar(name).casefold().replace("&", " and "))
-    folded = "".join(char for char in folded if not unicodedata.combining(char))
-    words = [
-        word for word in re.split(r"[\W_]+", folded)
-        if len(word) >= 3 and not word.isdigit() and word not in FACILITY_KIND_WORDS
-    ]
-    return list(dict.fromkeys(words)), all(char.isascii() for char in folded if char.isalpha())
-
-
-def _same_word(one: str, two: str) -> bool:
-    """Alike enough to be one word misspelled or inflected: "Meadows" and "Medows" or "Meadow"."""
-    if one == two:
-        return True
-    if min(len(one), len(two)) >= 4 and (one.startswith(two) or two.startswith(one)):
-        return True
-    return min(len(one), len(two)) >= 5 and SequenceMatcher(None, one, two).ratio() >= 0.85
-
-
-def names_another_facility(source_names: list[Any], our_names: list[Any]) -> bool:
-    """Whether a source's name for the facility shares no distinctive word with any name of ours.
-
-    Names are compared only where both say which facility they are and are written in the same
-    script; a generic name ("Landfill Site") or one in another script can't be judged, and is not
-    flagged. Build step 5's name matching replaces this.
-    """
-    judged = False
-    for source_name in source_names:
-        theirs, their_script = distinctive_words(source_name)
-        if not theirs:
-            continue
-        for our_name in our_names:
-            ours, our_script = distinctive_words(our_name)
-            if not ours or their_script != our_script:
+    out: list[Citation] = []
+    for site_id, (_by_attribute, rows) in found.items():
+        cited: dict[int, Citation] = {}
+        for row in rows:
+            index = row.get("source_index")
+            if index is None:
                 continue
-            judged = True
-            # One word written as two, or two as one, reads alike run together: "Peaks Nook".
-            if any(_same_word(one, two) for one in theirs for two in ours) or _same_word("".join(theirs), "".join(ours)):
-                return False
-    return judged
+            citation = cited.get(index)
+            if citation is None:
+                latitude, longitude = parse_float(row.get("located_latitude")), parse_float(row.get("located_longitude"))
+                citation = Citation(
+                    searched_site_id=site_id,
+                    source_index=index,
+                    url=normalize_scalar(row.get("url")),
+                    name_in_source=normalize_scalar(row.get("facility_name_in_source")),
+                    name_english=normalize_scalar(row.get("facility_name_english")),
+                    stated_location=normalize_scalar(row.get("stated_location")),
+                    basis=normalize_scalar(row.get("location_basis")),
+                    point=(latitude, longitude) if latitude is not None and longitude is not None else None,
+                    location_reason=normalize_scalar(row.get("location_reason")),
+                )
+                cited[index] = citation
+            if row.get("attribute_name") == "facility_type" and row.get("mapped_value") == NOT_A_WASTE_FACILITY:
+                citation.not_a_waste_facility = True
+        out.extend(cited.values())
+    return out
 
 
-def flag_other_facility_names(
-    site: dict[str, Any], resolved: list[dict[str, Any]], evidence_rows: list[dict[str, Any]]
-) -> int:
-    """Note each value whose winning source names a facility that shares no word with ours.
+# Where a value goes once its source is filed: into its site's pool for review, to Leads, to one of
+# the lists for ingestion (new_facility_candidates.csv or outside_run_matches.csv), or nowhere but
+# evidence.csv, where a Tier 1-2 name or location of ours is not reviewed.
+POOL, LEAD, LISTED, RECORDED = "pool", "lead", "listed", "recorded"
 
-    Until build step 5 matches each source to the site it is about, every source is filed under the
-    site searched, and the agent reports a source about another facility rather than leaving it out.
-    The 5 km check flags one that places the facility elsewhere; this flags one that names another,
-    with or without a location. Returns how many values it noted.
+
+def route(
+    attribute: str, value: Any, filing: Filing, searched: dict[str, Any], filed: dict[str, Any] | None
+) -> tuple[str, str]:
+    """Where one value goes, given where its source is filed, and why it isn't reviewed if not.
+
+    "Not a Waste Facility" stays only with the site searched, and only where that site was offered
+    the check (WP-525); anywhere else it is a lead, and never a new-landfill candidate. A site whose
+    name or coordinates come from a Tier 1-2 source has its sources' names and locations recorded,
+    not reviewed: the match is judged on the site a source is filed under, not the one searched.
     """
-    # A placeholder or generic name of ours ("OpenStreetMap Landfill", "Domestic landfill") says
-    # nothing about which facility it is, so a source can't be judged against it.
-    ours = [name for name in (site.get("site_name"), site.get("original_site_name")) if name_class(name) == NAMED]
-    by_id = {row["evidence_id"]: row for row in evidence_rows}
-    noted = 0
-    for row in resolved:
-        winner = by_id.get(normalize_scalar(row.get("winning_evidence_id")))
-        if winner is None or row.get("resolution") in {"Not found", "Calculated"}:
-            continue
-        in_source = normalize_scalar(winner.get("facility_name_in_source"))
-        english = normalize_scalar(winner.get("facility_name_english"))
-        if not names_another_facility([in_source, english], ours):
-            continue
-        named = in_source or english
-        if in_source and english and distinctive_words(in_source)[0] != distinctive_words(english)[0]:
-            named = f"{in_source} ({english})"
-        note = f"The winning source names {named}; check it is about this facility."
-        existing = normalize_scalar(row.get("researcher_notes"))
-        row["researcher_notes"] = f"{existing} {note}".strip() if existing else note
-        noted += 1
-    return noted
+    searched_id = normalize_scalar(searched.get("site_id"))
+    if attribute == "facility_type" and normalize_scalar(value) == NOT_A_WASTE_FACILITY:
+        if filing.site_id != searched_id:
+            where = f"is filed under site {filing.site_id}" if filing.site_id else "matches no site of ours"
+            return LEAD, (
+                f"{NOT_A_WASTE_FACILITY} is kept only for the site searched, where it was offered the check; "
+                f"this source {where}."
+            )
+        if not needs_contradiction_check(searched):
+            return LEAD, f"{NOT_A_WASTE_FACILITY} is kept only where it was offered, and this site was not offered it."
+    if not filing.site_id:
+        return LISTED, f"No site of ours is near where the source places it: listed in {NEW_FACILITY_FILE}."
+    if not filing.in_run:
+        return LISTED, (
+            f"Filed under site {filing.site_id}, outside this run's selection: listed in {OUTSIDE_RUN_FILE}."
+        )
+    if attribute == LOCATION_ATTRIBUTE and filed is not None and not asks_location(filed):
+        return RECORDED, "Recorded only: our location comes from a Tier 1-2 source, so it is not reviewed."
+    if attribute == "found_facility_name" and filed is not None and trusted_baseline_name(filed):
+        return RECORDED, "Recorded only: our name comes from a Tier 1-2 source, so it is not reviewed."
+    return POOL, ""
+
+
+def filing_for(matching: Matching, site_id: str, source_index: Any) -> Filing:
+    """A source's filing; one matching never saw stays with the site searched."""
+    return matching.filings.get(
+        (site_id, source_index),
+        Filing(site_id, NO_LOCATION, f"{NO_LOCATION}: the source gives no location, so it stays with the site searched.", [site_id]),
+    )
+
+
+def file_evidence(
+    found: dict[str, tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]],
+    matching: Matching,
+    sites_by_id: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Pool every search's evidence under the site each source is filed under, by attribute.
+
+    Each evidence row now names that site as its site_id, the search that found it as its
+    searched_site_id, and the rule as its match. A row not pooled says why in exclusion_reason, and
+    carries its route, so Leads takes only what belongs there. Evidence keeps the agent's order
+    within a search, and searches follow one another by site id, so equal sources still break ties
+    by order.
+    """
+    pools: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    order = 0
+    for site_id, (by_attribute, rows) in sorted(found.items()):
+        searched = sites_by_id[site_id]
+        for row in rows:
+            filing = filing_for(matching, site_id, row.get("source_index"))
+            filed = sites_by_id.get(filing.site_id)
+            row["searched_site_id"] = site_id
+            row["site_id"] = filing.site_id
+            row["internal_facility_id"] = normalize_scalar((filed or {}).get("internal_facility_id") or filing.site_id)
+            row["match"] = filing.match
+            value = row.get("mapped_value") or row.get("normalized_value")
+            where, why = route(row["attribute_name"], value, filing, searched, filed)
+            row["_route"] = where
+            if where in (LEAD, LISTED) or (where == RECORDED and not row["exclusion_reason"]):
+                row["promotion_eligible"] = "FALSE"
+                row["exclusion_reason"] = why
+        for name, items in by_attribute.items():
+            for item in items:
+                filing = filing_for(matching, site_id, item.get("source_index"))
+                where, _why = route(name, item.get("value"), filing, searched, sites_by_id.get(filing.site_id))
+                if where != POOL:
+                    continue
+                order += 1
+                pools.setdefault(filing.site_id, {}).setdefault(name, []).append(
+                    {**item, "order": order, "searched_site_id": site_id}
+                )
+    return pools
+
+
+def resolve_site(site: dict[str, Any], pool: dict[str, list[dict[str, Any]]], searched: bool) -> list[dict[str, Any]]:
+    """Every source filed under one site, from any search, pooled into one decision per attribute.
+
+    A site that was searched is resolved on everything it was asked, so what nothing answered says
+    "Not found"; a site that only had sources filed under it, on what they give.
+    """
+    names = list(requested_attributes(site)) if searched else []
+    names += [name for name in pool if name not in names]
+    return [resolve(site, name, pool.get(name, [])) for name in names]
+
+
+def describe_winner(row: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]], matching: Matching) -> None:
+    """Add to a decided row the search that found its winning value, why that value is filed here,
+    and the facility its source describes, as the queue shows them."""
+    winner = evidence_by_id.get(normalize_scalar(row.get("winning_evidence_id")))
+    if winner is None:
+        return
+    filing = filing_for(matching, winner["searched_site_id"], winner.get("source_index"))
+    row["searched_site_id"] = winner["searched_site_id"]
+    row["match"] = winner["match"]
+    row["facility_name_in_source"] = winner.get("facility_name_in_source", "")
+    row["stated_location"] = winner.get("stated_location", "")
+    row["location_basis"] = winner.get("location_basis", "") if row["attribute_name"] == LOCATION_ATTRIBUTE else ""
+    # The sites an SME might re-file it under, offered where there is more than one.
+    row["_site_choices"] = filing.choices if len(filing.choices) > 1 else []
+
+
+def is_evidence_lead(row: dict[str, Any], promoted: bool) -> bool:
+    """Whether an evidence row is listed under Leads: a "Not a Waste Facility" verdict filed where
+    it was not offered, or a finding that could have been reviewed and lost. `promoted` says whether
+    its attribute was decided with a value at the site it is filed under."""
+    if row["_route"] == LEAD:
+        return True
+    if row["_route"] != POOL or row["promotion_eligible"] == "TRUE" or not row["exclusion_reason"]:
+        return False
+    # A stated location is a lead only where it could have been a value and lost: a hint and a
+    # street-level address stay in evidence.csv.
+    if row["attribute_name"] == LOCATION_ATTRIBUTE and row["location_basis"] not in VALUE_BASES:
+        return False
+    # A finding already promoted is not listed again as a lead. A dead-link source is the exception:
+    # it never won anything - it was excluded before resolution - so the lead is the only place it
+    # is recorded, and without this it vanished whenever another source filled the same attribute.
+    return not promoted or row.get("link_status") == BROKEN
+
+
+def read_listed_candidates(path: Path) -> list[dict[str, str]]:
+    """The new-facility candidates SMEs added to a run's list, which arbitrating again keeps."""
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return [dict(row) for row in csv.DictReader(handle) if row.get("found_by") == FOUND_BY_SME]
 
 
 def payload_leads(
@@ -775,6 +803,7 @@ def payload_leads(
                     "site_id": site_id,
                     "site_name": normalize_scalar(site.get("site_name")),
                     "country_iso3": normalize_scalar(site.get("country_iso3")),
+                    "searched_site_id": site_id,
                     "attribute_name": attribute,
                     "lead_value": value,
                     "source_tier": "",
@@ -840,6 +869,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     retry_sites: list[dict[str, Any]] = []
     # What each source that states a location was read as, for Run_Config.
     stated_bases: list[str] = []
+    # What each search found, by attribute and as evidence rows, before its sources are filed.
+    found: dict[str, tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]] = {}
 
     for site_id, paths in sorted(by_site.items()):
         site = sites_by_id.get(site_id)
@@ -911,16 +942,23 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                 }
             )
 
-        # Resolve everything we would ask for, plus anything the agent actually returned.
-        # A follow-up pass answers attributes the current seed would no longer request, and
-        # discarding that evidence because of a stale baseline would silently lose the finding.
-        # A location is the exception: every source states one, but it is reviewed only where our
-        # coordinates are asked for, as found_location.
-        site_resolved: list[dict[str, Any]] = []
-        to_resolve = list(requested_attributes(site))
-        to_resolve += [name for name in by_attribute if name not in to_resolve and name != LOCATION_ATTRIBUTE]
-        for name in to_resolve:
-            site_resolved.append(resolve(site, name, by_attribute.get(name, [])))
+        found[site_id] = (by_attribute, site_evidence)
+
+    # Each source is filed under the site of ours it is about (match.py), and only the sites this
+    # run selected get values. Everything filed under one site, from any search, is decided
+    # together: one review row per site and attribute.
+    selection = run_selection(sites, set(found))
+    matching = match_sources(citations_for(found), sites, selection)
+    pools = file_evidence(found, matching, sites_by_id)
+    evidence_by_id = {
+        row["evidence_id"]: row for _by_attribute, rows in found.values() for row in rows
+    }
+    resolved_by_site: dict[str, list[dict[str, Any]]] = {}
+    for site_id in sorted(set(found) | set(pools)):
+        site = sites_by_id[site_id]
+        site_resolved = resolve_site(site, pools.get(site_id, {}), site_id in found)
+        for row in site_resolved:
+            describe_winner(row, evidence_by_id, matching)
         for warning in cover_consistency_warnings(site_resolved):
             parse_warnings.append(
                 {
@@ -930,43 +968,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                     "warning": warning,
                 }
             )
-
-        km = farthest_location_km(site, site_evidence)
-        coordinates, found = "a source's stated location is", "a source's stated location"
-        # A dropped map site is not a source, but its page still shows the agent looking at
-        # another landfill, so its coordinates can fail the identity check too.
-        map_km, map_site = dropped_map_site_offset_km(site, payload)
-        kept_far = km is not None and km > IDENTITY_DISTANCE_KM_THRESHOLD
-        if not kept_far and map_km is not None and map_km > IDENTITY_DISTANCE_KM_THRESHOLD:
-            km = map_km
-            coordinates = f"coordinates on a {map_site} page the agent cited (dropped as a source) are"
-            found = f"{map_site} page's coordinates"
-        if flag_identity_mismatch(site_resolved, km, coordinates):
-            parse_warnings.append(
-                {
-                    "run_id": config.run_id,
-                    "site_id": site_id,
-                    "site_name": normalize_scalar(site.get("site_name")),
-                    "warning": f"Identity not confirmed: {found} {km:.1f} km from seed location.",
-                }
-            )
-        flag_other_facility_names(site, site_resolved, site_evidence)
+        resolved_by_site[site_id] = site_resolved
         resolved_rows.extend(site_resolved)
-
-        # Q8: cap evidence rows for pure confirmations; keep everything else.
-        confirmed = {
-            row["attribute_name"]
-            for row in site_resolved
-            if row["resolution"] == "Confirmed baseline"
-        }
-        kept_per_attribute: dict[str, int] = {}
-        for row in site_evidence:
-            name = row["attribute_name"]
-            if name in confirmed:
-                kept_per_attribute[name] = kept_per_attribute.get(name, 0) + 1
-                if kept_per_attribute[name] > MAX_CONFIRMATION_EVIDENCE_ROWS:
-                    continue
-            evidence_rows.append(row)
 
         for row in site_resolved:
             if not routed_to_leads(row):
@@ -977,6 +980,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                     "site_id": site_id,
                     "site_name": normalize_scalar(site.get("site_name")),
                     "country_iso3": normalize_scalar(site.get("country_iso3")),
+                    "searched_site_id": row.get("searched_site_id", ""),
                     "attribute_name": row["attribute_name"],
                     "lead_value": row["resolved_value"],
                     "source_tier": row["winning_source_tier"] or row["best_tier_available"],
@@ -986,36 +990,34 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                 }
             )
 
-        # Feedback 1 lets a low-tier source fill an empty baseline, so a piece of evidence the
-        # tier gate marked ineligible can still end up winning. Listing it as a lead as well would
-        # show the SME the same finding twice, in two places, which feedback 3 rules out.
-        promoted_attributes = {
-            row["attribute_name"]
-            for row in site_resolved
-            if normalize_scalar(row.get("resolved_value"))
-        }
-
-        for row in site_evidence:
-            if row["promotion_eligible"] == "TRUE" or not row["exclusion_reason"]:
-                continue
-            # A stated location is a lead only where it could have been a value and lost: a hint, a
-            # street-level address and a location recorded but not reviewed stay in evidence.csv.
-            if row["attribute_name"] == LOCATION_ATTRIBUTE and (
-                not asks_location(site) or row["location_basis"] not in VALUE_BASES
-            ):
-                continue
-            # A finding already promoted is not listed again as a lead. A dead-link source is the
-            # exception: it never won anything - it was excluded before resolution - so the lead is
-            # the only place it is recorded, and without this it vanished whenever another source
-            # filled the same attribute.
-            if row["attribute_name"] in promoted_attributes and row.get("link_status") != BROKEN:
+    # Feedback 1 lets a low-tier source fill an empty baseline, so a piece of evidence the tier gate
+    # marked ineligible can still end up winning. Listing it as a lead as well would show the SME
+    # the same finding twice, in two places, which feedback 3 rules out.
+    promoted = {
+        (row["site_id"], row["attribute_name"])
+        for row in resolved_rows
+        if normalize_scalar(row.get("resolved_value"))
+    }
+    # Q8: cap evidence rows for pure confirmations, per site they are filed under; keep everything else.
+    confirmed = {(row["site_id"], row["attribute_name"]) for row in resolved_rows if row["resolution"] == "Confirmed baseline"}
+    kept_per_attribute: dict[tuple[str, str], int] = {}
+    for site_id in sorted(found):
+        for row in found[site_id][1]:
+            key = (row["site_id"], row["attribute_name"])
+            if key in confirmed:
+                kept_per_attribute[key] = kept_per_attribute.get(key, 0) + 1
+                if kept_per_attribute[key] > MAX_CONFIRMATION_EVIDENCE_ROWS:
+                    continue
+            evidence_rows.append(row)
+            if not is_evidence_lead(row, key in promoted):
                 continue
             leads.append(
                 {
                     "run_id": config.run_id,
-                    "site_id": site_id,
-                    "site_name": normalize_scalar(site.get("site_name")),
-                    "country_iso3": normalize_scalar(site.get("country_iso3")),
+                    "site_id": row["site_id"] or row["searched_site_id"],
+                    "site_name": "",
+                    "country_iso3": normalize_scalar(sites_by_id.get(row["site_id"] or row["searched_site_id"], {}).get("country_iso3")),
+                    "searched_site_id": row["searched_site_id"],
                     "attribute_name": row["attribute_name"],
                     "lead_value": row["mapped_value"] or row["normalized_value"],
                     "source_tier": row["source_tier"],
@@ -1043,6 +1045,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         queue_row = {header: row.get(header, "") for header in REVIEW_QUEUE_HEADERS}
         queue_row["evidence_summary"] = review_summary(row, closure)
         queue_row["baseline_coordinates"] = baseline_coordinates(sites_by_id.get(row["site_id"], {}))
+        # The workbook offers these in corrected_site_id's dropdown; they are not a column.
+        queue_row["_site_choices"] = row.get("_site_choices", [])
         review_queue.append(queue_row)
 
     not_a_waste_facility = sum(
@@ -1074,7 +1078,12 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         "leads": out / "supplementary_leads.csv",
         "warnings": out / "parse_warnings.csv",
         "retry": out / "sites_to_retry.csv",
+        "new_facilities": out / NEW_FACILITY_FILE,
+        "possible_duplicates": out / POSSIBLE_DUPLICATES_FILE,
+        "outside_run": out / OUTSIDE_RUN_FILE,
     }
+    # The new-facility candidates SMEs marked, which collect-new-facilities added, stay listed.
+    new_facilities = matching.new_facilities + read_listed_candidates(paths["new_facilities"])
     write_csv_records(paths["evidence"], evidence_rows, EVIDENCE_HEADERS)
     # Header only: nothing is accepted automatically. Ingestion reads the SMEs' decisions from the
     # workbook, and accepts an empty resolved.csv beside it.
@@ -1086,6 +1095,11 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     write_csv_records(
         paths["retry"], retry_sites, ["site_id", "site_name", "country_iso3", "reason", "search_notes"]
     )
+    # For ingestion, which has no path for either: landfills none of our sites is, and pairs of our
+    # sites one source fits equally well. Then sources matched outside this run's selection.
+    write_csv_records(paths["new_facilities"], new_facilities, NEW_FACILITY_HEADERS)
+    write_csv_records(paths["possible_duplicates"], matching.duplicates, POSSIBLE_DUPLICATES_HEADERS)
+    write_csv_records(paths["outside_run"], matching.outside, OUTSIDE_RUN_HEADERS)
 
     paths["workbook"] = write_review_workbook(
         out / f"{config.run_id}_review.xlsx",
@@ -1117,17 +1131,41 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             },
             {"setting": "contradiction_checks", "value": contradiction_checks},
             {"setting": "not_a_waste_facility", "value": not_a_waste_facility},
+            *match_settings(matching),
         ],
         review_queue=review_queue,
         leads=leads,
         parse_warnings=parse_warnings,
     )
 
-    print_summary(by_site, resolved_rows, evidence_rows, review_queue, leads, parse_warnings, retry_sites)
+    print_summary(by_site, resolved_rows, evidence_rows, review_queue, leads, parse_warnings, retry_sites, matching)
     return paths
 
 
-def print_summary(cached, resolved_rows, evidence_rows, review_queue, leads, warnings, retry_sites) -> None:
+# Run_Config's count of each match outcome (match.py), in the order of the rules.
+MATCH_SETTINGS = [
+    ("match_located", LOCATED),
+    ("match_named_among_several", NAMED_AMONG_SEVERAL),
+    ("match_tie", TIE),
+    ("match_name_nearby", NAME_NEARBY),
+    ("match_new_facility", NEW_FACILITY),
+    ("match_moved_by_name", MOVED_BY_NAME),
+    ("match_no_location", NO_LOCATION),
+    ("match_outside_run", OUTSIDE_RUN),
+]
+
+
+def match_settings(matching: Matching) -> list[dict[str, Any]]:
+    """How each source was matched, for Run_Config. A source with a location is counted once, however
+    many searches cited it; one without, once for each search that cited it."""
+    return [
+        *({"setting": setting, "value": matching.counts[outcome]} for setting, outcome in MATCH_SETTINGS),
+        {"setting": "new_facility_candidates", "value": len(matching.new_facilities)},
+        {"setting": "possible_duplicates", "value": len(matching.duplicates)},
+    ]
+
+
+def print_summary(cached, resolved_rows, evidence_rows, review_queue, leads, warnings, retry_sites, matching=None) -> None:
     from collections import Counter
 
     resolutions = Counter(row["resolution"] for row in resolved_rows)
@@ -1137,6 +1175,11 @@ def print_summary(cached, resolved_rows, evidence_rows, review_queue, leads, war
     print(f"Attributes arbitrated:   {len(resolved_rows)}")
     print(f"Leads:                   {len(leads)}")
     print(f"Parse warnings:          {len(warnings)}")
+    if matching is not None:
+        print("\nSources matched:")
+        for setting, outcome in MATCH_SETTINGS:
+            print(f"  {matching.counts[outcome]:>5}  {outcome}")
+        print(f"  New-facility candidates: {len(matching.new_facilities)}; possible duplicates: {len(matching.duplicates)}")
     if retry_sites:
         ids = " ".join(row["site_id"] for row in retry_sites)
         print(

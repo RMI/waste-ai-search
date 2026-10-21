@@ -79,11 +79,16 @@ def _fake_run(run_dir: Path, manifest: dict | None = None) -> Path:
         {"site_id": "4", "attribute_name": "found_latitude", "resolution": "Confirmed baseline", "resolved_value": "49.8", "researcher_notes": ""},
     ], ["site_id", "attribute_name", "resolution", "resolved_value", "researcher_notes"])
     _write(run_dir / "review_queue.csv", [
-        {"site_id": "1", "attribute_name": "found_facility_name", "resolution": "Conflict - needs review", "resolved_value": "Smalltown Landfill",
-         "researcher_notes": "Identity not confirmed: source-backed coordinates are 12.0 km from the seed location."},
-        {"site_id": "1", "attribute_name": "facility_type", "resolution": "Filled empty baseline", "resolved_value": "Not a Waste Facility", "researcher_notes": ""},
-        {"site_id": "2", "attribute_name": "found_longitude", "resolution": "Confirmed baseline", "resolved_value": "-123", "researcher_notes": "Identity not confirmed: 7 km"},
-    ], ["site_id", "attribute_name", "resolution", "resolved_value", "researcher_notes"])
+        {"site_id": "1", "searched_site_id": "1", "attribute_name": "found_facility_name", "resolution": "Conflict - needs review",
+         "resolved_value": "Smalltown Landfill", "researcher_notes": ""},
+        {"site_id": "1", "searched_site_id": "1", "attribute_name": "facility_type", "resolution": "Filled empty baseline",
+         "resolved_value": "Not a Waste Facility", "researcher_notes": ""},
+        {"site_id": "2", "searched_site_id": "2", "attribute_name": "found_longitude", "resolution": "Confirmed baseline",
+         "resolved_value": "-123", "researcher_notes": ""},
+        # Site 1's search found site 4's operator: credited to site 1, and filed under site 4.
+        {"site_id": "4", "searched_site_id": "1", "attribute_name": "operator", "resolution": "Filled empty baseline",
+         "resolved_value": "City of Brady", "researcher_notes": ""},
+    ], ["site_id", "searched_site_id", "attribute_name", "resolution", "resolved_value", "researcher_notes"])
     if manifest is not None:
         folder = run_dir / "consolidation_snapshot"
         folder.mkdir(parents=True)
@@ -98,60 +103,63 @@ def test_each_searched_site_says_what_its_search_found(tmp_path):
     assert set(rows) == {"1", "2", "3", "4"}  # site 5 was never searched
     placeholder = rows["1"]
     assert (placeholder["name_class"], placeholder["source_group"]) == (NO_NAME, ny.MAP_ONLY)
-    assert (placeholder["new_values_accepted"], placeholder["new_values_to_review"]) == (0, 2)
-    assert placeholder["found_name"] and placeholder["identity_not_confirmed"]
+    assert (placeholder["new_values_accepted"], placeholder["new_values_to_review"]) == (0, 3)
+    assert placeholder["found_name"] and placeholder["filed_under_another_site"] == 1
     assert placeholder["not_a_waste_facility"]
     assert placeholder["web_searches"] == 21
 
     named = rows["2"]
     assert (named["new_values_accepted"], named["new_values_to_review"]) == (1, 0)  # confirmations don't count
-    assert named["identity_not_confirmed"]  # a note on a confirmation row still flags the site
+    assert named["filed_under_another_site"] == 0
     assert rows["3"]["source_group"] == ny.MAP_ONLY and not rows["3"]["answered"]
     assert rows["4"]["source_group"] == ny.OTHER_SOURCES and rows["4"]["answered"]
     assert rows["4"]["web_searches"] == 0
+    assert rows["4"]["new_values_to_review"] == 0  # its operator row was found by site 1's search
 
 
-def test_a_site_whose_values_only_confirmed_ours_is_still_flagged_by_the_identity_warning(tmp_path):
-    """Nothing is accepted automatically, so a confirmation is never queued and resolved.csv is
-    header-only: the gate's note is on no row. Its parse warning still flags the site."""
+def test_a_search_is_credited_with_the_values_it_found_wherever_they_are_filed(tmp_path):
+    """Replaces the identity gate's count (build step 5): a search that found another site's values
+    is no longer flagged by a distance, so name_yield counts the values filed under another site.
+
+    End to end: a "domestic landfill" search finds a permit for Brady Road Landfill, 40 km away,
+    which states its coordinates. The permit is filed under Brady Road; the search gets the credit.
+    """
     from waste_ai_search.arbitrate import run_arbitration
     from waste_ai_search.input_loader import write_csv_records
     from waste_ai_search.run_context import PipelineConfig
     from waste_ai_search.seed_source import seed_headers
 
     run_dir = tmp_path / "run"
-    write_csv_records(run_dir / "seed.csv", [{
-        "facility_id": "7", "site_id": "7", "internal_facility_id": "7", "year": "2022",
-        "site_name": "Seaton Meadows", "facility_name": "Seaton Meadows", "country_iso3": "GBR",
-        "iso3c_plus": "GBR", "latitude": "54.6", "longitude": "-1.2", "facility_type": "Sanitary Landfill",
-        "contributing_data_sources": "osm_2022", "reference_year": "2022",
-    }], seed_headers())
+
+    def seed(sid, name, lat, lon):
+        return {"facility_id": sid, "site_id": sid, "internal_facility_id": sid, "year": "2022", "site_name": name,
+                "facility_name": name, "country_iso3": "CAN", "iso3c_plus": "CAN", "latitude": lat, "longitude": lon,
+                "contributing_data_sources": "osm_2022", "reference_year": "2022"}
+
+    write_csv_records(run_dir / "seed.csv", [
+        seed("7", "domestic landfill", "50.2", "-97.5"), seed("8", "Brady Road Landfill", "49.7", "-97.2"),
+    ], seed_headers())
     _write(run_dir / "foundry_run_log.csv", [
-        {"site_id": "7", "site_name": "Seaton Meadows", "country_iso3": "GBR", "status": "Succeeded", "web_searches": "4"},
+        {"site_id": "7", "site_name": "domestic landfill", "country_iso3": "CAN", "status": "Succeeded", "web_searches": "4"},
     ], ["site_id", "site_name", "country_iso3", "status", "web_searches"])
-
-    def found(name, value, url, source_type, unit=""):
-        source = {"source_title": "Page", "publisher": "Publisher", "source_type": source_type,
-                  "publication_date": "2024-03-01", "url": url}
-        return {"attribute_name": name, "value": value, "unit": unit, "value_basis": "Direct",
-                "confidence_score": "High", "value_date": "2024", "evidence_summary": "Says so.",
-                "sources": [source]}
-
-    mapcarta = "https://mapcarta.com/W9"  # a page about a landfill 89 km north
+    permit = {"url": "https://winnipeg.example.ca/brady-road", "source_title": "Brady Road permit",
+              "publisher": "Manitoba Environment", "source_type": "Permit or registry", "publication_date": "2024-03-01",
+              "facility_name_in_source": "Brady Road Resource Management Facility",
+              "stated_location": "49.7012, -97.2034", "stated_location_kind": "coordinates",
+              "values": [{"attribute_name": "operator", "value": "City of Winnipeg", "value_basis": "Direct",
+                          "confidence_score": "High", "value_date": "2024", "evidence_summary": "Names the operator."}]}
     raw = run_dir / "raw_foundry_responses"
     raw.mkdir()
-    (raw / "site_7.json").write_text(json.dumps({"site_id": "7", "attributes": [
-        found("found_latitude", "55.4", mapcarta, "Map or coordinate directory", "decimal degrees"),
-        found("found_longitude", "-1.2", mapcarta, "Map or coordinate directory", "decimal degrees"),
-        found("facility_type", "sanitary landfill", "https://regulator.example.gov/permit/7", "Regulator"),
-    ]}))
+    (raw / "site_7.json").write_text(json.dumps({"site_id": "7", "sources": [permit]}))
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
     run = ny.load_run("run", ny.local_reader(run_dir))
-    assert run.review == [] and run.resolved == []
+    assert sorted((row["site_id"], row["searched_site_id"], row["attribute_name"]) for row in run.review) == [
+        ("8", "7", "found_location"), ("8", "7", "operator"),
+    ]
     [row] = ny.site_rows(run)
-    assert row["identity_not_confirmed"]
-    assert (row["new_values_accepted"], row["new_values_to_review"]) == (0, 0)
+    assert row["site_id"] == "7"
+    assert (row["new_values_to_review"], row["filed_under_another_site"]) == (2, 2)
 
 
 def test_the_summary_compares_each_class_with_named_sites_from_the_same_sources(tmp_path):
@@ -160,7 +168,7 @@ def test_the_summary_compares_each_class_with_named_sites_from_the_same_sources(
 
     no_name = summary[(ny.MAP_ONLY, NO_NAME)]
     assert (no_name["sites_searched"], no_name["sites_with_new_value"], no_name["new_value_rate"]) == (1, 1, 1.0)
-    assert no_name["queries_per_new_value"] == 10.5
+    assert no_name["queries_per_new_value"] == 7.0  # 21 queries, 3 new values
     assert no_name["rate_vs_named"] == 1.0  # named map-only site 2 also found something
     assert no_name["verdict"] == "too few to judge"
     generic = summary[(ny.MAP_ONLY, GENERIC)]
@@ -189,11 +197,13 @@ def test_sme_decisions_come_from_the_reviewed_workbook(tmp_path):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Review_Queue"
-    sheet.append(["site_id", "attribute_name", "validation_status", "rejection_reason"])
-    sheet.append(["1", "found_facility_name", "Rejected", "Wrong facility"])
-    sheet.append(["1", "facility_type", "Validated", ""])
-    sheet.append(["2", "found_longitude", "Needs review", ""])  # undecided
-    sheet.append([None, None, None, None])
+    sheet.append(["site_id", "searched_site_id", "attribute_name", "validation_status", "rejection_reason"])
+    sheet.append(["1", "1", "found_facility_name", "Rejected", "Wrong facility"])
+    sheet.append(["1", "1", "facility_type", "Validated", ""])
+    sheet.append(["2", "2", "found_longitude", "Needs review", ""])  # undecided
+    # Since build step 5 a wrong facility says which kind; both count. Credited to the search.
+    sheet.append(["4", "1", "operator", "Rejected", "Wrong facility - another site in our database"])
+    sheet.append([None, None, None, None, None])
     path = tmp_path / "batch1_review.xlsx"
     workbook.save(path)
 
@@ -201,8 +211,9 @@ def test_sme_decisions_come_from_the_reviewed_workbook(tmp_path):
     run.sme = ny.read_review_workbook(path)
     rows = {row["site_id"]: row for row in ny.site_rows(run)}
 
-    assert len(run.sme) == 3
-    assert (rows["1"]["sme_validated"], rows["1"]["sme_rejected"], rows["1"]["sme_wrong_facility"]) == (1, 1, 1)
+    assert len(run.sme) == 4
+    assert (rows["1"]["sme_validated"], rows["1"]["sme_rejected"], rows["1"]["sme_wrong_facility"]) == (1, 2, 2)
+    assert rows["4"]["sme_rejected"] == 0
     assert (rows["2"]["sme_validated"], rows["2"]["sme_rejected"]) == (0, 0)
     assert ny.read_review_workbook(tmp_path / "missing.xlsx") is None
 

@@ -335,49 +335,6 @@ def test_gazetteer_metadata_cannot_beat_an_existing_value():
     assert resolved["validation_status"] == "Routed to leads"
 
 
-def test_distant_locations_flag_every_value_for_the_sme():
-    """A credible source describing the wrong facility is what tier cannot catch. With nothing
-    accepted automatically, the gate only adds its note; build step 5 replaces it."""
-    from waste_ai_search.arbitrate import farthest_location_km, flag_identity_mismatch
-
-    s = site(latitude="6.5", longitude="3.3")
-    response = located_by("14.5000, 121.0000")
-    status_value = {key: value for key, value in attribute("facility_status", "active").items() if key != "sources"}
-    response["sources"].append({**REGULATOR, "values": [status_value]})
-    by_attr, rows, _sources, _warn = extract(s, response)
-    status = resolve(s, "facility_status", by_attr["facility_status"])
-    assert status["validation_status"] == "Needs review"
-
-    km = farthest_location_km(s, rows)
-    assert flag_identity_mismatch([status], km) is True
-    assert status["validation_status"] == "Needs review"
-    assert status["researcher_notes"].startswith("Identity not confirmed: a source's stated location is")
-    assert "Check the source is about this facility." in status["researcher_notes"]
-
-
-def test_nearby_locations_add_no_identity_note():
-    from waste_ai_search.arbitrate import farthest_location_km, flag_identity_mismatch
-
-    s = site(latitude="6.5", longitude="3.3")
-    _by, rows, _sources, _warn = extract(s, located_by("6.5010, 3.3010"))
-    resolved_rows = [{"attribute_name": "operator", "resolution": "Filled empty baseline", "researcher_notes": ""}]
-    assert flag_identity_mismatch(resolved_rows, farthest_location_km(s, rows)) is False
-    assert resolved_rows[0]["researcher_notes"] == ""
-
-
-def test_the_farthest_usable_location_is_measured_and_a_hint_is_not():
-    from waste_ai_search.arbitrate import farthest_location_km
-
-    s = site(latitude="6.5", longitude="3.3")
-    response = located_by("6.5010, 3.3010")
-    response["sources"] += located_by("7.6, 3.3")["sources"]  # one decimal: a hint, 122 km away
-    _by, rows, _sources, _warn = extract(s, response)
-    assert farthest_location_km(s, rows) < 1.0
-    response["sources"] += located_by("7.6000, 3.3000")["sources"]
-    _by, rows, _sources, _warn = extract(s, response)
-    assert 120 < farthest_location_km(s, rows) < 125
-
-
 def test_a_location_200_m_from_ours_goes_to_review():
     """Reversed on purpose. Four of five pilot coordinate conflicts were under 200 m apart, and the
     1 km rule (feedback 5) settled them as the same place. Every value that differs from ours is

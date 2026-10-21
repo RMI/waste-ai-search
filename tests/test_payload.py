@@ -236,10 +236,12 @@ def write_run(tmp_path, responses):
     from waste_ai_search.seed_source import seed_headers
 
     run_dir = tmp_path / "run"
+    # Each site sits where NEW's source places its facility (NZ 123 456), so matching files the
+    # source under the site searched.
     seeds = [
         {"facility_id": sid, "site_id": sid, "internal_facility_id": sid, "year": "2022", "site_name": f"Site {sid}",
          "facility_name": f"Site {sid}", "country_iso3": "GBR", "iso3c_plus": "GBR", "reference_year": "2022",
-         "contributing_data_sources": "osm_2022"}
+         "contributing_data_sources": "osm_2022", "latitude": "54.8056", "longitude": "-1.8094"}
         for sid in responses
     ]
     write_csv_records(run_dir / "seed.csv", seeds, seed_headers())
