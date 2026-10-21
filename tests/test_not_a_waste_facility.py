@@ -8,12 +8,12 @@ The failure these tests exist to prevent is the one the ticket names: a closed, 
 redeveloped landfill read as "not a landfill". Those sites keep emitting methane for decades and
 are exactly what WasteMAP tracks, so "it's a park now" must never become "Not a Waste Facility".
 
-By decision on WP-525 the value is promoted like any facility_type - it reaches the standardized
-table and the next pass's seed - and it is also always routed to review. Tests below pin both, so
-changing either is deliberate.
+By decision on WP-525 the value is handled like any facility_type: it reaches the next pass's seed,
+and it is always reviewed. Nothing is accepted automatically now, so the second needs no rule of its
+own. Tests below pin both, so changing either is deliberate.
 
 All offline: agent responses are hand-built payloads fed through the real extraction, resolution,
-refresh, standardized-table and workbook code.
+arbitration, refresh and workbook code.
 """
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ def arbitrate(site, *attributes):
     payload = {"site_id": site["site_id"], "attributes": list(attributes)}
     by_attr, evidence, _sources, _warn = extract_evidence(site, payload, "run", "v", date(2026, 1, 1))
     names = list(requested_attributes(site)) + [n for n in by_attr if n not in requested_attributes(site)]
-    resolved = [resolve(site, n, by_attr.get(n, []), reviewed_on=date(2026, 1, 1)) for n in names]
+    resolved = [resolve(site, n, by_attr.get(n, [])) for n in names]
     return resolved, evidence
 
 
@@ -138,19 +138,18 @@ def test_a_source_describing_a_quarry_yields_not_a_waste_facility_with_a_clickab
 
 
 def test_even_a_tier_1_verdict_is_routed_to_review():
-    """Without the override this is an ordinary Tier 1 empty-baseline fill, which auto-validates."""
     resolved, _ = arbitrate(unconfirmed_site(), quarry())
     row = row_for(resolved, "facility_type")
 
     assert row["validation_status"] == "Needs review"
     assert needs_review(row)
-    assert "never signed off automatically" in row["resolution_rule"]
 
 
-def test_the_override_is_what_prevents_auto_validation():
-    """Control: the same Tier 1 source giving an ordinary facility type does auto-validate."""
+def test_an_ordinary_tier_1_facility_type_is_reviewed_too():
+    """Reversed on purpose: this once auto-validated, and a rule of its own kept the verdict from
+    doing the same. Nothing is accepted automatically now, so that rule is gone."""
     resolved, _ = arbitrate(unconfirmed_site(), attribute("facility_type", "Dumpsite", [REGULATOR]))
-    assert row_for(resolved, "facility_type")["validation_status"] == "Auto-validated"
+    assert needs_review(row_for(resolved, "facility_type"))
 
 
 # --- a low-tier contradiction -------------------------------------------------------------------
@@ -223,16 +222,36 @@ def test_a_site_the_agent_could_not_find_gets_no_verdict():
     assert all(r["resolved_value"] != NOT_A_WASTE_FACILITY for r in resolved)
 
 
-# --- criterion 4, as decided on WP-525: promoted, and always reviewed ---------------------------
-def test_the_verdict_is_promoted_to_the_standardized_table():
-    """Decided on WP-525: flows like any facility_type value. Pinned so reversing it is deliberate."""
-    from waste_ai_search.standardized import build_standard_record
+# --- criterion 4, as decided on WP-525: carried forward, and always reviewed --------------------
+def test_a_real_arbitration_queues_the_verdict_and_the_refresh_carries_it_forward(tmp_path):
+    """Decided on WP-525: flows like any facility_type value. Pinned so reversing it is deliberate.
 
-    site = unconfirmed_site()
-    resolved, _ = arbitrate(site, quarry())
-    record, _notes = build_standard_record(site, resolved, sha="deadbeef")
+    The verdict is in the review queue, not resolved.csv, and refresh-seed still reads it there, as
+    it reads every value awaiting review.
+    """
+    import json
 
-    assert record["facility_type"] == NOT_A_WASTE_FACILITY
+    from waste_ai_search.arbitrate import run_arbitration
+    from waste_ai_search.cli import read_arbitrated_rows
+    from waste_ai_search.input_loader import write_csv_records
+    from waste_ai_search.run_context import PipelineConfig
+    from waste_ai_search.seed_refresh import refresh_sites
+    from waste_ai_search.seed_source import seed_headers
+
+    site = unconfirmed_site(facility_id="4471", year="2022", facility_name="Landfill", iso3c_plus="CAN")
+    run_dir = tmp_path / "run"
+    write_csv_records(run_dir / "seed.csv", [site], seed_headers())
+    (run_dir / "raw_foundry_responses").mkdir(parents=True)
+    (run_dir / "raw_foundry_responses" / "site_4471.json").write_text(
+        json.dumps({"site_id": "4471", "attributes": [quarry()]})
+    )
+    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
+
+    rows = read_arbitrated_rows(run_dir)
+    [verdict] = [row for row in rows if row["attribute_name"] == "facility_type"]
+    assert (verdict["resolved_value"], verdict["validation_status"]) == (NOT_A_WASTE_FACILITY, "Needs review")
+    [refreshed], _stats = refresh_sites([site], rows, "run")
+    assert refreshed["facility_type"] == NOT_A_WASTE_FACILITY
 
 
 def test_the_verdict_is_merged_into_the_next_pass_seed_and_not_offered_again():

@@ -192,8 +192,10 @@ def build_parser() -> argparse.ArgumentParser:
 def read_arbitrated_rows(run_dir: Path) -> list[dict[str, str]]:
     """Every arbitrated value worth carrying into the next pass: resolved.csv plus the review queue.
 
-    resolved.csv holds only auto-validated values, but a refresh also merges values still awaiting
-    review, so a gas collection system found in pass 1 still unlocks the pass-2 follow-up.
+    Nothing is accepted automatically, so a run's resolved.csv is header-only and every value it
+    found is in the queue, awaiting review. A refresh merges those too, so a gas collection system
+    found in pass 1 still unlocks the pass-2 follow-up. resolved.csv is still read for runs
+    arbitrated before (batch 1), which wrote the values they accepted there.
     """
     import csv
 

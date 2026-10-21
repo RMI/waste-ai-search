@@ -23,11 +23,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-# The table the generated load statement actually writes to (standardized.TARGET_TABLE). It does
-# not exist yet, so the check falls back to a sibling to validate the column set and says so
-# loudly - a green run against a sibling would otherwise imply a load that cannot work at all.
+# A table built to the standardized spec, to check the spec's columns and their types against. This
+# repository no longer writes one of its own (ingestion builds the AI search's from reviewed
+# values), so it checks against a sibling's.
 TRANSFORMED_SCHEMA = "transformed"
-FALLBACK_TRANSFORMED_TABLE = "transformed_osm"
+TRANSFORMED_TABLE = "transformed_osm"
 
 
 def main() -> int:
@@ -56,7 +56,6 @@ def main() -> int:
         RAW_NAME_SOURCES,
         source_name_sql,
     )
-    from waste_ai_search.standardized import TARGET_TABLE
     from waste_ai_search.seed_source import SELECT_FIELDS
 
     config = DatabaseConfig.from_env()
@@ -68,12 +67,9 @@ def main() -> int:
 
     print(f"Target: {config.describe()}\n")
 
-    # The load statement names this table, so it is the one that matters.
-    load_schema, _, load_table = TARGET_TABLE.partition(".")
-
     try:
         consolidated = fetch_columns(CONSOLIDATION_SCHEMA, CONSOLIDATION_TABLE, config=config)
-        transformed = fetch_columns(load_schema, load_table, config=config)
+        transformed = fetch_columns(TRANSFORMED_SCHEMA, TRANSFORMED_TABLE, config=config)
         constrained = fetch_check_constraint_values(config=config)
         enum_values = fetch_enum_values(
             [name for name in DB_ENUMS if name != "waste_depth"], config=config
@@ -84,15 +80,10 @@ def main() -> int:
 
     problems: list[str] = []
 
-    checked_table = TARGET_TABLE
+    checked_table = f"{TRANSFORMED_SCHEMA}.{TRANSFORMED_TABLE}"
     if not transformed:
-        # Checking a sibling still validates the column set against a table built to the same
-        # spec, but it must never read as "the load will work".
-        transformed = fetch_columns(TRANSFORMED_SCHEMA, FALLBACK_TRANSFORMED_TABLE, config=config)
-        checked_table = f"{TRANSFORMED_SCHEMA}.{FALLBACK_TRANSFORMED_TABLE}"
-        problems.append(f"{TARGET_TABLE} does not exist; the generated load statement cannot run")
-        print(f"FAIL  load target: {TARGET_TABLE} does not exist")
-        print(f"        falling back to {checked_table} to validate the column set")
+        problems.append(f"{checked_table} does not exist; the spec's columns cannot be checked")
+        print(f"FAIL  {checked_table} does not exist")
 
     # 1. Every column the seed SELECTs must exist on consolidated_facility. This is the check that
     #    would have caught `area` -> `area_square_meters` the day it landed.
@@ -113,7 +104,7 @@ def main() -> int:
     else:
         print(f"ok    seed columns: all {len(seed_fields)} present on {label}")
 
-    # 2. Every column written to the standardized table must exist on the target.
+    # 2. Every column of the standardized spec, as the code declares it, must exist on the table.
     target = checked_table
     std_missing, _ = compare_columns(STANDARDIZED_FACILITY_COLUMNS, transformed)
     if std_missing:

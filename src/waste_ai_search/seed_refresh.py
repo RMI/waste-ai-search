@@ -21,7 +21,9 @@ from typing import Any
 
 from .credibility import ai_filled_tiers
 from .schema import (
+    COORDINATE_ATTRIBUTES,
     GAP_FILL_ATTRIBUTES,
+    LOCATION_ATTRIBUTE,
     is_blank,
     normalize_scalar,
 )
@@ -85,6 +87,17 @@ def refresh_sites(
             value = normalize_scalar(row.get("resolved_value"))
             tier_label_text = normalize_scalar(row.get("winning_source_tier"))
 
+            if merge_identity and attribute == LOCATION_ATTRIBUTE:
+                # Arbitration writes a found location as one "lat, lon" row. Both seed coordinates
+                # change together, each stamped under its own coordinate attribute, since that is
+                # how the next pass reads them (credibility.trusted_baseline_coordinates).
+                for coordinate, part in zip(COORDINATE_ATTRIBUTES, _location_parts(value, row)):
+                    new_site[IDENTITY_MERGE_COLUMNS[coordinate]] = part
+                    if coordinate not in existing:
+                        stamps.append(f"{coordinate}@{tier_label_text}")
+                    merged_here += 1
+                continue
+
             if attribute in GAP_FILL_ATTRIBUTES:
                 column = attribute
             elif merge_identity and attribute in IDENTITY_MERGE_COLUMNS:
@@ -118,6 +131,16 @@ def refresh_sites(
         refreshed.append(new_site)
 
     return refreshed, stats
+
+
+def _location_parts(value: str, row: dict[str, Any]) -> list[str]:
+    """A found_location's two coordinates, as written."""
+    parts = [part.strip() for part in value.split(",")]
+    if len(parts) != len(COORDINATE_ATTRIBUTES) or not all(parts):
+        raise ValueError(
+            f"Site {normalize_scalar(row.get('site_id'))}: {LOCATION_ATTRIBUTE} {value!r} is not 'lat, lon'"
+        )
+    return parts
 
 
 def _existing_labels(value: Any) -> dict[str, str]:

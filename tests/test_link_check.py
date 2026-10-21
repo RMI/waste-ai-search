@@ -408,8 +408,8 @@ def test_a_dead_source_reaches_leads_when_a_working_source_filled_the_attribute(
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
     import csv
-    resolved = [r for r in csv.DictReader((run_dir / "resolved.csv").open()) if r["attribute_name"] == "facility_status"]
-    assert resolved[0]["resolved_value"] == "Active"  # filled from the working source
+    queued = [r for r in csv.DictReader((run_dir / "review_queue.csv").open()) if r["attribute_name"] == "facility_status"]
+    assert queued[0]["resolved_value"] == "Active"  # filled from the working source
     leads = list(csv.DictReader((run_dir / "supplementary_leads.csv").open()))
     assert [l["url"] for l in leads if "Source link broken" in l["exclusion_reason"]] == [dead]
 

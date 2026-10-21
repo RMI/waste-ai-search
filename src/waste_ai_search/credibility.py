@@ -161,14 +161,12 @@ def dropped_source_site(url: Any) -> str:
 # A source with no publication date cannot exceed Tier 3 whatever its publisher (Q2).
 UNDATED_TIER_CAP = TIER_3
 
-# Tier 4 and Unrated do not auto-promote when a baseline value already exists. An EMPTY baseline
-# is filled regardless of tier (pilot feedback 1): anything sourced beats nothing, and the fill
-# still needs review unless the tier is high enough to auto-validate.
+# Tier 4 and Unrated cannot challenge a baseline value that already exists; they go to leads. An
+# EMPTY baseline is filled regardless of tier (pilot feedback 1): anything sourced beats nothing.
+# Either way the value goes to review: nothing is accepted automatically.
 MAX_PROMOTABLE_TIER = TIER_3
 # Only Tier 1-2 may override a non-empty baseline (Q3).
 MAX_OVERRIDE_TIER = TIER_2
-# Tier 1-2 fills auto-validate; Tier 3 fills go to review (Q30).
-MAX_AUTO_VALIDATE_TIER = TIER_2
 
 
 def tier_label(tier: int) -> str:
@@ -379,10 +377,6 @@ def is_promotable(tier: int) -> bool:
 
 def may_override_baseline(tier: int) -> bool:
     return tier <= MAX_OVERRIDE_TIER
-
-
-def may_auto_validate(tier: int) -> bool:
-    return tier <= MAX_AUTO_VALIDATE_TIER
 
 
 def best_source(
