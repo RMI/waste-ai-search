@@ -696,6 +696,10 @@ def test_a_name_is_taken_off_only_where_it_ends_at_a_separator():
         "Main Street Recycling Centre",
         "Lot 5, Concession 3, Smith Waste Disposal Site",
         "Old Mill Road Dump.",
+        # As sources usually write it: the name, then the town and province.
+        "Mapleward Road Landfill, Thunder Bay, ON",
+        "Main Street Recycling Centre, Brandon MB R7A 1A1",
+        "Highway 16 Transfer Station; Vermilion, Alberta",
     ],
 )
 def test_an_address_with_no_civic_number_ending_in_a_facility_word_is_a_name(stated):
@@ -713,6 +717,7 @@ def test_an_address_with_no_civic_number_ending_in_a_facility_word_is_a_name(sta
         "Unit 3, 12 Tip Lane",                   # a facility word that is not at the end
         "1777 Brady Road, Winnipeg MB",
         "Mapleward Road, Thunder Bay",
+        "Brady Road Landfill, 1777 Brady Road, Winnipeg MB",  # a civic number after the name
     ],
 )
 def test_an_address_with_a_civic_number_or_no_facility_word_at_its_end_is_sent(stated):

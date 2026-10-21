@@ -229,9 +229,9 @@ street address is sent, with any leading facility name taken off, and text that 
 not sent at all. The names are the source's own, any `found_facility_name` it gives, and our
 site's `site_name` and `original_site_name`; `&` and `and` count as the same, and a name is taken
 off only where a comma, a dash or a number follows it, so "Hart" never shortens "Hartland Avenue".
-Text with no civic number that ends in a word for a waste site is a name too, whoever's it is:
-"Mapleward Road Landfill", "Highway 16 Transfer Station" or "Main Street Recycling Centre" is never
-sent, while "5405 Mapleward Road" is. The words are landfill, dump, tip, eco-centre, and site,
+Text with no civic number in which a part ends in a word for a waste site is a name too, whoever's
+it is: "Mapleward Road Landfill", "Highway 16 Transfer Station" or "Main Street Recycling Centre,
+Brandon MB" is never sent, while "5405 Mapleward Road" is. The words are landfill, dump, tip, eco-centre, and site,
 station, centre, depot, park or grounds after waste, refuse, recycling, transfer, disposal and the
 like.
 

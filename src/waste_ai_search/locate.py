@@ -22,8 +22,8 @@ an address stays unlocated.
 A facility name is never geocoded: geocoders find landfills by name from OpenStreetMap, which is
 where most of our sites came from, so it would hand us our own point back. Only text the agent
 labelled a street address is sent, with any leading facility name taken off, and never text that
-has no civic number and ends in a word for a waste site ("Mapleward Road Landfill"), which is a
-name too.
+has no civic number and a part ending in a word for a waste site ("Mapleward Road Landfill, Thunder
+Bay, ON"), which is a name too.
 """
 from __future__ import annotations
 
@@ -976,8 +976,9 @@ def _copied(located: Located, site: dict[str, Any], source: dict[str, Any]) -> b
 
 
 # Text the agent labelled a street address that is really a facility's name: no civic number, and
-# ending in a word for a waste site ("Mapleward Road Landfill", "Highway 16 Transfer Station"). A
-# geocoder would find it by name in OpenStreetMap, or place it on the road it names.
+# a part ending in a word for a waste site ("Mapleward Road Landfill", "Highway 16 Transfer
+# Station", or "Mapleward Road Landfill, Thunder Bay, ON", as sources usually write it). A geocoder
+# would find it by name in OpenStreetMap, or place it on the road it names.
 _CIVIC_NUMBER = re.compile(r"(?:^|[,;])\s*\d+[A-Za-z]?(?:-\d+)?\s+[^\W\d_]")
 _ENDS_IN_FACILITY_WORD = re.compile(
     r"(?:\b(?:landfills?|dump|dumpsite|tip|eco-?centre)|"
@@ -988,9 +989,11 @@ _ENDS_IN_FACILITY_WORD = re.compile(
 
 
 def names_a_facility(text: str) -> bool:
-    """Whether address text is a facility's name: no civic number, and a waste-site word at its end."""
+    """Whether address text is a facility's name: no civic number, and a waste-site word ending one
+    of its comma-separated parts."""
     text = normalize_scalar(text)
-    return bool(_ENDS_IN_FACILITY_WORD.search(text)) and not _CIVIC_NUMBER.search(text)
+    parts = re.split(r"[,;]", text)
+    return any(_ENDS_IN_FACILITY_WORD.search(part) for part in parts) and not _CIVIC_NUMBER.search(text)
 
 
 def _parts(text: str, kind: str) -> list[tuple[str, str]]:
