@@ -514,6 +514,7 @@ def test_saving_leaves_no_temporary_file(tmp_path):
         "Coordinates (lat, long): 45.4215, -75.6972",
         "GPS (latitude, longitude): 45.4215, -75.6972",
         "Long/Lat: -75.6972, 45.4215",
+        "POINT(-75.6972 45.4215)",  # well-known text, longitude first
         # A label after its number belongs to that number, not the next one.
         "45.4215 lat, -75.6972 long",
     ],
@@ -618,6 +619,7 @@ def test_a_po_box_is_taken_out_and_the_street_address_left_is_sent():
         "PMB 12, Darwin",
         "BP 45, Abidjan",
         "GPO Box 12, Sydney NSW 2001",
+        "Postbox 12, Oslo",
     ],
 )
 def test_a_po_box_with_only_a_town_left_is_not_sent(stated):

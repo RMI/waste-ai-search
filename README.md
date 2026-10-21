@@ -192,7 +192,8 @@ turns each of those into a point and says how far it can be trusted, as its `loc
 Coordinates are read as `lat, lon`, in decimal degrees or degrees, minutes and seconds, with
 hemisphere letters or words (`North`, `West`). `lon, lat` is read only where that is unambiguous: a
 hemisphere or a label says so, or the first number is beyond 90. A header naming both axes, such as
-`Lat/Long:` or `(lat, long)`, gives their order. In prose, a number followed by a unit (km, m, ha,
+`Lat/Long:` or `(lat, long)`, gives their order, and a well-known-text `POINT(lon lat)` is read
+longitude first. In prose, a number followed by a unit (km, m, ha,
 %) is a distance or an area, not a coordinate, and the first pair in range is the one used.
 
 A labelled easting and northing (`E`/`N`, `Easting`/`Northing` or `X`/`Y`, in metres) is read in

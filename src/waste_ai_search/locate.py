@@ -87,7 +87,7 @@ NOT_LOCATED = "not located yet: run `locate --run-id` for this run"
 # A PO box, private bag or the like, with its number, is where post goes, not where the site is:
 # "PO Box 253", "Box 219", "C.P. 123", "Case postale 123", "Private Mail Bag 12", "PMB 12", "BP 45".
 PO_BOX = re.compile(
-    r"(?<![\w.])(?:p\.?\s*o\.?\s*box|post\s*office\s*box|g\.?\s*p\.?\s*o\.?\s*box|box|"
+    r"(?<![\w.])(?:p\.?\s*o\.?\s*box|post\s*(?:office\s*)?box|postboks|g\.?\s*p\.?\s*o\.?\s*box|box|"
     r"private\s+(?:mail\s+)?bag|locked\s+bag|p\.?\s*m\.?\s*b\.?|c\.?\s*p\.?|case\s+postale|"
     r"bo[iî]te\s+postale|b\.?\s*p\.?|postfach|apartado(?:\s+postal)?|caixa\s+postal|"
     r"casilla(?:\s+postal)?|postbus)\s*(?:no\.?|n[°º]|#)?\s*\d+[A-Za-z]?(?!\w)",
@@ -211,10 +211,12 @@ _DECIMAL = re.compile(
 )
 _LAT_LABEL = re.compile(r"\blat(?:itude)?\b", re.IGNORECASE)
 _LON_LABEL = re.compile(r"\b(?:lon|long|lng|longitude)\b", re.IGNORECASE)
+# Well-known text, as open data writes a point: POINT(-75.6972 45.4215) is longitude first.
+_WKT_POINT = re.compile(r"\bpoint\s*z?\s*\(\s*$", re.IGNORECASE)
 # Words that may sit around a location that is nothing but coordinates or a grid reference.
 _LABELS = re.compile(
     r"\b(?:lat|latitude|lon|long|lng|longitude|coordinates?|coords?|gps|wgs\s*-?\s*84|decimal|"
-    r"degrees|dd|dms|location|position|centroid|site|ngr|os|ordnance|survey|national|grid|ref|"
+    r"degrees|dd|dms|location|position|point|wkt|centroid|site|ngr|os|ordnance|survey|national|grid|ref|"
     r"reference|irish|itm|transverse|mercator|easting|northing|e|n|x|y|at)\b",
     re.IGNORECASE,
 )
@@ -240,7 +242,10 @@ def _decimals(number: str) -> int:
 
 def _axis_label(text: str) -> str:
     """"lat" or "lon" if the text names one axis. Where it names both, as a header does ("Lat/Long:",
-    "Coordinates (lat, long):"), the first named is the first number's."""
+    "Coordinates (lat, long):"), the first named is the first number's. A WKT "POINT(" is longitude
+    first."""
+    if _WKT_POINT.search(text):
+        return "lon"
     lat, lon = _LAT_LABEL.search(text), _LON_LABEL.search(text)
     if lat and lon:
         return "lat" if lat.start() < lon.start() else "lon"
