@@ -154,7 +154,10 @@ REVIEW_INSTRUCTIONS = [
             "source filed under the site pooled into it. Ingestion reads your decisions from this tab."
         ),
         "sme_action": (
-            "Work top to bottom. To see where the database puts the site, paste "
+            "Work top to bottom. A shaded CHECK note in evidence_summary means the source's own page, as the "
+            "link check read it, doesn't show its quote or the location it states: open the page and look before "
+            "deciding, since a page can say something in an image or a map the check can't read. To see where the "
+            "database puts the site, paste "
             "baseline_coordinates into Google Maps. Compare site_name with original_site_name - the source's own "
             "spelling - and note any translation problem in translation_note. Open "
             "winning_source_url and check the source says this, about THIS facility. A found_location row is one point, "

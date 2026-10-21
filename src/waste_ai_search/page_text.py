@@ -37,6 +37,8 @@ MAX_PAGE_BYTES = 25 * 1024 * 1024
 MAX_TEXT_CHARS = 2_000_000
 MAX_PDF_PAGES = 300
 MAX_SHEET_CELLS = 500_000
+# A .xlsx or .docx is a zip, and a hostile one can unpack to far more than it downloads as.
+MAX_UNZIPPED_BYTES = 200 * 1024 * 1024
 # An HTML page with less visible text than this is probably built by JavaScript, so a quote may be
 # missing from it only because the link check can't run the page.
 LITTLE_TEXT_CHARS = 200
@@ -218,6 +220,16 @@ def _cells_text(rows) -> tuple[str, bool]:  # noqa: ANN001 - rows of cell values
     return "\n".join(lines), False
 
 
+class _TooLarge(ValueError):
+    """A zipped file that would unpack to more than MAX_UNZIPPED_BYTES."""
+
+
+def _check_unzipped_size(body: bytes) -> None:
+    size = sum(member.file_size for member in zipfile.ZipFile(io.BytesIO(body)).infolist())
+    if size > MAX_UNZIPPED_BYTES:
+        raise _TooLarge(f"not read: it unpacks to {size // (1024 * 1024):,} MB")
+
+
 def spreadsheet_text(body: bytes) -> tuple[str, str]:
     parts, cut = [], False
     if body.startswith(_OLE2):
@@ -232,6 +244,7 @@ def spreadsheet_text(body: bytes) -> tuple[str, str]:
     else:
         from openpyxl import load_workbook
 
+        _check_unzipped_size(body)
         book = load_workbook(io.BytesIO(body), read_only=True, data_only=True)
         try:
             for sheet in book.worksheets:
@@ -246,6 +259,7 @@ def spreadsheet_text(body: bytes) -> tuple[str, str]:
 
 
 def docx_text(body: bytes) -> str:
+    _check_unzipped_size(body)
     xml = zipfile.ZipFile(io.BytesIO(body)).read("word/document.xml").decode("utf-8", errors="replace")
     xml = re.sub(r"<w:tab\s*/>", "\t", xml)
     xml = re.sub(r"</w:p>|<w:br\s*/>", "\n", xml)
@@ -272,6 +286,8 @@ def extract_text(body: bytes, content_type: str = "", url: str = "", truncated: 
         else:
             shown = (content_type or "").split(";")[0].strip() or _suffix(url) or "unknown type"
             return PageText("", "", f"not read ({shown})")
+    except _TooLarge as exc:
+        return PageText("", kind, str(exc))
     except Exception as exc:  # noqa: BLE001 - an unreadable file is recorded, never fatal
         return PageText("", kind, f"could not be read ({type(exc).__name__})")
     if len(text) > MAX_TEXT_CHARS:

@@ -111,6 +111,17 @@ def test_a_word_document_is_read():
     assert (read.kind, read.text) == (DOCX, "Smith Road Landfill\nClosed & capped 1998")
 
 
+def test_a_zip_that_would_unpack_to_too_much_is_not_read(monkeypatch):
+    import waste_ai_search.page_text as page_text
+
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", "<w:document>" + "x" * 5000 + "</w:document>")
+    monkeypatch.setattr(page_text, "MAX_UNZIPPED_BYTES", 1000)
+    read = extract_text(data.getvalue(), "", "https://x.example/huge.docx")
+    assert (read.text, read.kind) == ("", DOCX) and read.note.startswith("not read: it unpacks to")
+
+
 def test_plain_text_is_decoded_by_its_declared_charset():
     read = extract_text("Café du Port, déchetterie".encode("cp1252"), "text/csv; charset=windows-1252", "")
     assert (read.kind, read.text) == (TEXT, "Café du Port, déchetterie")
