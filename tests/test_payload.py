@@ -107,6 +107,43 @@ def test_two_spellings_of_one_url_are_one_source_and_blanks_are_filled_from_the_
     assert len(source["values"]) == 2
 
 
+def test_each_value_keeps_how_its_own_citation_described_the_page():
+    # Batch 1, site 14922: the main pass labelled anewclimate.com a directory listing, and the gas
+    # follow-up pass an operator disclosure. Each value is tiered by its own citation's label, as it
+    # was before the conversion, while an undated citation still takes the page's date.
+    listing = {"source_title": "Profile", "publisher": "Directory", "source_type": "Company directory listing",
+               "publication_date": "2024-01-01", "url": "https://anewclimate.com/site"}
+    disclosure = dict(listing, source_type="Operator disclosure", publication_date="2025-06-10", publisher="")
+    main = {"site_id": "7", "attributes": [attribute("operator", "Anew Climate", listing)]}
+    gccs = {"site_id": "7", "attributes": [
+        attribute("has_flare", "TRUE", disclosure),
+        attribute("opening_year", "1990", dict(listing, publication_date="")),
+    ]}
+    site = {"site_id": "7", "internal_facility_id": "7", "site_name": "Ecoserv", "country_iso3": "GBR"}
+    _by_attribute, rows, sources, _warnings = extract_evidence(site, merge_payloads([main, gccs]), "run", "v", date(2026, 1, 1))
+    tiers = {row["attribute_name"]: (row["source_tier"], row["tier_rule_applied"]) for row in rows}
+    assert tiers["operator"] == ("Tier 4", "source_type 'company directory listing' -> Tier 4")
+    assert tiers["has_flare"] == ("Tier 1", "source_type 'operator disclosure' -> Tier 1")
+    assert tiers["opening_year"] == ("Tier 4", "source_type 'company directory listing' -> Tier 4")
+    # One page, one source, still described by its first citation in sources.csv.
+    (page,) = read_payload(merge_payloads([main, gccs]))["sources"]
+    assert (page["source_type"], page["publisher"]) == ("Company directory listing", "Directory")
+    assert {entry["source_type"] for entry in sources} == {"Company directory listing", "Operator disclosure"}
+
+
+def test_a_converted_location_is_tiered_by_the_citation_of_its_coordinates():
+    blog = dict(NEWS, source_type="Wiki or aggregator", url=PERMIT["url"])
+    old = {"site_id": "7", "attributes": [
+        attribute("operator", "Ecoserv Ltd", blog),
+        attribute("found_latitude", "54.12345", PERMIT),
+        attribute("found_longitude", "-1.54321", PERMIT),
+    ]}
+    site = {"site_id": "7", "internal_facility_id": "7", "site_name": "Ecoserv", "country_iso3": "GBR"}
+    _by_attribute, rows, _sources, _warnings = extract_evidence(site, old, "run", "v", date(2026, 1, 1))
+    location = next(row for row in rows if row["attribute_name"] == "found_location")
+    assert (location["location_basis"], location["source_tier"]) == ("coordinates", "Tier 1")
+
+
 def test_a_citation_without_a_url_stays_a_source_of_its_own():
     no_url = dict(PERMIT, url="")
     read = read_payload({"attributes": [attribute("operator", "A", no_url, no_url)]})

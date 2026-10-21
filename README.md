@@ -430,7 +430,11 @@ counts, validation, the merge of the follow-up pass, retry detection and the age
 older, attribute-first response's citations become one source per exact URL, each with the values
 of the attributes that cited it. Its found name is the in-source name of the sources cited for it,
 and its found coordinates the stated location of the sources cited for both; half a location is
-none. Evidence ids and the agent's order are kept.
+none. Evidence ids and the agent's order are kept. Each value keeps how its own citation labelled
+the page (source type, date, publisher), so it is tiered as it was, even where the gas follow-up
+pass labelled the same page differently. Only a label its citation left blank comes from the
+page's other citations, so an undated citation of a dated page gets its date: on batch 1 that
+lifts 118 citations from the undated cap to their type's tier, and lowers none.
 
 ### The full run, in six country batches
 

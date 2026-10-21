@@ -11,10 +11,13 @@ detection and the agent's own leads.
 An attribute-first response is converted like this:
 
 - citations are grouped into one source per exact URL (normalize_url); a citation with no URL
-  stays a source of its own. Where two citations of one URL describe it differently, each field
-  takes the first value given, so an undated citation of a dated page gets its date;
+  stays a source of its own. The source is described by the first value given for each field;
 - each source gets the values of the attributes that cited it, each with its own quote, and each
-  keeps its evidence id and its place in the response's order;
+  keeps its evidence id and its place in the response's order. Each value also keeps how its own
+  citation described the page - its source_type, date, publisher and so on - so it is tiered as it
+  was before the conversion (cited_source). Only a field its citation left blank is taken from the
+  page's other citations, so an undated citation of a dated page gets its date. A gas follow-up
+  pass that labelled a page differently keeps its own label;
 - facility_name_in_source is the response's found_facility_name, for the sources cited for it;
 - stated_location is the found latitude and longitude as "lat, lon", kind "coordinates", for the
   sources cited for both. They are no longer values: a found location comes from what each source
@@ -55,10 +58,31 @@ _CONVERTED = "_converted"
 # A converted value's place among the response's citations, and its attribute and citation number.
 _ORDER = "_order"
 _CITATION = "_citation"
+# How a converted value's own citation described its page, and how the citation of the found
+# coordinates did, for the location a converted source states.
+_CITED_AS = "_cited_as"
+_LOCATION_CITED_AS = "_location_cited_as"
+# What a citation says about its page, as opposed to the value it supports.
+CITATION_FIELDS = [
+    "source_title", "publisher", "source_type", "publication_date", "language", "paywall_flag",
+    *LEGACY_SOURCE_FIELDS,
+]
 
 
 def is_converted(source: dict[str, Any]) -> bool:
     return bool(source.get(_CONVERTED))
+
+
+def cited_source(source: dict[str, Any], value: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The source as one citation described it: `value`'s own citation, or with no value, the
+    citation of the location it states.
+
+    Only a source converted from an attribute-first response has citations of its own; there, a
+    field the citation gave wins over the first value given for the page, and a field it left blank
+    is the page's. A source-first source describes itself once, and is returned as it is.
+    """
+    own = (value or {}).get(_CITED_AS) if value is not None else source.get(_LOCATION_CITED_AS)
+    return {**source, **own} if own else source
 
 
 def normalize_url(url: Any) -> str:
@@ -193,9 +217,17 @@ def _from_attributes(attributes: Any, problems: list[str]) -> list[dict[str, Any
                 if field in citation and (field not in source or normalize_scalar(source[field]) == ""):
                     source[field] = citation[field]
             cited_for[key].setdefault(name, attribute.get("value"))
+            cited_as = {
+                field: citation[field] for field in CITATION_FIELDS
+                if field in citation and normalize_scalar(citation[field]) != ""
+            }
             if name in COORDINATE_ATTRIBUTES:
-                continue  # a location now comes from what each source states, below
+                # A location now comes from what each source states, below, described as the
+                # citation of its coordinates described the page.
+                source.setdefault(_LOCATION_CITED_AS, cited_as)
+                continue
             value = dict(shared)
+            value[_CITED_AS] = cited_as
             if "quoted_evidence_short" in citation:
                 value["quoted_evidence_short"] = citation["quoted_evidence_short"]
             # Where the citation sat, so arbitration still reads them in the order the agent gave
@@ -218,6 +250,7 @@ def _from_attributes(attributes: Any, problems: list[str]) -> list[dict[str, Any
         else:
             source.setdefault("stated_location", "")
             source.setdefault("stated_location_kind", "")
+            source.pop(_LOCATION_CITED_AS, None)
         out.append(source)
     return out
 

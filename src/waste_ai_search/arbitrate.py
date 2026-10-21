@@ -37,6 +37,7 @@ from .locate import (
 from .payload import (
     citation_ids,
     citations,
+    cited_source,
     is_empty,
     merge_payloads,
     normalize_url,
@@ -159,9 +160,11 @@ def extract_evidence(
         link_status = link.verdict if link else ""
         return (link.resolved_url if link else raw_url), link_status, link_status == BROKEN and not keep_broken_links, link
 
-    for source_index, source, value_index, attribute in citations(read):
+    for source_index, page, value_index, attribute in citations(read):
         if source_index not in located:
             continue  # a dropped map site
+        # A response cached attribute-first keeps how each citation described its page.
+        source = cited_source(page, attribute)
         name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
         if name not in VALUE_ATTRIBUTES:
             warnings.append(f"Unsupported attribute_name {name!r} dropped.")
@@ -296,7 +299,7 @@ def extract_evidence(
     # from a Tier 1-2 source) has a found location reviewed; elsewhere the locations are recorded.
     asked = asks_location(site)
     for source_index, place in located.items():
-        source = read["sources"][source_index - 1]
+        source = cited_source(read["sources"][source_index - 1])
         if not states_location(source):
             continue
         url, link_status, dead_link, link = link_for(source)
