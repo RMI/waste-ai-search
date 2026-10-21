@@ -140,11 +140,13 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": "Review_Queue",
         "purpose": (
-            "YOUR WORKLIST. Every value the search found that differs from what the database "
-            "holds: a value for an empty field, or one that disagrees with the existing value, "
-            "whatever the source's tier. Nothing is accepted without review. A source that only "
-            "confirms the database's value is not shown, and nothing from it is loaded. Ingestion "
-            "reads your decisions from this tab."
+            "YOUR WORKLIST. Every value the search found for an empty field, whatever the "
+            "source's tier, and every value that disagrees with the database's from a Tier 1-3 "
+            "source at least as credible as the database's own (for status, a Tier 1-3 source at "
+            "least 3 years newer). Nothing is accepted without review. A weaker disagreement, a "
+            "source whose link is dead and a unit that could not be converted are on the Leads tab "
+            "instead. A source that only confirms the database's value is not shown, and nothing "
+            "from it is loaded. Ingestion reads your decisions from this tab."
         ),
         "sme_action": (
             "Work top to bottom. To see where the database puts the site, paste "
@@ -173,7 +175,12 @@ REVIEW_INSTRUCTIONS = [
     },
     {
         "tab_name": "Leads",
-        "purpose": "Findings whose only sources fell below the credibility floor, plus the agent's own unverified leads.",
+        "purpose": (
+            "Findings that lost: a disagreement with the database's value from a source below the "
+            "credibility floor (Tier 4-5) or weaker than the database's, a source whose link is "
+            "dead, a unit that could not be converted, half a location; plus the agent's own "
+            "unverified leads."
+        ),
         "sme_action": "Read only. Promote something by hand if you judge the source good enough.",
         "editable": "nothing",
     },

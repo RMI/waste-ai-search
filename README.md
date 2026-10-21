@@ -605,7 +605,7 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 
 | File | Purpose |
 |---|---|
-| `<run_id>_review.xlsx` | **The SME artifact.** Every found value that differs from what the database holds, with dropdowns. Ingestion reads the SMEs' decisions from it. |
+| `<run_id>_review.xlsx` | **The SME artifact.** Every found value for an empty field, whatever its tier, and every disagreement with our value from a Tier 1–3 source at least as credible as ours, with dropdowns. Weaker disagreements are under Leads. Ingestion reads the SMEs' decisions from it. |
 | `resolved.csv` | A header and no rows. Nothing is accepted automatically, and ingestion accepts it empty. Runs from before (batch 1) wrote the values they accepted here. |
 | `evidence.csv` | One row per source-backed claim, confirmations of our values included. The audit trail. Its `source_id` finds the source in `sources.csv`. |
 | `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below). |
@@ -641,8 +641,9 @@ simultaneously. Its number is kept as `agent_proposed_tier` for drift monitoring
 | 4 | Aggregator, wiki, directory listing | yes | no |
 | 5 | Source type could not be established | yes | no |
 
-**Nothing is accepted automatically.** Whatever its tier, a found value that differs from what the
-database holds goes to the review queue; one weaker than ours goes to Leads. A value equal to ours
+**Nothing is accepted automatically.** A found value for an empty field goes to the review queue
+whatever its tier. One that disagrees with ours goes there from a Tier 1–3 source at least as
+credible as ours, and to Leads from one below the floor or weaker than ours. A value equal to ours
 is a confirmation: its evidence stays in `evidence.csv`, but it is not queued and not loaded, so the
 AI search never becomes the credited source for a value nobody reviewed. Tier still decides between
 the queue and Leads, and is shown beside each value. Until build step 3 of
@@ -710,19 +711,20 @@ the run directory is audit material you only need if a row raises a question.
 
 ### 1. Open the Review_Queue tab
 
-This is the worklist: every value the search found that differs from what the database holds.
-**Nothing is accepted without review**, whatever the source's tier. An empty queue means nothing
-needs you.
+This is the worklist: every value the search found for an empty field, and every disagreement
+with what the database holds from a source credible enough to challenge it. **Nothing is accepted
+without review**, whatever the source's tier. An empty queue means nothing needs you.
 
 Rows arrive here for one of two reasons:
 
 - **A value fills a field that was empty.** It may come from a regulator or from a directory; the
   tier is beside it.
-- **A value disagrees with what the database already holds**, at equal or better credibility.
+- **A value disagrees with what the database already holds**, from a Tier 1–3 source at equal or
+  better credibility. For status, a Tier 1–3 source at least 3 years newer than ours counts too.
 
 Not shown: a source that only confirms what the database holds (it stays in `evidence.csv`, and
-nothing from it is loaded), a search that found nothing, and a finding weaker than what we hold,
-which is under Leads.
+nothing from it is loaded), a search that found nothing, and a disagreement from a source below the
+floor or weaker than what we hold, which is under Leads.
 
 ### 2. Read the row
 
@@ -780,8 +782,8 @@ Edit only these columns; everything else is read-only:
 
 ### 5. Optional tabs
 
-- **Leads** — findings that lost: below the credibility floor, weaker than the baseline, or
-  unconvertible units. Read-only. If you judge one good enough, promote it by hand.
+- **Leads** — findings that lost: below the credibility floor, weaker than the baseline, a dead
+  link, or unconvertible units. Read-only. If you judge one good enough, promote it by hand.
 - **Parse_Warnings** — values the pipeline dropped or could not map, and citations of the two
   dropped map sites, each attributed to its `site_id` and `site_name`. Worth scanning for
   systematic problems (a recurring unit or enum failure usually means an upstream fix, not 50

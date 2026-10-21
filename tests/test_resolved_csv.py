@@ -1,8 +1,9 @@
 """Nothing is accepted automatically.
 
-Every found value that differs from ours goes to the review queue, whatever its tier. A value equal
-to ours is a confirmation: its evidence is kept, but it is neither queued nor loaded. resolved.csv
-is written with its header and no rows; ingestion reads the SMEs' decisions from the workbook.
+Every found value for an empty field goes to the review queue, whatever its tier, and so does every
+disagreement from a source credible enough to challenge ours. A value equal to ours is a
+confirmation: its evidence is kept, but it is neither queued nor loaded. resolved.csv is written
+with its header and no rows; ingestion reads the SMEs' decisions from the workbook.
 
 This reverses Q30's auto-validation of Tier 1-2 fills and of confirmations, on purpose: in batch 1,
 2,932 values were accepted that way, including the 131 a map mirror won.
@@ -131,6 +132,21 @@ def test_the_workbook_never_tells_smes_anything_was_accepted_for_them():
     assert "AI Agent" not in text
     assert "std_facility" not in text
     assert "Auto-validated" not in DEFINITION_VALUES["validation_status"]
+
+
+def test_a_disagreement_below_the_floor_goes_to_leads_as_the_workbook_says(tmp_path):
+    """Not every disagreement is queued whatever its tier: one from a Tier 4-5 source, or weaker than
+    ours, is a lead. The Review_Queue tab's ReadMe once said otherwise."""
+    from waste_ai_search.workbook_io import REVIEW_INSTRUCTIONS
+
+    wiki = dict(NEWS, source_type="Wiki or aggregator", url="https://wiki.example.org/seaton-meadows")
+    run_dir = arbitrate(tmp_path, found("facility_type", "Dumpsite", wiki))
+
+    assert "facility_type" not in {r["attribute_name"] for r in read(run_dir / "review_queue.csv")}
+    leads = [r for r in read(run_dir / "supplementary_leads.csv") if r["attribute_name"] == "facility_type"]
+    assert "Conflict - lower credibility" in {r["exclusion_reason"] for r in leads}
+    [queue_tab] = [tab for tab in REVIEW_INSTRUCTIONS if tab["tab_name"] == "Review_Queue"]
+    assert "A weaker disagreement" in queue_tab["purpose"] and "Leads tab" in queue_tab["purpose"]
 
 
 def test_a_confirmation_is_kept_as_evidence_but_not_queued(tmp_path):

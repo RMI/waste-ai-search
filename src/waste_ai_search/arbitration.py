@@ -107,9 +107,10 @@ def resolve(
 ) -> dict[str, Any]:
     """Arbitrate one (facility, attribute) pair.
 
-    Nothing is accepted automatically. A found value that differs from ours, whatever its tier,
-    needs review; one weaker than ours goes to leads; a confirmation of ours, or nothing found,
-    leaves our database as it is, so there is nothing to review.
+    Nothing is accepted automatically. A found value for an empty field needs review whatever its
+    tier, and so does one that disagrees with ours from a source at the floor or above and at least
+    as credible as ours; a weaker disagreement goes to leads. A confirmation of ours, or nothing
+    found, leaves our database as it is, so there is nothing to review.
     """
     site_id = normalize_scalar(site.get("site_id"))
     baseline = baseline_for(site, attribute_name)
