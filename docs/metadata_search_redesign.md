@@ -243,7 +243,9 @@ run against the new seed.
 
 So the pipeline shape is: `transformed.transformed_<source>` → merge → `consolidation.consolidated_facility`
 (our seed). AI search is another *source*, which means its natural output is a spec-conformant
-standardized table that merges like any other.
+standardized table that merges like any other. **Since F36** ingestion #261 builds that table from
+reviewed values, and this repository no longer writes one, so the mismatches in §10.3 are
+ingestion's to handle.
 
 ### 10.1 Every categorical value the agent returns is invalid (measured)
 
@@ -325,9 +327,9 @@ All settled. Where an answer overrode my recommendation it is marked.
 | Q21 | Enum source of truth | Generated from the DB into a committed module |
 | Q22 | `has_biocover` | Dropped; `cover_types` searched instead |
 | Q23 | Coordinates | Split into `found_latitude` / `found_longitude` |
-| Q24 | Year | **One record per facility, `year` = latest year of record** (overrode the per-year pivot) |
+| Q24 | Year | **One record per facility, `year` = latest year of record** (overrode the per-year pivot). **Moot since F36:** this repository no longer builds the standardized table. |
 | Q25 | New token | `ai_search_2026`; `sinir_2024` → T1, `manual_entry` → T3 |
-| Q27 | `facility_id` | `internal_facility_id` as text; rows only where something was promoted |
+| Q27 | `facility_id` | `internal_facility_id` as text; rows only where something was promoted. **Moot since F36:** this repository no longer builds the standardized table. |
 | Q28 | Confirmations | Included in the standardized table. **Reversed by F36:** a confirmation is neither queued nor loaded. |
 | Q29 | Search mode | **Gap-fill** — only attributes empty for that facility are requested |
 | Q31 | SME artifact | Filtered review queue workbook; other levels are CSV sidecars |
@@ -368,7 +370,7 @@ All settled. Where an answer overrode my recommendation it is marked.
 | F33 | Transfer stations and recycling centres (WP-551) | `facility_type` offers `Transfer Station` and `Recycling Center`, both pending upstream: Transfer Station is in every `transformed.*` CHECK but not the enum type or `consolidated_facility`'s CHECK; Recycling Center is in none. The prompt's allowed list is built from the enum, so a regenerated `db_enums.py` reaches the agent without a code edit. A transfer station or recycling centre on a closed landfill is classified as the landfill, since the buried waste still emits. |
 | F34 | One worklist (WP-550) | The Contradictions tab is gone: a "Not a Waste Facility" verdict, or any facility_type that differs from the baseline, is reviewed on the site's own `facility_type` row in Review_Queue. The closure cross-check moved into that row's `evidence_summary`. Separate tabs for overlapping purposes confused reviewers. |
 | F35 | Newer evidence wins (WP-558) | Within a tier the newer `value_date` wins, ahead of corroboration. For `facility_status` only, a lower-tier source down to the promotion floor (Tier 3) may beat a better-tier source or the baseline when at least 3 years newer, always for review: a dated Tier 1 permit against recent Tier 3 news is the common case. `resolution_rule` states the dates. Re-arbitrating batch 1 changed 4 values (pass-1/pass-2 disagreements on gas-project fields). |
-| F36 | Nothing is accepted automatically (source-matching plan, build step 3) | Every found value that fills an empty field, at any tier, or disagrees with ours from a Tier 1–3 source at least as credible as ours goes to the review queue: `Filled empty baseline`, `Overrides baseline` and `Conflict - needs review`. A value equal to ours (`Confirmed baseline`) keeps its evidence in `evidence.csv`, but is not queued and not loaded, so the search never becomes the credited source for a value nobody reviewed. `Not found` stays out. Such rows get `validation_status = Nothing to review`, and no row is signed `AI Agent`. `resolved.csv` is written header-only; ingestion #261 accepts that and reads SME decisions from the workbook. The tier floor and the Leads route are unchanged. The 1 km (later 0.5 km) "same place" coordinate rule is gone: a location equal to ours to comparison precision confirms it, and any other is reviewed. The standardized CSV, its `.load.sql` and Run_Config's `standardized_records` are deleted, since they were built before review and #261 replaces them; arbitrating a run again deletes the copies an earlier arbitration left in its folder, and keeps any in blob. PR #24 is folded in: a location is one `found_location` row valued `lat, lon`, and a correction can carry `corrected_value_date`. The pass-2 gas follow-up and `refresh-seed` read values awaiting review in `review_queue.csv`, so both still work, and a "Not a Waste Facility" verdict still reaches the next pass's seed. In batch 1, 2,932 values had been accepted without review, the 131 a map mirror won among them. Reverses Q15/Q30, Q19, Q28, F5 and F25. |
+| F36 | Nothing is accepted automatically (source-matching plan, build step 3) | Every found value that fills an empty field, at any tier, or disagrees with ours from a Tier 1–3 source at least as credible as ours goes to the review queue: `Filled empty baseline`, `Overrides baseline` and `Conflict - needs review`. A value equal to ours (`Confirmed baseline`) keeps its evidence in `evidence.csv`, but is not queued and not loaded, so the search never becomes the credited source for a value nobody reviewed. `Not found` stays out. Such rows get `validation_status = Nothing to review`, and no row is signed `AI Agent`. `resolved.csv` is written header-only; ingestion #261 accepts that and reads SME decisions from the workbook. The tier floor and the Leads route are unchanged. The 1 km (later 0.5 km) "same place" coordinate rule is gone: a location equal to ours to comparison precision confirms it, and any other is reviewed. The standardized CSV, its `.load.sql` and Run_Config's `standardized_records` are deleted, since they were built before review and #261 replaces them; arbitrating a run again deletes the copies an earlier arbitration left in its folder, and keeps any in blob. PR #24 is folded in: a location is one `found_location` row valued `lat, lon`, and a correction can carry `corrected_value_date`. The pass-2 gas follow-up and `refresh-seed` read values awaiting review in `review_queue.csv`, so both still work, and a "Not a Waste Facility" verdict still reaches the next pass's seed. In batch 1, 2,932 values had been accepted without review, the 131 a map mirror won among them. Reverses Q15/Q30, Q19, Q28, F5 and F25, and makes Q24 and Q27 moot. |
 | F11 | Tier 5 replaces the Unrated sentinel | An unclassifiable source now sits on the ordered scale at Tier 5 rather than out-of-band at 99. `Other` removed from `source_type`: 15 types, no catch-all. |
 
 ### Accepted risks
@@ -388,9 +390,11 @@ All settled. Where an answer overrode my recommendation it is marked.
   A generic one-word `landfill` will therefore be classified as an engineered facility in exactly
   the countries where that is least likely. Accepted by decision; revisit if modeled emissions in
   non-US countries look high.
-- **Year semantics (Q24).** A value dated 2008 can sit in a record stamped `year = 2026`, which the
-  spec says should not happen. Per-attribute `value_date` is preserved in `resolved.csv`; the
-  43-column spec has nowhere to carry it.
+- **Year semantics (Q24).** *Closed by F36.* A value dated 2008 could sit in a record stamped
+  `year = 2026`, which the spec says should not happen. This repository no longer builds
+  standardized records, so it stamps none. Ingestion #261 builds them from reviewed values, and the
+  review queue carries each value's `value_date`; build step 5 of the source-matching plan gives
+  each year of a yearly attribute its own review row.
 - **Gap-fill makes Q6 mostly latent (Q29).** Because filled fields are never queried, the
   relative-credibility arbitration rarely fires. Wrong values already in the seed will not be
   challenged. Running verification mode on NGA+PHL (198 sites, ~3h) would exercise it cheaply.
