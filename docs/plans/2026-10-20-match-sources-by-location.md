@@ -1,7 +1,7 @@
 # AI search: file each source under the site it is about, and review everything
 
-**Status:** agreed 20 October 2026, with both decisions below taken as recommended. Nothing
-built yet. To be built before batch 2.
+**Status:** agreed 20 October 2026, with the decisions listed below. Nothing built yet. To be
+built before batch 2.
 **Date:** 20 October 2026
 
 ## The problem
@@ -28,7 +28,7 @@ checks that a source is actually about that site. Batch 1 (1,931 sites):
 | # | Step | In short |
 |---|---|---|
 | 1 | **Pick sites** | Skip names that give a search nothing to look for ("domestic landfill", "OpenStreetMap Landfill"; measured in PR #23). US and Brazil stay excluded. |
-| 2 | **Search** | The agent researches the site as today, but reports each **source** with the facility name and location as the source writes them. Map mirrors are dropped. |
+| 2 | **Search** | The agent researches the site as today, but reports each **source** with the facility name and location as the source writes them. Maptons is dropped; Mapcarta's points are used for matching only. |
 | 3 | **Locate** | Code turns each source's location into coordinates: parsed when it gives coordinates or a grid reference, geocoded when it gives an address. |
 | 4 | **Match** | Each source is filed under the site of ours it is about, by location, with the name as a check. It may be filed under the site searched, another of our sites, a likely new landfill, or the site searched with a "no location" flag. |
 | 5 | **Review** | For each (matched site, attribute), every source is pooled into one decision. **Nothing is accepted automatically.** SMEs see why each value was filed where it was, and can re-file it. |
@@ -39,7 +39,9 @@ checks that a source is actually about that site. Batch 1 (1,931 sites):
 ### 2. Search
 
 - **Each source reports the facility it describes:**
-  - `facility_name_in_source`, the name exactly as written, used for matching;
+  - `facility_name_in_source`, the name exactly as written;
+  - `facility_name_english`, the agent's English rendering of it, since our database's names are
+    in English;
   - `stated_location`, coordinates, a grid reference or the site's street address, copied as
     written and never worked out;
   - `stated_location_kind`.
@@ -57,18 +59,22 @@ checks that a source is actually about that site. Batch 1 (1,931 sites):
   That is enough to search with, and nothing worth copying. As a backstop, a stated location equal
   to the prompt's coordinates counts as no location. In batch 1 the agent copied our exact OSM
   point six times and credited it to an Ontario registry.
-- **Two map sites are dropped by website.** Dropped citations are counted in
-  `parse_warnings.csv`.
-  - **mapcarta.com copies OpenStreetMap.** All 319 batch-1 citations trace to the OSM way in
-    the URL: coordinates to within a metre, names and operators word for word, typos included.
-    Nothing came from anywhere else, and some of it was stale OSM. 30 of the citations pointed
-    at a different landfill.
-  - **maptons.com is an unattributed scrape of business listings,** probably Google's. 27 of
-    its 36 coordinate pairs were more than 2 km from the site searched.
+- **Map sites:**
+  - **mapcarta.com is kept as a weak source.** For landfills it mostly copies OpenStreetMap: all
+    319 batch-1 citations traced to the OSM way in the URL. Some pages also carry Wikipedia,
+    Wikidata or GeoNames content, which OSM lacks.
 
-  Sites are not dropped by the agent's source-type label, which it applies unreliably:
-  asbestossafety.gov.au was labelled a map directory 38 times. Wikimapia is an independent
-  crowd-sourced map, not a mirror, so it stays as a weak source.
+    A value equal to ours is only a confirmation, so a copy of our own OSM data never reaches
+    SMEs. Its coordinates are OSM's bounding-box centre, not our centroid (median 14 m apart),
+    so they are used for matching only and never offered as a location value. Otherwise every
+    Mapcarta point would become a review row.
+  - **maptons.com is dropped by website.** It is an unattributed scrape of business listings,
+    probably Google's, and 27 of its 36 coordinate pairs were more than 2 km from the site
+    searched. Dropped citations are counted in `parse_warnings.csv`.
+  - **Wikimapia** is an independent crowd-sourced map and stays as a weak source.
+
+  Map sites are identified by website, not by the agent's source-type label, which it applies
+  unreliably: asbestossafety.gov.au was labelled a map directory 38 times.
 - **Two sites copy government data and need care:**
   - **wastebook.co.uk** republishes the Environment Agency register. Its coordinates are postcode
     centroids, so they are never used as a location. Its "issued" date is a permit date, not a
@@ -90,6 +96,20 @@ checks that a source is actually about that site. Batch 1 (1,931 sites):
 | Street address | Geocoded (Azure Maps). PO boxes skipped. | Rooftop level: matching and a value. Street level: matching only. |
 | Anything else, or a copy of the prompt's coordinates | No location | — |
 
+- **How an address becomes a point.** The address text is sent to a geocoding service (Azure
+  Maps), which looks it up in its address database. It returns a point and says how precise the
+  match was: an exact address, a street, a postcode or a town. Only exact-address and street
+  matches are used.
+- **How reliable it is.** A town street address is usually placed within tens of metres. Landfill
+  addresses are often worse:
+  - the address marks the gate or weighbridge, which can be hundreds of metres from the middle of
+    the site (the 2 km match allows for this);
+  - rural addresses ("Highway 16, 5 km east of town", lot and concession numbers) often resolve
+    only to a road or a town, and are discarded;
+  - an operator's office address puts the point somewhere else entirely, which only the prompt
+    and the precision filter guard against.
+
+  The hit rate and the error are measured before batch 2 (Testing, step 2).
 - **Coordinates and an address together:** the coordinates win. If the address lands more than
   2 km away, the location is treated as doubtful and not used.
 - **A facility name is never geocoded.** Geocoders find landfills by name from OSM, which would just
@@ -105,19 +125,41 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 
 | The source has | Rule | Filed under |
 |---|---|---|
-| A location | Exactly one of our sites within 1.5 km | That site, whether or not it was the one searched |
-| A location | Two or more within 1.5 km | The one whose name fits. If neither fits, the site searched, flagged, and the pair goes on `possible_duplicates.csv`. |
-| A location | None within 1.5 km, but its name matches the site searched within 5 km (2 km on a single shared word; 25 km where our location is flagged inexact) | The site searched. Its location goes to review as a coordinate correction. |
+| A location | Exactly one of our sites within 2 km | That site, whether or not it was the one searched |
+| A location | Two or more within 2 km | The one whose name fits. If neither fits, the site searched, flagged, and the pair goes on `possible_duplicates.csv`. |
+| A location | None within 2 km, but its name strongly matches the site searched (see names, below) within 5 km, or 25 km where our location is flagged inexact | The site searched. Its location goes to review as a coordinate correction. |
 | A location | Nothing of ours that close | No site. Listed in `new_facility_candidates.csv`. |
 | No location | — | The site searched, flagged **no location**. The flag also says if the source's name fits the site searched, fits another of our sites in the same country within 200 km (named, ties included), or the same page was cited for other searches. |
 
-- **The same page counts once per facility it names.** A source is its exact URL, query string
-  included (today's cleaning drops it and merged 103 different NRW documents), plus the name it
-  gives. Cited by several searches, a located source matches once and is filed once.
-- **Names are a check, not the main test.** Name alone merges distant sites: "Eastview Landfill"
-  is both a Brandon and a Guelph site, 1,716 km apart. Similarity uses distinctive words, as in
-  #225, with more generic words added: tip, refuse, depot, grounds, nuisance, lieu, enfouissement,
-  technique, LET. That needs agreeing with CJ, so both repos mean the same by "same name".
+- **Sources are matched one at a time, not grouped first.** Two sources about one landfill
+  match the same site anyway. Sources are combined in only two places:
+  - **The same page counts once.** A page cited by several searches is one source. Its key is the
+    exact URL, query string included; today's cleaning drops the query string, which merged 103
+    different NRW documents into one. The facility name it gives is part of the key, since a
+    registry page names many sites.
+  - **New landfills are grouped.** Located sources that match none of our sites, and lie within
+    2 km of each other, become one new-landfill candidate.
+
+  Sources with no location are never grouped. With nothing to go on, each stays on its own.
+- **Names are fuzzy-matched, and they are a check, not the main test.** Name alone merges distant
+  sites: "Eastview Landfill" is both a Brandon and a Guelph site, 1,716 km apart. The scoring is
+  CJ's from #225 (`facility_names.py`):
+  1. Case, accents and punctuation are ignored.
+  2. Generic words ("landfill", "sanitary", "waste management"), company suffixes and permit codes
+     are dropped. More generic words would be added: tip, refuse, depot, grounds, nuisance, lieu,
+     enfouissement, technique, LET. That needs agreeing with CJ, so both repos mean the same by
+     "same name".
+  3. The score, from 0 to 1, is the higher of two things: the share of the shorter name's words
+     found in the longer one, and how alike the two read as strings. So "Seaton Meadows Landfil"
+     still matches "Seaton Meadows".
+  4. Conflicting qualifiers score 0, e.g. North vs South, or Cell I vs Cell II.
+
+  A **strong** match is a score of 0.8 or more on at least two distinctive words; one shared word
+  ("Eastview") is too weak to stretch a match. A name that has no distinctive words left, like
+  "Landfill Site", can't be judged.
+- **Names are compared in both languages.** `facility_name_english` is compared with our English
+  `facility_name`, and `facility_name_in_source` with our `original_site_name` where we have one.
+  The higher score counts.
 - **Only sites in this run's selection get values filed under them.** A match to another batch's
   country, or to the US or Brazil, goes on a list, not the Review_Queue. #261 stops on a facility
   with values from two runs.
@@ -131,10 +173,24 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 
 ### 5. Review
 
-- **One decision per (matched site, attribute).** All sources filed under a site, from any search,
-  go into one `resolve()` call, and the queue keeps one row, with the losing sources in its
-  evidence summary. This matters downstream: #261 stops on two values for one facility, attribute
-  and year.
+- **One review row per (matched site, attribute, year).** This is the key ingestion uses, and #261
+  stops on two values for one facility, attribute and year.
+  - **For yearly attributes** (status, waste received, waste in place, depth, cover types and the
+    gas figures, per consolidation's `TIME_VARYING_ATTRIBUTE_COLUMNS`), each year a source reports
+    is its own row. Today only the newest value is kept, and older years are lost.
+  - **Every other attribute** gets one row per site: name, location, type, opening and closing
+    year, operator, waste type, area, and the yes/no gas collection and cover fields.
+  - A value's year is the year of its `value_date`. An undated value goes in the run year, as #261
+    does now.
+- **When several sources give one (site, attribute, year), arbitration proposes a winner** by
+  today's rule:
+  1. the best tier;
+  2. then the newest source;
+  3. then the most sources agreeing.
+
+  Two equally good sources that disagree become a conflict for the SME. For status, a weaker
+  source at least 3 years newer can win. Either way the SME sees the proposal, the agreeing count
+  and the losing sources in the evidence summary, and decides.
 - **Nothing is accepted automatically.**
   - A value that differs from ours goes to the Review_Queue whatever its tier.
   - A value equal to ours is a confirmation. It is kept in `evidence.csv` but not queued and not
@@ -185,15 +241,16 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 | waste-ai-search#24 | Fold in: keep the single `found_location` row and `corrected_value_date`; drop the 0.5 km rule |
 | waste-ai-search#23 | `name_yield` counts rejection reasons by prefix ("Wrong facility…") and credits findings to `searched_site_id` |
 | waste-ai-search#26 | Treat the new Review_Queue columns as optional; re-key `searched_site_id`, `corrected_site_id` and the two lists |
-| ingestion #261 | Add the new Review_Queue columns as optional, in the loader and in `create_raw_tables.sql`. Add the two rejection reasons. Read `corrected_site_id` and `location_basis`. Note that confirmations no longer load. Keep `CONFIRMING_KM`: it only affects batch 1's two-row layout, whose nearby coordinates mostly came from mirrors. |
+| ingestion #261 | Add the new Review_Queue columns as optional, in the loader and in `create_raw_tables.sql`. Add the two rejection reasons. Read `corrected_site_id` and `location_basis`. Note that confirmations no longer load. Leave `CONFIRMING_KM` as it is: it only affects batch 1's two-row layout, and batch 1 is out of scope. |
 | ingestion #262, #264 | None |
 
 ## Decisions (Hugh, 20 October 2026)
 
-1. **Batch 1 is re-arbitrated under these rules before it loads.** That means no new searches, but
-   its 2,932 auto-accepted values go to SMEs. The alternative was loading it as it stands, minus
-   the values a mirror won.
+1. **Batch 1's existing problems are out of scope for now.** This plan is for batch 2 onwards.
 2. **The prompt gets our coordinates rounded to 2 decimals.**
+3. **The match distance is 2 km, not 1.5 km.** Landfills are big, and addresses and coordinates
+   can be off.
+4. **Mapcarta is kept as a weak source.** Its coordinates are used for matching only.
 
 ## Risks
 
@@ -214,16 +271,20 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 1. **Hand-built fixtures** for the known cases, with per-source names and locations: Brandon and
    Guelph Eastview, West Perth/Mitchell, Thunder Bay (the copied coordinates), and Cowpen Bewley and
    Foxhall (UK duplicates).
-2. **A batch 1 replay, as a plumbing check.** Batch 1 has few located sources. A replay by the
+2. **A geocoder accuracy test, offline and free of Bing costs.** Geocode the addresses of
+   landfills whose true location we already hold from a register that gives both. Measure how
+   often a usable point comes back, and how far it lands from the true one. This decides whether
+   2 km is right for addresses.
+3. **A batch 1 replay, as a plumbing check.** Batch 1 has few located sources. A replay by the
    review of this plan filed 9 misfiled pages under the right site: Trail Road, Otter Lake,
    Fredericton and 6 others. Its assertion: never two rows for one (site, attribute).
-3. **A live test on about 30 batch-1 sites**, the known cases included, for about $8 of Bing. It
+4. **A live test on about 30 batch-1 sites**, the known cases included, for about $8 of Bing. It
    measures:
    - the share of sources that give a location;
    - review rows per site;
    - attribute yield against batch 1 under the same 6-search cap;
    - response size, token use and timeouts.
-4. **The existing tests** for the identity gate, the near-coordinate rule, trusted names and
+5. **The existing tests** for the identity gate, the near-coordinate rule, trusted names and
    coordinates, Brazil, WP-525 promotion and the follow-up are rewritten on purpose. So are the 15
    files that build attribute-first payloads.
 
@@ -231,7 +292,8 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 
 Separate PRs, each useful for batch 2 on its own:
 
-1. Drop map mirrors by website, and dedupe sources on the exact URL.
+1. Drop Maptons by website, keep Mapcarta's coordinates out of location values, and dedupe
+   sources on the exact URL.
 2. Skip unsearchable names (from #23).
 3. Turn off automatic acceptance, and remove the near-coordinate rules here. Delete the
    standardized CSV. Fold in #24.
