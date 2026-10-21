@@ -183,17 +183,27 @@ turns each of those into a point and says how far it can be trusted, as its `loc
 | The source states | Becomes | Basis | Used for |
 |---|---|---|---|
 | Coordinates with 3 or more decimals (or seconds) | Parsed locally | `coordinates` | Matching, and a location value |
-| A UK OS or Irish grid reference, 100 m or finer, or ITM metres labelled ITM | Converted locally (`pyproj`) | `grid reference` | Matching, and a location value |
+| A UK OS or Irish grid reference, 100 m or finer, ITM metres labelled ITM, or an easting and northing each labelled (`E 531090 N 180600`) in the UK or Ireland | Converted locally (`pyproj`) | `grid reference` | Matching, and a location value |
 | A street address placed on its building or address point | Geocoded | `rooftop` | Matching, and a location value |
 | A street address placed only on its street | Geocoded | `street` | Matching only |
 | Coordinates with fewer decimals, or a coarser grid reference | Parsed locally | `hint` | Nothing yet: too approximate |
 | Anything else: a town or postcode match, a place description, a PO box | — | `none` | — |
 
 Coordinates are read as `lat, lon`, in decimal degrees or degrees, minutes and seconds, with
-hemisphere letters. `lon, lat` is read only where that is unambiguous: a hemisphere letter or a
-label says so, or the first number is beyond 90. "Matching" is build step 5's: until then, a
-usable location feeds the site's `found_location` and the 5 km identity check (see
-[Attributes searched](#attributes-searched)).
+hemisphere letters or words (`North`, `West`). `lon, lat` is read only where that is unambiguous: a
+hemisphere or a label says so, or the first number is beyond 90. A header naming both axes, such as
+`Lat/Long:` or `(lat, long)`, gives their order. In prose, a number followed by a unit (km, m, ha,
+%) is a distance or an area, not a coordinate, and the first pair in range is the one used.
+
+A labelled easting and northing (`E`/`N`, `Easting`/`Northing` or `X`/`Y`, in metres) is read in
+the country's grid: the British National Grid in the UK, and in Ireland the Irish Grid or ITM,
+whose numbers never overlap. A UK source that says Irish Grid, as Northern Ireland's do, is read
+in Ireland's grids. Elsewhere the grid is unknown, so such metres are not read. The `E` is never
+taken for an Irish Grid square, and where a text holds a licence number and a grid reference, the
+reference 100 m or finer wins.
+
+"Matching" is build step 5's: until then, a usable location feeds the site's `found_location` and
+the 5 km identity check (see [Attributes searched](#attributes-searched)).
 
 Three guards throw a location out, with the reason in `evidence.csv`:
 

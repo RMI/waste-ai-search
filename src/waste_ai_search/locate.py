@@ -102,6 +102,9 @@ class Located:
     basis: str = NONE
     reason: str = ""
     geocoder: str = ""
+    # For a hint, how far the true point may be from this one: the half-diagonal of the square its
+    # last digit names. An address can agree with a hint only within this, and DOUBTFUL_ADDRESS_KM.
+    uncertainty_km: float = 0.0
 
     @property
     def point(self) -> tuple[float, float] | None:
@@ -165,6 +168,20 @@ def prompt_point(site: dict[str, Any]) -> tuple[float, float] | None:
 # --- coordinates -----------------------------------------------------------------------------
 _HEMISPHERE_SIGN = {"N": 1, "S": -1, "E": 1, "W": -1}
 _MINUS = "-−–"
+# A hemisphere written as a word, "49.1234 North, 97.1234 West", is read as its letter.
+_HEMISPHERE_WORDS = re.compile(r"(?<![A-Za-z])(north|south|east|west)(?![A-Za-z])", re.IGNORECASE)
+# A number followed by a unit is a distance, an area or the like, never a coordinate: "12.345 ha
+# at 48.8434, -87.4296".
+_UNIT = re.compile(
+    r"\s*(?:km|kms|kilomet(?:re|er)s?|met(?:re|er)s?|m|ha|hectares?|%|t|tonnes?|tons?|mi|miles?|ft|"
+    r"feet|acres?|m2|m²|m3|m³|sq)(?![A-Za-z])",
+    re.IGNORECASE,
+)
+# A label belongs to the number in its own part of the text: in "45.42 (lat), -75.70 (long)" the
+# "lat" before the comma is the first number's.
+_SEPARATOR = re.compile(r"[,;]")
+# One degree of latitude, in km; a degree of longitude is never longer.
+_KM_PER_DEGREE = 111.32
 
 # Degrees, minutes and seconds: 63° 43' 58.15" N, or 51°30.25'N. The degree mark is required, so a
 # bare number in an address is never read as a coordinate. A hemisphere letter goes before or
@@ -187,7 +204,7 @@ _LON_LABEL = re.compile(r"\b(?:lon|long|lng|longitude)\b", re.IGNORECASE)
 _LABELS = re.compile(
     r"\b(?:lat|latitude|lon|long|lng|longitude|coordinates?|coords?|gps|wgs\s*-?\s*84|decimal|"
     r"degrees|dd|dms|location|position|centroid|site|ngr|os|ordnance|survey|national|grid|ref|"
-    r"reference|irish|itm|transverse|mercator|easting|northing|e|n|at)\b",
+    r"reference|irish|itm|transverse|mercator|easting|northing|e|n|x|y|at)\b",
     re.IGNORECASE,
 )
 
@@ -199,28 +216,53 @@ class _Component:
     fine: bool
     label: str
     span: tuple[int, int]
+    # The step its last digit names, in degrees: 0.01 for "48.84", 1/60 for whole minutes.
+    resolution: float
+    # Followed by a unit, so not a coordinate at all.
+    unit: bool
+
+
+def _decimals(number: str) -> int:
+    parts = re.split(r"[.,]", number)
+    return len(parts[1]) if len(parts) > 1 else 0
+
+
+def _axis_label(text: str) -> str:
+    """"lat" or "lon" if the text names one axis. Where it names both, as a header does ("Lat/Long:",
+    "Coordinates (lat, long):"), the first named is the first number's."""
+    lat, lon = _LAT_LABEL.search(text), _LON_LABEL.search(text)
+    if lat and lon:
+        return "lat" if lat.start() < lon.start() else "lon"
+    return "lon" if lon else "lat" if lat else ""
 
 
 def _component(match: re.Match, text: str, previous_end: int, dms: bool) -> _Component:
     degrees = float(match["deg"])
-    minutes = float((match.groupdict().get("min") or "0").replace(",", "."))
-    seconds = float((match.groupdict().get("sec") or "0").replace(",", "."))
-    value = degrees + minutes / 60 + seconds / 3600
+    minute_text = match.groupdict().get("min") or ""
+    second_text = match.groupdict().get("sec") or ""
+    value = degrees + float(minute_text.replace(",", ".") or 0) / 60 + float(second_text.replace(",", ".") or 0) / 3600
     if match["sign"] and match["sign"] in _MINUS:
         value = -value
     hemisphere = (match["pre"] or match["post"] or "").upper()
     if hemisphere and _HEMISPHERE_SIGN[hemisphere] < 0:
         value = -abs(value)
-    minute_text = match.groupdict().get("min") or ""
     if dms and minute_text:
         # A second is about 30 m; a hundredth of a minute about 18 m. Whole minutes are 1.8 km.
-        minute_decimals = len(re.split(r"[.,]", minute_text)[1]) if re.search(r"[.,]", minute_text) else 0
-        fine = bool(match.groupdict().get("sec")) or minute_decimals >= 2
+        fine = bool(second_text) or _decimals(minute_text) >= 2
+        if second_text:
+            resolution = 10 ** -_decimals(second_text) / 3600
+        else:
+            resolution = 10 ** -_decimals(minute_text) / 60
     else:
-        fine = "." in match["deg"] and len(match["deg"].split(".")[1]) >= MIN_DECIMALS
+        fine = _decimals(match["deg"]) >= MIN_DECIMALS
+        resolution = 10 ** -_decimals(match["deg"])
+    # A label is read from the text before the number, back to the last comma: "Lat: 48.84, Long:
+    # -87.43". So in "48.84 lat, -87.43 long" the second number takes no label, rather than the
+    # first's. The first number takes a header naming both.
     before = text[previous_end:match.start()]
-    label = "lon" if _LON_LABEL.search(before) else "lat" if _LAT_LABEL.search(before) else ""
-    return _Component(value, hemisphere, fine, label, match.span())
+    label = _axis_label(before) if previous_end == 0 else _axis_label(_SEPARATOR.split(before)[-1])
+    unit = bool(_UNIT.match(text, match.end()))
+    return _Component(value, hemisphere, fine, label, match.span(), resolution, unit)
 
 
 def _components(text: str) -> list[_Component]:
@@ -247,48 +289,59 @@ def _only_labels(text: str, spans: list[tuple[int, int]]) -> bool:
     return not re.search(r"[A-Za-z\d]", rest)
 
 
+def _axes(first: _Component, second: _Component) -> tuple[_Component, _Component]:
+    """A pair as (latitude, longitude): "lat, lon" unless a hemisphere, a label or a value beyond 90
+    says otherwise."""
+    if first.hemisphere in {"E", "W"} or second.hemisphere in {"N", "S"}:
+        return second, first
+    if first.hemisphere in {"N", "S"} or second.hemisphere in {"E", "W"}:
+        return first, second
+    if first.label == "lon" or second.label == "lat":
+        return second, first
+    if first.label == "lat" or second.label == "lon":
+        return first, second
+    if abs(first.value) > 90 >= abs(second.value):
+        return second, first
+    return first, second
+
+
+def _in_range(latitude: float, longitude: float) -> bool:
+    return -90 <= latitude <= 90 and -180 <= longitude <= 180 and not (latitude == 0 and longitude == 0)
+
+
 def parse_coordinates(text: str, strict: bool = False) -> Located | None:
     """Read a latitude and longitude from text, or None if it holds no coordinate pair.
 
-    "lat, lon" is assumed. "lon, lat" is read only when it is unambiguous: a hemisphere letter or a
-    label says so, or the first number is beyond 90. `strict` asks for text that is nothing but the
-    coordinates and their labels, for text the agent labelled something else.
+    "lat, lon" is assumed. "lon, lat" is read only when it is unambiguous: a hemisphere letter or
+    word, or a label, says so, or the first number is beyond 90. `strict` asks for text that is
+    nothing but the coordinates and their labels, for text the agent labelled something else.
     """
     text = normalize_scalar(text)
     if "." not in text and ";" in text:
         text = re.sub(r"(\d),(\d)", r"\1.\2", text)  # decimal commas: "48,8434; 2,3488"
-    components = _components(text)
+    text = _HEMISPHERE_WORDS.sub(lambda match: match[1][0].upper(), text)
+    components = [component for component in _components(text) if not component.unit]
     if len(components) < 2:
         return None
-    first, second = components[0], components[1]
-    if strict and (len(components) > 2 or not _only_labels(text, [first.span, second.span])):
+    if strict and (len(components) > 2 or not _only_labels(text, [c.span for c in components])):
         return None
-    # In prose ("1.5 km north of 48.8434, -87.4296"), the first pair precise enough to be a
-    # location is the one meant.
-    for one, two in zip(components, components[1:]):
-        if one.fine and two.fine:
-            first, second = one, two
-            break
-
-    if first.hemisphere in {"E", "W"} or second.hemisphere in {"N", "S"}:
-        latitude, longitude = second, first
-    elif first.hemisphere in {"N", "S"} or second.hemisphere in {"E", "W"}:
-        latitude, longitude = first, second
-    elif first.label == "lon" or second.label == "lat":
-        latitude, longitude = second, first
-    elif first.label == "lat" or second.label == "lon":
-        latitude, longitude = first, second
-    elif abs(first.value) > 90 >= abs(second.value):
-        latitude, longitude = second, first
-    else:
-        latitude, longitude = first, second
+    # In prose ("1.5 km north of 48.8434, -87.4296"), the first neighbouring pair that is in range
+    # and precise enough to be a location is the one meant; failing that, the first in range.
+    pairs = [_axes(one, two) for one, two in zip(components, components[1:])]
+    in_range = [pair for pair in pairs if _in_range(pair[0].value, pair[1].value)]
+    precise = [pair for pair in in_range if pair[0].fine and pair[1].fine]
+    latitude, longitude = (precise or in_range or pairs)[0]
 
     lat, lon = latitude.value, longitude.value
-    if not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat == 0 and lon == 0):
+    if not _in_range(lat, lon):
         return None if strict else Located(reason=f"coordinates out of range ({lat:g}, {lon:g})")
     if latitude.fine and longitude.fine:
         return Located(lat, lon, COORDINATES, "")
-    return Located(lat, lon, HINT, f"coordinates with fewer than {MIN_DECIMALS} decimals are approximate")
+    uncertainty = max(latitude.resolution, longitude.resolution) / 2 * _KM_PER_DEGREE * math.sqrt(2)
+    return Located(
+        lat, lon, HINT, f"coordinates with fewer than {MIN_DECIMALS} decimals are approximate",
+        uncertainty_km=uncertainty,
+    )
 
 
 # --- grid references ---------------------------------------------------------------------------
@@ -300,6 +353,11 @@ _IRISH_GRID = re.compile(r"(?<![A-Za-z])([A-HJ-Z])\s*(\d{2,10})(?:\s+(\d{1,5}))?
 # Irish Transverse Mercator: plain metres, read only where the text says ITM.
 _ITM_LABEL = re.compile(r"\bITM\b|irish\s+transverse\s+mercator", re.IGNORECASE)
 _METRES = re.compile(r"(?<![\d.])(\d{6}(?:\.\d+)?)(?![\d])")
+# An easting and a northing in metres, each with its label: "E 531090 N 180600", "Easting 531090,
+# Northing 180600", "X 531090 Y 180600". The letters are labels here, never a grid square.
+_EASTING = re.compile(r"(?<![A-Za-z])(?:(?i:eastings?)|E|X)(?![A-Za-z])\s*[:=]?\s*(\d{5,7}(?:\.\d+)?)(?![\d.])")
+_NORTHING = re.compile(r"(?<![A-Za-z])(?:(?i:northings?)|N|Y)(?![A-Za-z])\s*[:=]?\s*(\d{5,7}(?:\.\d+)?)(?![\d.])")
+_IRISH_LABEL = re.compile(r"\birish\b", re.IGNORECASE)
 # Irish Grid letters apply to Ireland and Northern Ireland only.
 IRISH_GRID_ISO3 = {"IRL", "GBR", ""}
 # A grid reference this fine (3 digits a side, 100 m) or finer is a location; coarser is a hint.
@@ -336,7 +394,10 @@ def _grid_point(square_east: int, square_north: int, digits: tuple[str, str], cr
     lat, lon = _to_wgs84(crs, easting, northing)
     if precision >= MIN_GRID_DIGITS:
         return Located(lat, lon, GRID_REFERENCE, "")
-    return Located(lat, lon, HINT, f"{label} coarser than 100 m is approximate")
+    return Located(
+        lat, lon, HINT, f"{label} coarser than 100 m is approximate",
+        uncertainty_km=resolution * math.sqrt(2) / 2 / 1000,
+    )
 
 
 def _letter_index(letter: str) -> int:
@@ -383,23 +444,72 @@ def parse_itm(text: str) -> Located | None:
     return Located(lat, lon, GRID_REFERENCE, "")
 
 
+def _labelled_metres(text: str) -> tuple[float, float, list[tuple[int, int]]] | None:
+    """An easting and a northing, each labelled, and where they are in the text."""
+    east, north = _EASTING.search(text), _NORTHING.search(text)
+    if east is None or north is None:
+        return None
+    return float(east[1]), float(north[1]), [east.span(), north.span()]
+
+
+def parse_labelled_metres(easting: float, northing: float, iso3: str, text: str) -> Located | None:
+    """Labelled metres in the grid the country uses: the British National Grid in the UK, and in
+    Ireland the Irish Grid or ITM, which never overlap. A UK text that says Irish is in Ireland's
+    grids, as Northern Ireland's sources are. Anywhere else the grid is unknown, so None."""
+    iso3 = iso3.upper()
+    if iso3 == "GBR" and not _IRISH_LABEL.search(text):
+        if 0 <= easting <= 700_000 and 0 <= northing <= 1_300_000:
+            lat, lon = _to_wgs84("EPSG:27700", easting, northing)
+            return Located(lat, lon, GRID_REFERENCE, "")
+        return None
+    if iso3 not in {"GBR", "IRL"}:
+        return None
+    if easting >= 400_000 and northing >= 500_000:
+        crs_ok = 400_000 <= easting <= 900_000 and northing <= 1_000_000
+        crs = "EPSG:2157"  # ITM
+    else:
+        crs_ok = 0 <= easting < 400_000 and 0 <= northing < 500_000
+        crs = "EPSG:29903"  # the Irish Grid
+    if not crs_ok:
+        return None
+    lat, lon = _to_wgs84(crs, easting, northing)
+    return Located(lat, lon, GRID_REFERENCE, "")
+
+
 def parse_grid_reference(text: str, iso3: str = "", strict: bool = False) -> Located | None:
-    """Read a UK or Irish grid reference, or ITM metres labelled as such; None if there is none."""
+    """Read a UK or Irish grid reference, ITM metres labelled as such, or a labelled easting and
+    northing; None if there is none.
+
+    Where the text holds several references, as in "Licence W0123, grid ref T 285 935", the first
+    one 100 m or finer wins over a coarser one before it.
+    """
     text = normalize_scalar(text)
     itm = parse_itm(text)
     if itm is not None:
         return itm
+    # "E 531090 N 180600" is metres. Read as the Irish Grid's square E, it would land in Scotland.
+    labels: list[tuple[int, int]] = []
+    metres = _labelled_metres(text)
+    if metres is not None:
+        easting, northing, labels = metres
+        if not strict or _only_labels(text, labels):
+            located = parse_labelled_metres(easting, northing, iso3, text)
+            if located is not None:
+                return located
     candidates = [(_OS_GRID, parse_os_grid)]
     if iso3.upper() in IRISH_GRID_ISO3:
         candidates.append((_IRISH_GRID, parse_irish_grid))
+    found: list[Located] = []
     for pattern, parse in candidates:
         for match in pattern.finditer(text):
+            if any(start < match.end() and match.start() < end for start, end in labels):
+                continue
             if strict and not _only_labels(text, [match.span()]):
                 continue
             located = parse(match)
             if located is not None:
-                return located
-    return None
+                found.append(located)
+    return next((item for item in found if item.basis == GRID_REFERENCE), found[0] if found else None)
 
 
 def parse_point(text: str, iso3: str = "", strict: bool = False) -> Located | None:

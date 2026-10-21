@@ -496,3 +496,82 @@ def test_saving_leaves_no_temporary_file(tmp_path):
     path = tmp_path / "source_locations.json"
     save_locations(path, {"CAN|x": {"basis": "none"}})
     assert [p.name for p in tmp_path.iterdir()] == ["source_locations.json"]
+
+# --- what reviewers found the parsers misread --------------------------------------------------
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Lat/Long: 45.4215, -75.6972",
+        "Lat/Lon: 45.4215, -75.6972",
+        "Latitude/Longitude: 45.4215, -75.6972",
+        "Lat, Long: 45.4215, -75.6972",
+        "Coordinates (lat, long): 45.4215, -75.6972",
+        "GPS (latitude, longitude): 45.4215, -75.6972",
+        "Long/Lat: -75.6972, 45.4215",
+        # A label after its number belongs to that number, not the next one.
+        "45.4215 lat, -75.6972 long",
+    ],
+)
+def test_a_header_naming_both_axes_reads_them_in_its_order(text):
+    located = parse_coordinates(text, strict=True)
+    assert (located.latitude, located.longitude, located.basis) == (45.4215, -75.6972, COORDINATES)
+
+
+def test_a_header_naming_both_axes_keeps_a_southern_point():
+    located = parse_coordinates("Lat/Long: -37.8136, 144.9631")
+    assert (located.latitude, located.longitude) == (-37.8136, 144.9631)
+
+
+def test_hemispheres_written_as_words():
+    located = parse_coordinates("Latitude 49.1234 North, Longitude 97.1234 West", strict=True)
+    assert (located.latitude, located.longitude, located.basis) == (49.1234, -97.1234, COORDINATES)
+    near(parse_coordinates("51°30'26\" North, 0°7'39\" West"), 51.507222, -0.1275, metres=1)
+    assert parse_coordinates("33.8688 south, 151.2093 east").point == (-33.8688, 151.2093)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Site area 12.345 ha at 48.8434, -87.4296",
+        "located 2.345 km from 48.8434, -87.4296",
+        "Elevation 312.456 m; 48.8434, -87.4296",
+        # No unit, but a pair out of range is passed over for the next one.
+        "Elevation 312.456; 48.8434, -87.4296",
+    ],
+)
+def test_a_distance_area_or_height_is_not_part_of_the_coordinates(text):
+    located = parse_coordinates(text)
+    assert (located.latitude, located.longitude, located.basis) == (48.8434, -87.4296, COORDINATES)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["E452300 N345600", "E 452300, N 345600", "Easting 452300, Northing 345600", "X 452300 Y 345600", "NGR E 452300 N 345600"],
+)
+def test_a_labelled_easting_and_northing_in_the_uk_is_the_national_grid(text):
+    # The same point as SK 52300 45600; read as the Irish Grid's square E it landed in Scotland.
+    expected = parse_grid_reference("SK 52300 45600", "GBR")
+    located = parse_grid_reference(text, "GBR")
+    assert located.basis == GRID_REFERENCE
+    near(located, *expected.point, metres=1)
+    assert parse_point(text, "GBR", strict=True).basis == GRID_REFERENCE
+
+
+def test_a_labelled_easting_and_northing_in_ireland_is_the_irish_grid_or_itm():
+    # The Spire, Dublin: Irish Grid metres, and ITM metres, which never overlap.
+    near(parse_grid_reference("E 315904 N 234671", "IRL"), 53.349798, -6.260254, metres=5)
+    near(parse_grid_reference("E 715830, N 734697", "IRL"), 53.349798, -6.260254, metres=5)
+    near(parse_grid_reference("E 278500 N 184300", "IRL"), 52.9042, -6.8341, metres=50)
+    # Northern Ireland's sources give the Irish Grid, and say so.
+    near(parse_grid_reference("Irish Grid E 315904 N 234671", "GBR"), 53.349798, -6.260254, metres=5)
+
+
+def test_labelled_metres_with_no_known_grid_are_not_read():
+    for iso3 in ("", "FRA"):
+        assert parse_grid_reference("E 452300 N 345600", iso3) is None
+
+
+def test_a_licence_number_before_a_grid_reference_does_not_hide_it():
+    located = parse_grid_reference("Licence W0123, grid ref T 285 935", "IRL")
+    assert located.basis == GRID_REFERENCE
+    near(located, *parse_grid_reference("T 285 935", "IRL").point, metres=1)
