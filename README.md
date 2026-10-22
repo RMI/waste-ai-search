@@ -257,7 +257,7 @@ turns them into a point and says how far it can be trusted, as its basis
 | A UK OS or Irish grid reference, 100 m or finer, ITM metres labelled ITM, or an easting and northing each labelled (`E 531090 N 180600`) in the UK or Ireland | Converted locally (`pyproj`) | `grid reference` | `grid reference` |
 | An address placed on its building or address point | Geocoded | `rooftop` | `address (building)` |
 | An address placed only on its street | Geocoded | `street` | `address (street)` |
-| Coordinates with fewer decimals, or a coarser grid reference | Parsed locally | `hint` | blank: too approximate to use |
+| Coordinates with fewer decimals, or a coarser grid reference | Parsed locally | `hint` | blank: too approximate to show, but still measured for the 5 km check |
 | Anything else: a town or postcode match, a PO box | — | `none` | blank |
 
 **What the point is for.** A source's location never replaces ours. It is only used to check that
@@ -271,8 +271,17 @@ the source is about our site. Three columns of `found_values.csv` and the Site_R
 
 A Tier 1–2 source placing the facility more than 5 km from our site goes to SMEs rather than being
 approved automatically (see [Filing and approving each source](#filing-and-approving-each-source)).
-A source with no point, or a site of ours with no coordinates, is not checked. Where a source gives
-both coordinates and an address, the coordinates are used, unless the guards below throw both out.
+A source that states no location we can read, or a site of ours with no coordinates, is not
+checked. Where a source gives both coordinates and an address, the coordinates are used, unless the
+guards below throw both out.
+
+**Rough points are still measured.** Coordinates too coarse to show (a hint), and a doubtful pair's
+coordinates and address, give no `source_coordinates`, but each still says roughly where the source
+puts the facility. The 5 km check measures them: a hint is far only beyond 5 km plus its own
+coarseness, and a doubtful pair is far if either its coordinates or its address is more than 5 km
+from ours. `distance_km` then gives the farthest of them, `location_note` says why there is no
+point, and `status_reason` says "roughly". A Tier 1 source stating `50.66, -97.20` for a site at
+Brady Road, 100 km south, would otherwise be approved unseen.
 
 Coordinates are read as `lat, lon`, in decimal degrees or degrees, minutes and seconds, with
 hemisphere letters or words (`North`, `West`). `lon, lat` is read only where that is unambiguous: a
@@ -300,10 +309,10 @@ Three guards throw a location out, with the reason in `found_values.csv`'s `loca
   about.
 - **wastebook.co.uk.** Its coordinates are postcode centroids.
 - **A doubtful pair.** Where a source gives coordinates and an address, the coordinates win; if the
-  address lands more than 2 km from them, neither is used. Coarse coordinates (a hint) give way to
-  a located address that agrees with them: within 2 km plus the hint's own coarseness, about
-  0.8 km for 2 decimals. An address farther off, such as an operator's office, makes the pair
-  doubtful too.
+  address lands more than 2 km from them, neither is used as the source's point, though both are
+  still measured for the 5 km check. Coarse coordinates (a hint) give way to a located address that
+  agrees with them: within 2 km plus the hint's own coarseness, about 0.8 km for 2 decimals. An
+  address farther off, such as an operator's office, makes the pair doubtful too.
 
 **A facility name is never geocoded.** Geocoders find landfills by name from OpenStreetMap, where
 most of our sites came from, so it would hand our own point back. Only the stated address is
@@ -431,9 +440,10 @@ found for it fills an empty field.
    them at most, unless they are one facility recorded twice. Each site's pair goes to SMEs, and
    the sites go on `possible_duplicates.csv`.
 2. **The source places the facility more than 5 km from our site's coordinates.** This is batch 1's
-   check, now run per source (see [Locating each source](#locating-each-source)). A source with no
-   point, or a site of ours with no coordinates, isn't checked, so its Tier 1–2 values are approved,
-   as in batch 1.
+   check, now run per source (see [Locating each source](#locating-each-source)). Coordinates too
+   coarse to show, and a doubtful pair's coordinates and address, are still measured. A source
+   stating no location we can read, or a site of ours with no coordinates, isn't checked, so its
+   Tier 1–2 values are approved, as in batch 1.
 3. **The source says the site is "Not a Waste Facility"** (see
    [Not a waste facility](#not-a-waste-facility-wp-525)).
 

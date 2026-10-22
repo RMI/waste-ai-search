@@ -270,6 +270,25 @@ def test_the_5_km_check_needs_coordinates_on_both_sides(tmp_path):
     }
 
 
+def test_coordinates_far_away_go_to_an_sme_even_where_their_address_disagrees(tmp_path):
+    """Coordinates and an address more than 2 km apart are doubtful, so neither is shown as where the
+    source places the facility; but coordinates 100 km from ours are still a reason to look. The check
+    measures both, and either can send the pair to an SME."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    # The locate step's answer: the address on its building, 3 km from the coordinates stated.
+    (run_dir / "source_locations.json").write_text(json.dumps({"CAN|1 Other Road, Elsewhere MB": {
+        "text": "1 Other Road, Elsewhere MB", "country": "CAN", "latitude": 50.6853, "longitude": -97.2004,
+        "basis": "rooftop", "reason": "", "geocoder": "nominatim", "match": "",
+    }}))
+    permit = source("https://a.example/permit", "Brady Road Landfill", "50.6583, -97.2004",
+                    address="1 Other Road, Elsewhere MB", values=[value("operator", "City of Winnipeg")])
+    [row] = rows(arbitrate(tmp_path, [BRADY], {"13413": [permit]}))
+    assert (row["source_coordinates"], row["distance_km"]) == ("", "103.08")
+    assert row["location_note"] == "doubtful: its address lands 3.0 km from its coordinates"
+    assert (row["status"], row["status_reason"]) == (SME_REVIEW, "Tier 1 source; it places the facility roughly 103 km from our site.")
+
+
 def test_the_same_page_and_name_cited_for_two_sites_goes_to_smes_for_both(tmp_path):
     """Guelph's search cited Brandon's registry page, and so did Brandon's. Both pairs go to an SME,
     and possible_duplicates.csv lists the two sites."""

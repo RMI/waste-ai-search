@@ -19,7 +19,8 @@ The exceptions, which send a Tier 1-2 pair to SMEs whatever its tier:
 - the same page and facility name are cited for two or more of our sites (possible_duplicates.csv
   lists them);
 - the source places the facility more than EXCEPTION_KM from our site's coordinates. A source
-  that gives no coordinates, or a site with none, is not checked, as in batch 1;
+  that gives no coordinates, or a site with none, is not checked, as in batch 1. Coordinates too
+  coarse to use, or that disagree with the source's own address, are still checked (Pair.measure);
 - the source says the site is "Not a Waste Facility".
 
 An empty field is our value for that site, attribute and year, as arbitration.site_for_year reads
@@ -117,7 +118,12 @@ class Pair:
     # Our other sites whose searches cited the same page under the same name.
     shared_with: list[str] = field(default_factory=list)
     not_a_waste_facility: bool = False
+    # How far the source places the facility from our site, and whether that is further than
+    # EXCEPTION_KM, allowing for how rough its point is (measure).
     distance_km: float | None = None
+    far_away: bool = False
+    # Whether that is measured from points too rough to show as the source's own.
+    roughly: bool = False
 
     @property
     def review_id(self) -> str:
@@ -138,20 +144,42 @@ class Pair:
     @property
     def location(self) -> dict[str, Any]:
         """The citation whose location the pair goes by: the first that places the facility, else
-        the first."""
-        return next((c for c in self.citations if citation_point(c) is not None), self.citations[0])
+        the first that places it roughly, else the first."""
+        return (
+            next((c for c in self.citations if citation_point(c) is not None), None)
+            or next((c for c in self.citations if c.get("rough_points")), self.citations[0])
+        )
 
     def measure(self, site: dict[str, Any]) -> None:
-        """How far the source places the facility from our site's coordinates, where both are known."""
-        point, ours = citation_point(self.location), seed_point(site)
-        self.distance_km = haversine_km(*ours, *point) if point is not None and ours is not None else None
+        """How far the source places the facility from our site's coordinates, where both are known.
+
+        A source whose point is too rough to show - coordinates with too few decimals, or coordinates
+        and an address more than 2 km apart (locate.Located.rough_points) - is measured too: as far as
+        the farthest of its points, and far away if any is more than EXCEPTION_KM from ours beyond
+        how far off it may be. Coordinates that coarse still say the facility is 100 km away.
+        """
+        self.distance_km, self.far_away, self.roughly = None, False, False
+        ours = seed_point(site)
+        if ours is None:
+            return
+        location = self.location
+        point = citation_point(location)
+        if point is not None:
+            self.distance_km = haversine_km(*ours, *point)
+            self.far_away = self.distance_km > EXCEPTION_KM
+            return
+        rough = [(haversine_km(*ours, latitude, longitude), off) for latitude, longitude, off in location.get("rough_points") or ()]
+        if rough:
+            self.distance_km = max(km for km, _off in rough)
+            self.far_away = any(km > EXCEPTION_KM + off for km, off in rough)
+            self.roughly = True
 
     def exceptions(self) -> list[str]:
         """Which exceptions apply (EXCEPTIONS)."""
         found = []
         if self.shared_with:
             found.append(SAME_PAGE)
-        if self.distance_km is not None and self.distance_km > EXCEPTION_KM:
+        if self.far_away:
             found.append(FAR_AWAY)
         if self.not_a_waste_facility:
             found.append(SAYS_NOT_A_FACILITY)
@@ -172,7 +200,7 @@ class Pair:
                 others = ", ".join(self.shared_with)
                 parts.append(f"the same page and name are also cited for site{'s' if len(self.shared_with) > 1 else ''} {others}")
             elif exception == FAR_AWAY:
-                parts.append(f"it places the facility {_km(self.distance_km)} from our site")
+                parts.append(f"it places the facility {'roughly ' if self.roughly else ''}{_km(self.distance_km)} from our site")
             else:
                 parts.append(f"it says the site is {NOT_A_WASTE_FACILITY}")
         return "; ".join(parts) + "."

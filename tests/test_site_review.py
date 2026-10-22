@@ -9,6 +9,8 @@ where they can, on hand-built source-first responses.
 """
 from __future__ import annotations
 
+import pytest
+
 import csv
 import json
 
@@ -229,11 +231,31 @@ def test_only_the_quotes_of_values_approving_would_load_are_flagged():
 
 def test_every_flag_at_once_in_the_order_an_sme_reads_them():
     rows = [waiting_row("operator", NOT_FOUND)]
-    flagged = pair(shared_with=["7", "12"], distance_km=5.01, not_a_waste_facility=True)
+    flagged = pair(shared_with=["7", "12"], distance_km=5.01, far_away=True, not_a_waste_facility=True)
     assert pair_flags(flagged, rows, rows, []) == [
         "quote not found on the page (operator)",
         "same page and name also cited for sites 7, 12",
         "more than 5 km from our site",
         f"says {NOT_A_WASTE_FACILITY}",
     ]
-    assert pair_flags(pair(distance_km=5.0), rows[:0], rows[:0], []) == []
+    assert pair_flags(pair(distance_km=5.0, far_away=False), rows[:0], rows[:0], []) == []
+
+
+@pytest.mark.parametrize("citation, km, far", [
+    # A point good enough to show: more than 5 km is far.
+    ({"location_basis": "coordinates", "located_latitude": "49.80", "located_longitude": "-97.2004"}, 4.6, False),
+    ({"location_basis": "coordinates", "located_latitude": "49.81", "located_longitude": "-97.2004"}, 5.7, True),
+    # A hint, good to about 0.7 km: far only beyond 5 km and that.
+    ({"location_basis": "hint", "rough_points": ((49.81, -97.2004, 0.75),)}, 5.7, False),
+    ({"location_basis": "hint", "rough_points": ((49.82, -97.2004, 0.75),)}, 6.9, True),
+    # A doubtful source: its coordinates and its address are both measured, and either can be far.
+    ({"location_basis": "none", "rough_points": ((49.7583, -97.2004, 0.0), (50.6583, -97.2004, 0.0))}, 100.1, True),
+    # Nothing stated, or nothing read: no check.
+    ({"location_basis": "none"}, None, False),
+])
+def test_how_far_a_pair_is_goes_by_its_point_or_else_its_rough_points(citation, km, far):
+    made = pair()
+    made.citations = [citation]
+    made.measure({"latitude": "49.7583", "longitude": "-97.2004"})
+    assert (None if made.distance_km is None else round(made.distance_km, 1), made.far_away) == (km, far)
+    assert made.roughly == ("rough_points" in citation)

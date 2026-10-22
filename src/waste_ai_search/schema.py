@@ -532,7 +532,8 @@ FOUND_VALUES_HEADERS = [
     # The facility the source describes, as it writes it: its name, address and coordinates or grid
     # reference (stated_coordinates). source_coordinates is the point read from them (locate.py),
     # "lat, lon" to paste into Google Maps, coordinates_from says from what, and distance_km is how
-    # far that is from our site's coordinates. location_note says why there is no point.
+    # far that is from our site's coordinates - or, where they were too rough to give a point, how
+    # far the farthest rough reading of them is. location_note says why there is no point.
     "facility_name_in_source", "facility_name_english", "source_address", "stated_coordinates",
     "source_coordinates", "coordinates_from", "distance_km", "location_note",
     # The value, converted and mapped, and as the agent wrote it; our_value is ours for that year.

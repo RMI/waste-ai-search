@@ -338,7 +338,7 @@ def extract_evidence(
     return by_attribute, evidence_rows, source_entries, list(dict.fromkeys(warnings))
 
 
-def location_columns(source: dict[str, Any], place: Located) -> dict[str, str]:
+def location_columns(source: dict[str, Any], place: Located) -> dict[str, Any]:
     """The facility a source describes, as it writes it - its name, address and coordinates - and the
     point read from them."""
     stated = states_location(source)
@@ -351,6 +351,8 @@ def location_columns(source: dict[str, Any], place: Located) -> dict[str, str]:
         "located_latitude": format_coordinate(place.latitude) if stated else "",
         "located_longitude": format_coordinate(place.longitude) if stated else "",
         "location_reason": place.reason if stated else "",
+        # Not a column: what the 5 km check measures where there is no point to use.
+        "rough_points": place.rough_points() if stated else (),
     }
 
 

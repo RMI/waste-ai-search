@@ -100,12 +100,19 @@ def test_an_older_responses_coordinates_are_where_its_source_places_the_facility
     assert row["distance_km"] == "0.46"
 
 
-def test_coarse_coordinates_are_a_hint_and_place_nothing(tmp_path):
-    """Two decimals are about a kilometre: too coarse to measure by, so no 5 km check runs on them."""
-    run_dir = arbitrate_el_hongo(tmp_path, {"sources": [operator({**REGULATOR, "stated_coordinates": "32.61, -116.31"})]})
-    [row] = found(run_dir)
-    assert (row["source_coordinates"], row["coordinates_from"], row["distance_km"]) == ("", "", "")
-    assert row["location_note"] and row["status"] == "auto-approved"
+def test_coarse_coordinates_are_a_hint_that_places_nothing_but_is_still_measured(tmp_path):
+    """Two decimals are about a kilometre: too coarse to show as where the source places the facility,
+    but not to say it is 14 km from ours. The 5 km check measures them, allowing for how coarse they
+    are; it once skipped them, and a Tier 1 source 100 km away was approved unseen."""
+    near = operator({**REGULATOR, "stated_coordinates": "32.51, -116.22"})
+    [row] = found(arbitrate_el_hongo(tmp_path / "near", {"sources": [near]}))
+    assert (row["source_coordinates"], row["coordinates_from"], row["distance_km"]) == ("", "", "0.89")
+    assert "fewer than 3 decimals" in row["location_note"] and row["status"] == "auto-approved"
+
+    far = operator({**REGULATOR, "stated_coordinates": "32.61, -116.31"})
+    [row] = found(arbitrate_el_hongo(tmp_path / "far", {"sources": [far]}))
+    assert (row["source_coordinates"], row["distance_km"], row["status"]) == ("", "13.76", "SME review")
+    assert row["status_reason"] == "Tier 1 source; it places the facility roughly 14 km from our site."
 
 
 def test_half_a_location_is_no_location(tmp_path):

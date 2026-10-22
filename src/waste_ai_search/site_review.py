@@ -122,7 +122,7 @@ def pair_flags(
     if pair.shared_with:
         sites = "s" if len(pair.shared_with) > 1 else ""
         flags.append(f"same page and name also cited for site{sites} {', '.join(pair.shared_with)}")
-    if pair.distance_km is not None and pair.distance_km > EXCEPTION_KM:
+    if pair.far_away:
         flags.append(FAR_AWAY_FLAG)
     if pair.not_a_waste_facility:
         # The likeliest false verdict is a closed landfill misread as never a waste site.

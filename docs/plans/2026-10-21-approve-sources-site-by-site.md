@@ -234,6 +234,11 @@ Each branch is cut from the one before. The first is cut from `approve-sources-s
 - **Not used also covers** a value the agent itself marked an excluded candidate, and the agent's
   unverified leads, which `found_values.csv` lists with a blank `review_id`.
 - **The 5 km flag shows on any listed pair** more than 5 km away, Tier 3–5 included.
+- **Rough points are measured too.** Coordinates too coarse to show (fewer than 3 decimals, or a
+  grid reference coarser than 100 m) and a doubtful source's coordinates and address (more than 2 km
+  apart) give no `source_coordinates`, but the 5 km check still measures them, allowing for their
+  coarseness, so a Tier 1–2 source stating coordinates 100 km away goes to SMEs however it states
+  them. Only a source stating nothing readable is unchecked.
 - **A Different site needs an `other_site_id`.** Without one, `accept-reviews` stops and names the
   row; an SME who can't tell which site leaves the decision blank and says so in `notes`. A
   Different site also weighs again, at the other site, values set aside only because they confirm

@@ -136,12 +136,25 @@ class Located:
     # For a hint, how far the true point may be from this one: the half-diagonal of the square its
     # last digit names. An address can agree with a hint only within this, and DOUBTFUL_ADDRESS_KM.
     uncertainty_km: float = 0.0
+    # For a doubtful source, which has no point: its coordinates and its address, each with how far
+    # off it may be (rough_points).
+    doubtful_points: tuple[tuple[float, float, float], ...] = ()
 
     @property
     def point(self) -> tuple[float, float] | None:
         if self.latitude is None or self.longitude is None:
             return None
         return self.latitude, self.longitude
+
+    def rough_points(self) -> tuple[tuple[float, float, float], ...]:
+        """Where a source puts the facility when it gives no point good enough to use, each as
+        (latitude, longitude, how far off it may be in km): a hint's own point, or a doubtful
+        source's coordinates and address. Neither is shown as the source's point, but each still
+        says roughly where the source puts the facility, so the 5 km check measures them
+        (found_values.py): coordinates 100 km from our site are a reason to look, however coarse."""
+        if self.basis == HINT and self.point is not None:
+            return ((self.latitude, self.longitude, self.uncertainty_km),)
+        return self.doubtful_points
 
     def value(self) -> str:
         """The point as "lat, lon", which Google Maps finds when pasted into its search box."""
@@ -1195,6 +1208,10 @@ def locate_source(
                 return Located(
                     reason=f"doubtful: its address lands {km:.1f} km from its coordinates",
                     geocoder=address.geocoder,
+                    doubtful_points=(
+                        (*point.point, point.uncertainty_km if point.basis == HINT else 0.0),
+                        (*address.point, 0.0),
+                    ),
                 )
             if point.basis == HINT:
                 # Coarse coordinates say less than an address that agrees with them.
