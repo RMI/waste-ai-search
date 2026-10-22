@@ -19,7 +19,7 @@ approving it would load. The SME picks a decision:
 | Blank | Nothing yet. |
 
 review_id names the pair, and is the same each time the run is arbitrated, so a decision is read
-back by it.
+back by it (accept_reviews.py).
 """
 from __future__ import annotations
 

@@ -176,8 +176,9 @@ REVIEW_INSTRUCTIONS = [
             "6. Pick decision:\n"
             "- Correct site: the source is about this site of ours. Its values load here.\n"
             "- Different site: it is about another site of ours. Put that site's id in other_site_id, "
-            "and its values load there, where that site's fields are empty. If you can't tell which "
-            "site, leave other_site_id blank, and nothing loads.\n"
+            "and its values load there, where that site's fields are empty. A Different site with no "
+            "other_site_id can't be read back: if you can't tell which of our sites it is about, leave "
+            "decision blank and say so in notes.\n"
             "- New site: it is about a landfill that isn't in our database. Nothing loads, and it is "
             "listed for ingestion as a new facility.\n"
             "- Junk: the source is no use - it isn't about one facility, or you can't tell which. "
@@ -200,9 +201,22 @@ REVIEW_INSTRUCTIONS = [
             "facility more than 5 km from our site, or it says the site is Not a Waste Facility. These "
             "load once the source is approved on Site_Review. not used: it confirms or would change a "
             "value we hold, its link is dead, or it could not be converted or mapped. status_reason "
-            "says why. review_id names the site-source pair, as on Site_Review."
+            "says why. review_id names the site-source pair, as on Site_Review. Once your decisions "
+            "are read back, sme_decision gives the pair's decision, and loaded says whether the value "
+            "loads: yes, or no where another value was picked for the same site, attribute and year."
         ),
         "sme_action": "Read only. Open it to see each value's quote, and why it has its status.",
+        "editable": "nothing",
+    },
+    {
+        "tab_name": "(file) accepted_values.csv",
+        "purpose": (
+            "What loads into our database, once your decisions are read back: one value per site, "
+            "attribute and, for a yearly attribute, year, from the auto-approved sources and those you "
+            "approve. Where approved values disagree, the best tier wins, then the newest, then the "
+            "value most sources give. approved_by is auto, or the reviewer. For ingestion."
+        ),
+        "sme_action": "Read only.",
         "editable": "nothing",
     },
     {

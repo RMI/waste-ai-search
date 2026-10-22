@@ -555,9 +555,11 @@ uv run waste-ai-search refresh-seed --run-id pilot10
 uv run waste-ai-search search --run-id pilot10_pass2 \
   --input-csv outputs/runs/pilot10/refreshed_seed.csv --site-ids <ids printed above>
 
-# After review - add the values SMEs rejected as "New facility - not in our database" to the run's
+# During or after review - apply the SMEs' Site_Review decisions: write the auto-approved and
+# SME-approved values to accepted_values.csv, for ingestion, and the sources marked New site to
 # new_facility_candidates.csv. Reads the SharePoint copy of the workbook, else the run folder's.
-uv run waste-ai-search collect-new-facilities --run-id pilot10 [--workbook <reviewed .xlsx>]
+# Run it any time: undecided pairs load nothing until it runs again.
+uv run waste-ai-search accept-reviews --run-id pilot10 [--workbook <reviewed .xlsx>]
 ```
 
 **Never search `refreshed_seed.csv` without `--site-ids`.** It holds the whole seeded corpus
@@ -1012,7 +1014,8 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 | `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. `searched_site_id` is the search that found each; a weaker disagreement weighed several sources, and names every search behind them. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
 | `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
-| `new_facility_candidates.csv` | For ingestion: landfills none of our sites is. One row per group of located sources more than 2 km from every site of ours (grouped within 2 km of each other), with their URLs, names as written and in English, stated locations, the point and its basis, our nearest site and its distance, and the searches that found them. `collect-new-facilities` adds the values SMEs rejected as "New facility - not in our database" (`found_by` = `SME`); arbitrating again keeps those. |
+| `new_facility_candidates.csv` | For ingestion: landfills none of our sites is. One row per group of located sources more than 2 km from every site of ours (grouped within 2 km of each other), with their URLs, names as written and in English, stated locations, the point and its basis, our nearest site and its distance, and the searches that found them. `accept-reviews` adds the sources SMEs mark New site on Site_Review (`found_by` = `SME`), once each; arbitrating again keeps those. |
+| `accepted_values.csv` | For ingestion, written by `accept-reviews`: one value per site, attribute and, for a yearly attribute, year, from the auto-approved site-source pairs and those SMEs approve on Site_Review (Correct site, or Different site with `other_site_id`, where that site's field is empty). Where accepted values disagree, the best tier wins, then the newest, then the value most sources give. Columns: `run_id`, `site_id`, `site_name`, `country_iso3`, `attribute_name`, `value`, `unit`, `year`, `source_url`, `source_tier`, `approved_by` (`auto` or the reviewer), `reviewed_date`, `review_id`. It also fills `found_values.csv`'s `sme_decision` and `loaded`. Arbitrating again removes it; run `accept-reviews` again. |
 | `possible_duplicates.csv` | For ingestion (entity linkage's #225 tackles E-PRTR re-registrations): pairs of our sites, with names, distance apart, the sources that hit both and why: one source placed within 2 km of both that its name couldn't settle, or one page cited by both sites' searches where they lie within 2 km. |
 | `outside_run_matches.csv` | Sources filed under a site outside the run's selection: the source, the site, its country, and the search that found it. Not reviewed. |
 | `datasets_found.csv` | For ingestion: pages that look like datasets, such as a regulator's list of its landfills. A search reports only the entry it used, so the rest of such a page goes unread, and every site on it pays its own search to find it again; loaded once through ingestion, as E-PRTR is, it would cover them all. Listed when it names or places 2 or more facilities, or when a regulator, registry or statistics publisher's page is found by 3 or more searches (a town's landfill page is found by every nearby search too). Names count apart by their distinctive words, and a facility placed being a site of ours the page was filed under by its own location or name, or one of its new-landfill entries. It gives the page, its publisher, type and tier, the counts, the searches, the sites it placed, the names it gave, and why it is listed. |
@@ -1222,7 +1225,7 @@ has a status row of its own, ingestion stops on the two. For the same reason, a
 `corrected_site_id`, check that site has no row of its own for the same attribute and year; if it
 has, reject one of the two.
 
-Once the review is done, `collect-new-facilities --run-id <run_id>` adds the values rejected as `New facility - not in our database` to the run's `new_facility_candidates.csv`, once each, for the ingestion team. It reads the workbook in the SharePoint folder, else the run folder's, or the one `--workbook` names.
+`accept-reviews --run-id <run_id>` reads the SMEs' decisions back from the Site_Review tab, writes `accepted_values.csv` for ingestion, and adds the sources marked New site to the run's `new_facility_candidates.csv`, once each. It reads the workbook in the SharePoint folder, else the run folder's, or the one `--workbook` names, and stops, naming the row, on a decision it can't read back: one that isn't Correct site, Different site, New site or Junk; a Different site with no `other_site_id`, or one not in the run's seed; or an `other_site_id` beside another decision.
 
 ### 5. Optional tabs
 

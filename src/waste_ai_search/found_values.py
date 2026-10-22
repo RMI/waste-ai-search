@@ -78,6 +78,11 @@ NOT_OFFERED = f"{NOT_A_WASTE_FACILITY} not offered"
 EXCLUDED_BY_AGENT = "excluded by the agent"
 UNVERIFIED = "the agent's unverified lead"
 NOT_USED_REASONS = [CONFIRMS, CHANGES, DEAD_LINK, NO_LINK, UNUSABLE, EXCLUDED_BY_AGENT, NOT_OFFERED, UNVERIFIED]
+# How status_reason begins for a value not used only because of the value we hold at the site
+# searched. That says nothing of another site, so an SME's Different site weighs it again there
+# (accept_reviews.py).
+CONFIRMS_TEXT = "Confirms our value."
+CHANGES_TEXT = "Would change our value"
 
 # What the agent writes of a value it found and then judged not to be one: a candidate it
 # excluded, or an attribute it reports as not found. "The page gives disposal charges per tonne,
@@ -322,8 +327,8 @@ def status_of(
         return NOT_USED, f"{NOT_A_WASTE_FACILITY} is used only where the search offered it, and this site was not offered it.", NOT_OFFERED
     if not is_blank(ours):
         if comparable(ours, attribute) == comparable(value, attribute):
-            return NOT_USED, "Confirms our value.", CONFIRMS
-        return NOT_USED, f"Would change our value, {ours}: only fills of empty fields load.", CHANGES
+            return NOT_USED, CONFIRMS_TEXT, CONFIRMS
+        return NOT_USED, f"{CHANGES_TEXT}, {ours}: only fills of empty fields load.", CHANGES
     return pair.status, pair.reason(), ""
 
 
@@ -403,6 +408,13 @@ def unverified_rows(leads: list[dict[str, Any]], sites_by_id: dict[str, dict[str
             "_why": UNVERIFIED,
         })
     return rows
+
+
+def judged_on_our_value(row: dict[str, Any]) -> bool:
+    """Whether a found_values.csv row is not used only because it confirms or would change the value
+    we hold at the site searched."""
+    reason = normalize_scalar(row.get("status_reason"))
+    return row.get("status") == NOT_USED and (reason.startswith(CONFIRMS_TEXT) or reason.startswith(CHANGES_TEXT))
 
 
 # --- one value per site, attribute and year ------------------------------------------------------

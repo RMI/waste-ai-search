@@ -544,6 +544,16 @@ FOUND_VALUES_HEADERS = [
     "review_id", "status", "status_reason", "sme_decision", "loaded",
 ]
 
+# accepted_values.csv: the one value to load for each site, attribute and year (for a yearly
+# attribute), from the auto-approved pairs and the pairs SMEs approved (accept_reviews.py). What
+# ingestion loads. site_id is where the value loads, which an SME's Different site can make another
+# of our sites than the one searched; review_id names the pair it came from. approved_by is "auto",
+# or the reviewer.
+ACCEPTED_VALUES_HEADERS = [
+    "run_id", "site_id", "site_name", "country_iso3", "attribute_name", "value", "unit", "year",
+    "source_url", "source_tier", "approved_by", "reviewed_date", "review_id",
+]
+
 # The Site_Review tab: one row per site-source pair whose values wait on an SME (site_review.py).
 SITE_REVIEW_HEADERS = [
     "review_id",
@@ -621,10 +631,6 @@ RESOLUTION_VALUES = [
 
 # Resolutions whose rows belong in the leads sheet and must NOT appear in the review queue.
 LEAD_ROUTED_RESOLUTIONS = {"Conflict - lower credibility"}
-
-# How a reviewed Review_Queue, before Site_Review replaced it, rejected a value whose source is about
-# a landfill not in our database. collect-new-facilities still reads those workbooks.
-NEW_FACILITY_REASON = "New facility - not in our database"
 
 # What an SME decides of each site-source pair on the Site_Review tab (site_review.py): the source
 # is about this site of ours, about another site of ours (other_site_id says which), about a

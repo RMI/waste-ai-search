@@ -207,13 +207,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Let a source with a dead link stay usable instead of listing its values as not used.",
     )
 
-    collect = subparsers.add_parser(
-        "collect-new-facilities",
-        help="Add the values SMEs rejected as 'New facility - not in our database' to the run's "
-        "new_facility_candidates.csv (no agent calls).",
+    accept = subparsers.add_parser(
+        "accept-reviews",
+        help="Apply the SMEs' Site_Review decisions: write the auto-approved and SME-approved values to "
+        "accepted_values.csv, and the sources marked New site to new_facility_candidates.csv (no agent "
+        "calls). Run it any time; undecided pairs load nothing yet.",
     )
-    add_common(collect)
-    collect.add_argument(
+    add_common(accept)
+    accept.add_argument(
         "--workbook",
         default="",
         help="The reviewed workbook. Default: <run_id>/<run_id>_review.xlsx in WASTE_AI_SEARCH_REVIEW_DIR, "
@@ -512,20 +513,20 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
             sync.up()
         return code
 
-    if args.command == "collect-new-facilities":
-        from .new_facilities import collect_new_facilities, reviewed_workbook
+    if args.command == "accept-reviews":
+        from .accept_reviews import ReviewError, accept_reviews, reviewed_workbook
         from .publish import review_dir
 
         sync = RunSync(config, local=args.local)
-        sync.down()  # the run's list as arbitration last left it
+        sync.down()  # found_values.csv and the new-facility list as arbitration last left them
         workbook = (
             Path(args.workbook).expanduser()
             if args.workbook
             else reviewed_workbook(config.run_dir, config.run_id, review_dir())
         )
         try:
-            collect_new_facilities(config.run_dir, workbook)
-        except FileNotFoundError as exc:
+            accept_reviews(config.run_dir, workbook)
+        except (FileNotFoundError, ReviewError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         sync.up()

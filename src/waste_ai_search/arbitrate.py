@@ -11,6 +11,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from .accept_reviews import ACCEPTED_VALUES_FILE
 from .costs import RUN_LOG_FILE, describe_run_cost, run_cost
 from .credibility import assign_source_tier, dropped_source_site, tier_label
 from .found_values import (
@@ -556,6 +557,26 @@ def remove_retired_outputs(run_dir: Path) -> list[Path]:
     return removed
 
 
+def remove_stale_acceptance(run_dir: Path) -> bool:
+    """Delete the accepted_values.csv accept-reviews wrote from the found values this arbitration
+    sorts again.
+
+    Arbitrating rewrites found_values.csv with its sme_decision and loaded blank, and may sort a value
+    differently - a link found dead since, say - so an accepted_values.csv left beside it would load
+    what the run no longer says. accept-reviews writes it again from the same reviewed workbook, as
+    review_id is the same each time.
+    """
+    path = run_dir / ACCEPTED_VALUES_FILE
+    if not path.exists():
+        return False
+    path.unlink()
+    print(
+        f"Removed {ACCEPTED_VALUES_FILE}: it was written from the found values this arbitration sorts again. "
+        "Run accept-reviews again to load the approved values."
+    )
+    return True
+
+
 def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     # One clock for the whole run: the access date, Run_Config's arbitrated_at, and the year an
     # undated value is given, so a value's year is the run's wherever it is read.
@@ -676,6 +697,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
 
     out = config.run_dir
     remove_retired_outputs(out)
+    remove_stale_acceptance(out)
     paths = {
         "found_values": out / FOUND_VALUES_FILE,
         "sources": out / "sources.csv",

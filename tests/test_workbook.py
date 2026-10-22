@@ -162,6 +162,9 @@ def test_the_readme_walks_an_sme_through_a_row_keeping_our_site_and_the_source_a
     for decision in SITE_REVIEW_DECISIONS:
         assert f"- {decision}:" in steps
     assert FAR_AWAY_FLAG in steps
+    # accept-reviews stops on a Different site with no other_site_id, so an SME who can't tell which
+    # of our sites leaves the decision blank.
+    assert "if you can't tell which of our sites it is about, leave decision blank" in steps
 
 
 def test_the_readme_says_what_each_status_means(tmp_path):
@@ -172,8 +175,9 @@ def test_the_readme_says_what_each_status_means(tmp_path):
 
 def test_the_readme_describes_the_lists_for_ingestion(tmp_path):
     described = {row[0]: row[1] for row in list(build(tmp_path)[0]["ReadMe"].values)[1:]}
-    for name in ("new_facility_candidates.csv", "possible_duplicates.csv", "datasets_found.csv"):
+    for name in ("accepted_values.csv", "new_facility_candidates.csv", "possible_duplicates.csv", "datasets_found.csv"):
         assert f"(file) {name}" in described
+    assert "one value per site, attribute and, for a yearly attribute, year" in described["(file) accepted_values.csv"]
     assert "(file) outside_run_matches.csv" not in described
     assert "same page under the same facility name" in described["(file) possible_duplicates.csv"]
     assert "New site" in described["(file) new_facility_candidates.csv"]
