@@ -505,7 +505,9 @@ auto-approved under Guelph.
   36 of the old review queue's 44 rows from Tier 1–2 sources had no usable source location.
 - **Extraction errors load unseen.** In the tests, 8% (gpt-5.4) and 11% (mini) of the values that
   would have loaded were wrong, even from the right facility. Most were planned or permitted
-  figures read as actual.
+  figures read as actual. The prompt now asks for actual figures and dates only - no planned,
+  permitted, design or projected numbers, and no future years - which those tests predate; a
+  live run will show how much it helps.
 - **The agent can claim the wrong facility.** The duplicate rule and the 5 km check catch most of
   what batch 1 showed. A Tier 1–2 page cited for only one site and giving no usable location gets
   through, like the Manitoba news release above. Its only location, "Brandon", is geocoded and

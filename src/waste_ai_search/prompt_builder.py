@@ -101,19 +101,25 @@ ATTRIBUTE_GUIDANCE = {
         "operator, not the owner, landlord or regulator. Text only; if a concession changed hands, "
         "give the operator for the source's value_date."
     ),
-    "opening_year": "Four-digit year the facility opened.",
+    "opening_year": (
+        "Four-digit year the facility first accepted waste. Not the date of a permit or licence, "
+        "or of a later stage, cell or extension opening."
+    ),
     "closing_year": (
-        "Four-digit year the facility closed or is expected to close. REQUIRED whenever the "
-        "facility is closed or inactive - a closure date almost always exists in news coverage, "
-        "a council resolution, or a closure order. Search for it specifically."
+        "Four-digit year the facility closed, meaning it stopped accepting waste. Not a planned or "
+        "expected closure. REQUIRED whenever the facility is closed or inactive - a closure date "
+        "almost always exists in news coverage, a council resolution, or a closure order. Search "
+        "for it specifically."
     ),
     "annual_incoming_waste_metric_tonnes": (
-        "Waste accepted per year. Report the source's original unit; the pipeline converts. "
+        "Waste actually accepted per year - not a permitted or licensed limit or a design "
+        "capacity. Report the source's original unit; the pipeline converts. "
         "Distinguish metric tonnes from US short tons. If the source just says 'tons', keep the "
         "number in value and set unit to 'ambiguous tons'. Never put words in value."
     ),
     "waste_in_place_metric_tonnes": (
-        "Total waste mass in place (a stock, not a rate). Report the source's original unit."
+        "Total waste mass actually in place (a stock, not a rate) - not a permitted or design "
+        "capacity. Report the source's original unit."
     ),
     "area_square_meters": (
         "Surface area of the landfill footprint containing waste. Report the source's original "
@@ -152,13 +158,15 @@ ATTRIBUTE_GUIDANCE = {
         "Array. Allowed members only: Operational, Under Construction, Planned, Closed."
     ),
     "gccs_collection_efficiency": (
-        "Fraction of generated landfill gas that is collected, as a value between 0 and 1. "
+        "Fraction of generated landfill gas that is collected, as measured or reported for the "
+        "facility - not a design or target value - as a value between 0 and 1. "
         "If the source gives a percentage, report the number and set unit to '%'."
     ),
     "has_flare": "Whether the facility has a flare that burns collected landfill gas. Yes, No, or Unknown.",
     "flare_efficiency": (
         "Destruction efficiency of the flare: the fraction of the methane sent to it that is "
-        "destroyed, as a value between 0 and 1. If the source gives a percentage, report the "
+        "destroyed, as measured or reported - not a design or required minimum - as a value "
+        "between 0 and 1. If the source gives a percentage, report the "
         "number and set unit to '%'."
     ),
     "bulk_waste_type": (
@@ -574,6 +582,12 @@ Value requirements:
   words, ranges in prose, or unit text.
 - Gas capture attributes only apply if the facility actually has a gas collection system. If it
   does not, omit them rather than returning zeros.
+- Return only actual figures and dates: what the facility is, did or does. Leave out
+  planned, proposed, permitted or licensed, design and projected numbers - a permitted
+  capacity or annual limit is not waste received, a design capacity is not waste in place,
+  and an expected closure is not a closing year. Never return a future year. If a source
+  gives only such a figure, leave the attribute out and mention the figure in
+  evidence_summary. (A gas project's status may still be Planned or Under Construction.)
 - Label anything not directly stated by the source as value_basis = Inferred.
 - Put uncertain or unsourced findings in unverified_leads, not in values.
 - If nothing is found, return an empty sources list and explain in search_notes.
