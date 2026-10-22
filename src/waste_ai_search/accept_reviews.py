@@ -32,16 +32,25 @@ from __future__ import annotations
 
 import csv
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, time
 from pathlib import Path
 from typing import Any
 
 from .arbitration import baseline_for, site_for_year
-from .found_values import AUTO_APPROVED, FOUND_VALUES_FILE, LOADABLE, SME_REVIEW, judged_on_our_value, pick_values
+from .costs import RUN_LOG_FILE
+from .found_values import (
+    AUTO_APPROVED,
+    EXCEPTION_KM,
+    FOUND_VALUES_FILE,
+    LOADABLE,
+    SME_REVIEW,
+    judged_on_our_value,
+    pick_values,
+)
 from .input_loader import SEED_NAME, load_sites, write_csv_records
 from .lists import FOUND_BY_SME, NEW_FACILITY_FILE, NEW_FACILITY_HEADERS, Site, SiteIndex, candidate_id, id_order, plain
-from .locate import stated_location_text
+from .locate import haversine_km, seed_point, stated_location_text
 from .payload import normalize_url
 from .prompt_builder import needs_contradiction_check
 from .schema import (
@@ -235,6 +244,8 @@ class Acceptance:
     unmatched: list[Decision]
     # Pairs for SME review with no decision yet.
     undecided: int
+    # Different site decisions applied that are worth a second look (other_site_warnings).
+    warnings: list[str] = field(default_factory=list)
 
 
 def accept(
@@ -329,6 +340,50 @@ def accepted_row(row: dict[str, Any], sites_by_id: dict[str, dict[str, Any]]) ->
         "reviewed_date": decision.reviewed_date if decision is not None else "",
         "review_id": row["review_id"],
     }
+
+
+def other_site_warnings(
+    decisions: dict[str, Decision],
+    found: list[dict[str, Any]],
+    sites_by_id: dict[str, dict[str, Any]],
+    searched: set[str],
+) -> list[str]:
+    """The Different site decisions worth a second look, though each can be right: the other site is
+    in another country than the site searched, the run didn't search it, or the source places the
+    facility more than EXCEPTION_KM from it. The seed holds our whole database, so a mistyped
+    other_site_id is still a site of ours, and its values would load there unremarked. And values
+    loaded at a site another run searched reach ingestion from two runs for one facility."""
+    points: dict[str, tuple[float, float]] = {}
+    for row in found:
+        point = _point(row.get("source_coordinates"))
+        if row.get("review_id") and point[0] and row["review_id"] not in points:
+            points[row["review_id"]] = (float(point[0]), float(point[1]))
+    warnings = []
+    for decision in sorted(decisions.values(), key=lambda decision: decision.row):
+        if decision.decision != DIFFERENT_SITE:
+            continue
+        searched_site, other = sites_by_id.get(decision.site_id, {}), sites_by_id.get(decision.other_site_id, {})
+        named = f"other_site_id {decision.other_site_id} ({normalize_scalar(other.get('site_name'))})"
+        where = f"{SITE_REVIEW_SHEET} row {decision.row} ({decision.review_id}): {named}"
+        country, theirs = normalize_scalar(searched_site.get("country_iso3")), normalize_scalar(other.get("country_iso3"))
+        if country and theirs and country != theirs:
+            warnings.append(f"{where} is in {theirs}, but site {decision.site_id}, whose search cited the source, is in {country}.")
+        if decision.other_site_id not in searched:
+            warnings.append(f"{where} wasn't searched in this run, so ingestion may get its values from another run too.")
+        source, ours = points.get(decision.review_id), seed_point(other)
+        if source is not None and ours is not None and haversine_km(*source, *ours) > EXCEPTION_KM:
+            warnings.append(f"{where} is {haversine_km(*source, *ours):,.0f} km from where the source places the facility.")
+    return warnings
+
+
+def searched_sites(run_dir: Path, found: list[dict[str, Any]]) -> set[str]:
+    """The sites the run searched: its run log's, and any site found_values.csv lists."""
+    sites = {normalize_scalar(row.get("site_id")) for row in found}
+    log = run_dir / RUN_LOG_FILE
+    if log.exists():
+        with log.open(newline="", encoding="utf-8-sig") as handle:
+            sites |= {normalize_scalar(row.get("site_id")) for row in csv.DictReader(handle)}
+    return sites - {""}
 
 
 # --- new sites -----------------------------------------------------------------------------------
@@ -457,6 +512,7 @@ def accept_reviews(run_dir: Path, workbook: Path) -> Acceptance:
         found = [dict(row) for row in reader]
         headers = list(reader.fieldnames or FOUND_VALUES_HEADERS)
     acceptance = accept(found, decisions, sites_by_id)
+    acceptance.warnings = other_site_warnings(decisions, found, sites_by_id, searched_sites(run_dir, found))
 
     write_csv_records(run_dir / ACCEPTED_VALUES_FILE, acceptance.values, ACCEPTED_VALUES_HEADERS)
     write_csv_records(found_path, found, [*headers, *(h for h in ("sme_decision", "loaded") if h not in headers)])
@@ -484,6 +540,13 @@ def print_acceptance(
             f"(Site_Review rows {rows}): the run was arbitrated again since, and its search no longer cites "
             "that page under that name. They were not applied."
         )
+    if acceptance.warnings:
+        print(
+            f"!! {len(acceptance.warnings)} thing(s) to check in Different site decisions, which were applied. "
+            "Correct other_site_id and run accept-reviews again if one is wrong:"
+        )
+        for warning in acceptance.warnings:
+            print(f"  {warning}")
     auto = sum(1 for row in acceptance.values if row["approved_by"] == AUTO)
     sites = len({row["site_id"] for row in acceptance.values})
     print(

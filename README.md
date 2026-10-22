@@ -1241,6 +1241,13 @@ that isn't Correct site, Different site, New site or Junk; a Different site with
 `other_site_id`, one not in the run's seed, or the row's own site; an `other_site_id` beside
 another decision; a filled row with no `review_id`; or two rows deciding one pair two ways.
 
+**It applies, but points out, a Different site worth a second look:** one in another country than
+the site searched, one the run didn't search, or one more than 5 km from where the source places
+the facility. The seed holds our whole database, so a mistyped `other_site_id` is still a site of
+ours, and its values would otherwise load there unremarked; and a site another run searched gets
+values from two runs. Each is printed with its Site_Review row. Correct the id and run it again if
+one is wrong.
+
 **Run it any time.** A pair not yet decided loads nothing until it runs again, and running it again
 on the same decisions writes the same files. Arbitrating a run again empties `accepted_values.csv`
 to its header row and blanks `sme_decision` and `loaded`, since it sorts the values again. The file

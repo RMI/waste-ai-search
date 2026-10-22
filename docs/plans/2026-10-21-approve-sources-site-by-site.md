@@ -255,6 +255,11 @@ Each branch is cut from the one before. The first is cut from `approve-sources-s
   row; an SME who can't tell which site leaves the decision blank and says so in `notes`. A
   Different site also weighs again, at the other site, values set aside only because they confirm
   or would change ours at the site searched.
+- **A Different site can be any site in the seed,** which holds our whole database: F38's limit to
+  the run's own sites went with `outside_run_matches.csv`. `accept-reviews` applies it but prints a
+  warning, naming the row, where the other site is in another country than the site searched, wasn't
+  searched by the run, or is more than 5 km from where the source places the facility. Ingestion
+  (#261) still has to decide what to do with one facility given values by two runs.
 - **An SME's decision applies whatever the pair's status:** a pair marked Junk loads nothing even
   if a later arbitration auto-approves it.
 - **Arbitrating again empties `accepted_values.csv`** to its header row, since it sorts the values

@@ -161,6 +161,35 @@ def test_correct_site_loads_the_pairs_values_at_the_site_searched(tmp_path):
     assert {r["attribute_name"]: r["loaded"] for r in news} == {"operator": "yes", "opening_year": "", "closing_year": "yes"}
 
 
+def test_a_different_site_worth_a_second_look_is_applied_and_said(tmp_path, capsys):
+    """The seed holds our whole database, so a mistyped other_site_id is still a site of ours, in any
+    country. A site in another country, one the run didn't search, or one far from where the source
+    places the facility, is said, naming the row; the decision is still applied, as each can be
+    right."""
+    oregon = seed("368", "Northwest Regional MSW Landfill", 45.5, -122.6, iso3="USA")
+    near = source("https://news.example/landfill", "Springfield Landfill", "49.7590, -97.2010", values=[value("operator", "RM of Springfield")])
+    run_dir = arbitrate(tmp_path, [BRADY, NEARBY, oregon], {"13413": [near]})
+    # The run searched 900 too, and found nothing there.
+    write_csv_records(run_dir / "foundry_run_log.csv", [{"site_id": "13413"}, {"site_id": "900"}], ["site_id"])
+    decide(run_dir, {near["url"]: {"decision": DIFFERENT_SITE, "other_site_id": "368"}})
+    capsys.readouterr()
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    out = capsys.readouterr().out
+    assert "!! 3 thing(s) to check in Different site decisions, which were applied." in out
+    where = "Site_Review row 2 (WAIREV-13413-"
+    assert f"{where}" in out
+    assert "other_site_id 368 (Northwest Regional MSW Landfill) is in USA, but site 13413, whose search cited the source, is in CAN." in out
+    assert "other_site_id 368 (Northwest Regional MSW Landfill) wasn't searched in this run" in out
+    assert "other_site_id 368 (Northwest Regional MSW Landfill) is 1,951 km from where the source places the facility." in out
+    assert [(r["site_id"], r["value"]) for r in accepted(run_dir)] == [("368", "RM of Springfield")]
+
+    decide(run_dir, {near["url"]: {"decision": DIFFERENT_SITE, "other_site_id": "900"}})
+    capsys.readouterr()
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    out = capsys.readouterr().out
+    assert "1 thing(s) to check" in out and "other_site_id 900 (domestic landfill) is 38 km from where the source places" in out
+
+
 def test_different_site_loads_the_values_at_that_site_only_where_its_fields_are_empty(tmp_path):
     """The source is about site 900. Its operator and opening year fill empty fields there - the
     opening year although it would change ours at the site searched, which says nothing of 900 - and
