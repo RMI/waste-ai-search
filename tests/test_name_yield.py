@@ -117,12 +117,14 @@ def test_each_searched_site_says_what_its_search_found(tmp_path):
     assert rows["4"]["new_values_to_review"] == 0  # its operator row was found by site 1's search
 
 
-def test_a_search_is_credited_with_the_values_it_found_wherever_they_are_filed(tmp_path):
-    """Replaces the identity gate's count (build step 5): a search that found another site's values
-    is no longer flagged by a distance, so name_yield counts the values filed under another site.
+def test_a_run_with_found_values_is_measured_from_them(tmp_path):
+    """Since step 2 of the approve-sources plan a run's values are in found_values.csv, every one
+    filed under the site searched: an auto-approved value counts as accepted, one for SME review as
+    to review, and a source naming the facility as a name found.
 
     End to end: a "domestic landfill" search finds a permit for Brady Road Landfill, 40 km away,
-    which states its coordinates. The permit is filed under Brady Road; the search gets the credit.
+    which states its coordinates, and the council's page, which gives none. The permit goes to an
+    SME, more than 5 km away; the council's page is approved.
     """
     from waste_ai_search.arbitrate import run_arbitration
     from waste_ai_search.input_loader import write_csv_records
@@ -145,21 +147,23 @@ def test_a_search_is_credited_with_the_values_it_found_wherever_they_are_filed(t
     permit = {"url": "https://winnipeg.example.ca/brady-road", "source_title": "Brady Road permit",
               "publisher": "Manitoba Environment", "source_type": "Permit or registry", "publication_date": "2024-03-01",
               "facility_name_in_source": "Brady Road Resource Management Facility",
-              "stated_location": "49.7012, -97.2034", "stated_location_kind": "coordinates",
+              "stated_address": "", "stated_coordinates": "49.7012, -97.2034",
               "values": [{"attribute_name": "operator", "value": "City of Winnipeg", "value_basis": "Direct",
                           "confidence_score": "High", "value_date": "2024", "evidence_summary": "Names the operator."}]}
+    council = {**permit, "url": "https://winnipeg.example.ca/landfill", "stated_coordinates": "",
+               "values": [{**permit["values"][0], "attribute_name": "opening_year", "value": "1973"}]}
     raw = run_dir / "raw_foundry_responses"
     raw.mkdir()
-    (raw / "site_7.json").write_text(json.dumps({"site_id": "7", "sources": [permit]}))
+    (raw / "site_7.json").write_text(json.dumps({"site_id": "7", "sources": [permit, council]}))
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
     run = ny.load_run("run", ny.local_reader(run_dir))
-    assert sorted((row["site_id"], row["searched_site_id"], row["attribute_name"]) for row in run.review) == [
-        ("8", "7", "found_location"), ("8", "7", "operator"),
-    ]
+    assert [(row["site_id"], row["attribute_name"]) for row in run.review] == [("7", "operator")]
+    assert [(row["site_id"], row["attribute_name"]) for row in run.resolved] == [("7", "opening_year")]
     [row] = ny.site_rows(run)
     assert row["site_id"] == "7"
-    assert (row["new_values_to_review"], row["filed_under_another_site"]) == (2, 2)
+    assert (row["new_values_accepted"], row["new_values_to_review"], row["filed_under_another_site"]) == (1, 1, 0)
+    assert row["found_name"]
 
 
 def test_the_summary_compares_each_class_with_named_sites_from_the_same_sources(tmp_path):

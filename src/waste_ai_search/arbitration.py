@@ -110,6 +110,12 @@ def value_year(value_date: Any, run_year: int) -> int:
     return run_year
 
 
+def decision_key(site_id: str, attribute: str, year: Any) -> tuple[str, str, Any]:
+    """(site, attribute, year): what one value is loaded for, the year only for a yearly attribute,
+    as ingestion keys it."""
+    return site_id, attribute, year if attribute in TIME_VARYING_ATTRIBUTES else ""
+
+
 def site_for_year(site: dict[str, Any], attribute_name: str, year: int) -> tuple[dict[str, Any], str]:
     """The site as its baseline stands for one year of a yearly attribute, and a note saying so.
 
@@ -166,10 +172,12 @@ def resolve(
 ) -> dict[str, Any]:
     """Arbitrate one (facility, attribute) pair.
 
-    Nothing is accepted automatically. A found value for an empty field needs review whatever its
-    tier, and so does one that disagrees with ours from a source at the floor or above and at least
-    as credible as ours; a weaker disagreement goes to leads. A confirmation of ours, or nothing
-    found, leaves our database as it is, so there is nothing to review.
+    Since step 2 of the approve-sources plan, a value's status is decided for its site-source pair
+    (found_values.py), and only fills of empty fields load. What arbitration asks of this is the
+    one value to load among those approved for an empty field (found_values.pick_values): the best
+    tier, then the newest, then the value the most sources give, then the agent's order. Its
+    comparisons with a value we hold - confirmed, overridden, a conflict, or a weaker disagreement
+    for leads - are no longer reached by arbitration.
     """
     site_id = normalize_scalar(site.get("site_id"))
     baseline = baseline_for(site, attribute_name)
@@ -349,7 +357,7 @@ def resolve(
     matches_baseline = not baseline_empty and comparable(baseline, attribute_name) == win_key
 
     if matches_baseline:
-        # Kept in evidence.csv, but neither queued nor loaded, so the search doesn't become the
+        # Listed in found_values.csv, but not loaded, so the search doesn't become the
         # credited source for a value nobody reviewed.
         row["resolution"] = "Confirmed baseline"
         row["resolution_rule"] = f"{tier_label(win_tier)} source agrees with {tier_label(base_tier)} baseline."

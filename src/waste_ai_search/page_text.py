@@ -2,7 +2,7 @@
 
 The link check already opens every cited URL to see whether it loads. For one that does, it now
 also reads the page, up to MAX_PAGE_BYTES, and keeps its text in page_text/ in the run folder: one
-gzip file per exact URL, named by the URL's source_id, so evidence.csv and sources.csv point at it.
+gzip file per exact URL, named by the URL's source_id, so found_values.csv and sources.csv point at it.
 Arbitration reads those files offline, to check whether each quote, and each stated location, is
 really on the page (on_page.py).
 

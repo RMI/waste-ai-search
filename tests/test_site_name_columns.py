@@ -1,7 +1,8 @@
 """WP-531 item 1: every SME-facing output shows the translated and original site names together.
 
-So a reviewer can check results against the source's own spelling and record translation problems
-in `translation_note`, the only new editable column.
+So a reviewer can check results against the source's own spelling. The review queue's editable
+`translation_note` went with the queue (step 2 of the approve-sources plan): found_values.csv is
+read-only.
 
 The end-to-end test builds a run directory - a pinned seed and one cached agent response - and runs
 the real arbitration over it. It is offline: the seed snapshot means no database is touched.
@@ -17,20 +18,11 @@ from openpyxl import load_workbook
 from waste_ai_search.arbitrate import attach_site_names, run_arbitration
 from waste_ai_search.input_loader import write_csv_records
 from waste_ai_search.run_context import PipelineConfig
-from waste_ai_search.schema import (
-    EVIDENCE_HEADERS,
-    RESOLVED_HEADERS,
-    REVIEW_QUEUE_HEADERS,
-    SITE_NAME_COLUMNS,
-    SUPPLEMENTARY_LEADS_HEADERS,
-)
+from waste_ai_search.schema import FOUND_VALUES_HEADERS, SITE_NAME_COLUMNS
 
 
 ALL_OUTPUTS = {
-    "evidence.csv": EVIDENCE_HEADERS,
-    "resolved.csv": RESOLVED_HEADERS,
-    "Review_Queue": REVIEW_QUEUE_HEADERS,
-    "Leads": SUPPLEMENTARY_LEADS_HEADERS,
+    "found_values.csv": FOUND_VALUES_HEADERS,
 }
 
 
@@ -39,18 +31,6 @@ ALL_OUTPUTS = {
 def test_every_output_carries_the_three_name_columns_side_by_side(output, headers):
     start = headers.index("site_name")
     assert headers[start:start + 3] == SITE_NAME_COLUMNS, output
-
-
-def test_translation_note_sits_beside_the_names_in_the_review_queue():
-    start = REVIEW_QUEUE_HEADERS.index("site_name")
-    assert REVIEW_QUEUE_HEADERS[start + 3] == "translation_note"
-
-
-def test_translation_note_is_only_in_the_review_queue():
-    """An editable column belongs where the decision is recorded, not in the read-only outputs."""
-    for output, headers in ALL_OUTPUTS.items():
-        if output != "Review_Queue":
-            assert "translation_note" not in headers, output
 
 
 # --- filling the values ---------------------------------------------------------------------
@@ -120,23 +100,10 @@ def test_a_real_arbitration_writes_both_names_everywhere(tmp_path):
     config = PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v")
     run_arbitration(config)
 
-    # The value waits for review, as every found value does; resolved.csv is written header-only.
-    for name in ("review_queue.csv", "evidence.csv"):
-        row = next(csv.DictReader((run_dir / name).open()))
-        assert (row["site_name"], row["original_site_name"], row["source_language"]) == ("THE FUNGUS", "EL HONGO", "es"), name
-    # A real arbitration fills the seed location for pasting into Google Maps.
-    assert next(csv.DictReader((run_dir / "review_queue.csv").open()))["baseline_coordinates"] == "32.500000, -116.200000"
+    row = next(csv.DictReader((run_dir / "found_values.csv").open()))
+    assert (row["site_name"], row["original_site_name"], row["source_language"]) == ("THE FUNGUS", "EL HONGO", "es")
 
-    ws = load_workbook(run_dir / "run_review.xlsx")["Review_Queue"]
+    ws = load_workbook(run_dir / "run_review.xlsx")["Found_Values"]
     header = [c.value for c in ws[1]]
     first = {h: ws.cell(2, i + 1).value for i, h in enumerate(header)}
     assert (first["site_name"], first["original_site_name"], first["source_language"]) == ("THE FUNGUS", "EL HONGO", "es")
-    assert "translation_note" in header
-
-
-def test_the_readme_tab_lists_translation_note_as_editable(tmp_path):
-    from waste_ai_search.workbook_io import REVIEW_INSTRUCTIONS
-
-    queue = next(r for r in REVIEW_INSTRUCTIONS if r["tab_name"] == "Review_Queue")
-    assert "translation_note" in queue["editable"]
-    assert "original_site_name" in queue["sme_action"]

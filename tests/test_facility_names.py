@@ -1,9 +1,10 @@
 """Facility names are compared as entity linkage compares them (build step 5 of the source-matching plan).
 
 facility_names.py started as a copy of RMI/waste_data_ingestion_pipeline#225's name scoring, and is
-this repository's own: matching is independent of entity linkage. It adds the generic words this
-corpus needs: without them batch 1's seven "Rubbish Tip" sites each matched 68 others. What makes a match
-strong enough to file a source by is matching's, in test_match.py.
+this repository's own. It adds the generic words this corpus needs: without them batch 1's seven
+"Rubbish Tip" sites each matched 68 others. The matcher that filed sources by it went in step 2 of the
+approve-sources plan, with its tests (test_match.py); datasets_found.csv still tells a page's facility
+names apart by their distinctive words.
 """
 from __future__ import annotations
 

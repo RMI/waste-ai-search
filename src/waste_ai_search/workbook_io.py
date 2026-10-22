@@ -12,13 +12,13 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
+from .found_values import AUTO_APPROVED, NOT_USED, SME_REVIEW
+from .on_page import NOT_FOUND, PARTLY
 from .schema import (
-    CORRECTED_VALUE_CHOICES,
     DEFINITION_VALUES,
     FIELD_TO_DEFINITION,
+    FOUND_VALUES_HEADERS,
     PARSE_WARNING_HEADERS,
-    REVIEW_QUEUE_HEADERS,
-    SUPPLEMENTARY_LEADS_HEADERS,
 )
 
 
@@ -138,108 +138,36 @@ def write_sheet(ws, headers: list[str], rows: list[dict[str, Any]]) -> None:
 
 REVIEW_INSTRUCTIONS = [
     {
-        "tab_name": "Review_Queue",
+        "tab_name": "Found_Values",
         "purpose": (
-            "YOUR WORKLIST. It holds every value the search found for a field that is empty in our "
-            "database, whatever the source's tier, and every value that disagrees with the "
-            "database's, as long as the new value is from a Tier 1-3 source at least as credible as "
-            "the database's own (for status, a Tier 1-3 source at least 3 years newer). Nothing is "
-            "accepted without SME review. A value that disagrees with the database's but is from "
-            "a Tier 4-5 source, or from a source less credible than the database's own, is on the "
-            "Leads tab instead, as is a value whose source link is dead or whose unit could not be "
-            "converted. A source that only confirms the database's value is not shown, and nothing "
-            "from it is loaded. Each value "
-            "is matched, as a best guess, to the "
-            "one of our sites its source seems to be about, which may not be the site that was "
-            "searched. The site columns (site_id, the names, baseline_coordinates and the baseline_ "
-            "columns) describe the matched site, searched_site_id is the site whose search found "
-            "the source, and match says why the value was matched to this site. There is one row "
-            "per site and attribute, and for a yearly attribute (status, waste received, waste in "
-            "place, depth, cover types, gas figures) one per year, with every source matched to the "
-            "site pooled into that row. Ingestion reads your decisions from this tab."
+            "Every value the search found, one row per site, year, source and attribute, as "
+            "found_values.csv holds them. Every source is filed under the site that was searched, and "
+            "status says what becomes of each value. auto-approved: a Tier 1-2 source filling a field "
+            "that is empty in our database. SME review: a Tier 3-5 source filling an empty field, or a "
+            "Tier 1-2 source with an exception - the same page and facility name are cited for another "
+            "of our sites, the source places the facility more than 5 km from our site, or it says the "
+            "site is Not a Waste Facility. not used: it confirms or would change a value we hold, its "
+            "link is dead, or it could not be converted or mapped. status_reason says why. A status is "
+            "decided for a site and a source together, and review_id names that pair, so every value "
+            "a source gives one site has the same status. source_coordinates is where the source "
+            "places the facility (coordinates_from says from what), and distance_km how far that is "
+            "from our site."
         ),
-        "sme_action": (
-            "Work top to bottom, one row at a time.\n"
-            "1. Read match first. It says where the source places the facility it describes, and why "
-            "that facility was matched to this site of ours. The match cell is ORANGE where the value "
-            "is matched to a site of ours other than the one whose search found it; BLUE where the "
-            "source gives no location, so the value stays with the site that was searched and you "
-            "must check the source is about this site; YELLOW where the source places the facility "
-            "within 2 km of several of our sites and its name couldn't pick one (corrected_site_id "
-            "offers them).\n"
-            "2. Paste baseline_coordinates, where our database puts this site, into Google Maps, and "
-            "source_coordinates, where the source places the facility it describes, beside it. "
-            "source_coordinates is read from stated_location. Where match says \"placed on its street\", "
-            "it is a point on that street, not the building. Where it is blank, the source's location "
-            "couldn't be placed, and match says why.\n"
-            "3. Check the name. site_name is our database's name for the site, machine-translated into "
-            "English; original_site_name is the same name before translation. Note any translation "
-            "problem in translation_note.\n"
-            "4. Open winning_source_url and check that the page states resolved_value, and that it is "
-            "about this site of ours. facility_name_in_source and stated_location are the facility's "
-            "name and location as the source writes them.\n"
-            "5. A shaded CHECK note in evidence_summary means our automated check couldn't find the "
-            "source's quote, or the location it states, on the page. Look for it yourself before "
-            "deciding: the check can't read images or maps, and it makes mistakes.\n"
-            "6. A found_location row's resolved_value is one point, lat, lon: where the source says the "
-            "facility is (from coordinates, a grid reference, or an address placed on its building; "
-            "location_basis says which). Paste it into Google Maps beside baseline_coordinates, and "
-            "validate it only if it is where this site of ours really is.\n"
-            "7. Set validation_status to Validated or Rejected. For a rejection, pick rejection_reason, "
-            "and if you know the right value put it in corrected_value (a dropdown of allowed values "
-            "for categorical fields; for a location, lat, lon). Never edit resolved_value.\n"
-            "- Right value, but about another site of ours: put that site's id in corrected_site_id (a "
-            "dropdown where there were several candidates; any site id may be typed) and validate it. "
-            "First filter site_id to that site: if it already has a row for the same attribute (and, "
-            "for a yearly attribute, the same year), reject one of the two, since ingestion takes one "
-            "value per site, attribute and year.\n"
-            "- About another site of ours, but you can't tell which: reject it as 'Wrong facility - "
-            "another site in our database'.\n"
-            "- About a facility that isn't in our database: reject it as 'New facility - not in our "
-            "database'. collect-new-facilities lists these for ingestion.\n"
-            "8. Each row of a yearly attribute is that year's value: the year of value_date, or this "
-            "run's year where value_date is blank. So an older year's value is not Outdated: validate "
-            "it if it was right for that year, and put a current figure on the newest year's row "
-            "instead. If your corrected value is for a different date than value_date, put that date "
-            "in corrected_value_date (YYYY, YYYY-MM or YYYY-MM-DD), but never a year that already has "
-            "its own row for this site and attribute.\n"
-            "9. Put your name in reviewer, the date in reviewed_date, and why in researcher_notes.\n"
-            "An empty queue means nothing needs you."
-        ),
-        "editable": (
-            "validation_status, rejection_reason, corrected_value, corrected_value_date, corrected_site_id, "
-            "reviewer, reviewed_date, "
-            "researcher_notes, "
-            "translation_note - "
-            "nothing else"
-        ),
-    },
-    {
-        "tab_name": "(file) evidence.csv",
-        "purpose": (
-            "One row per source-backed claim, with the tier rule applied to each source. Sources "
-            "that only confirm the database's value are here too. Every row also gives the facility "
-            "its source describes, by name and stated location, and the point read from that location; "
-            "a source that states a location has a found_location row of its own."
-        ),
-        "sme_action": "Read only. Open it to see why a value won or lost.",
+        "sme_action": "Read only. SME decisions are not recorded in this workbook yet.",
         "editable": "nothing",
     },
     {
         "tab_name": "(file) new_facility_candidates.csv",
-        "purpose": (
-            "Landfills none of our sites is: sources that place a facility more than 2 km from every site "
-            "of ours, grouped where they lie within 2 km of each other, plus the values SMEs rejected as "
-            "'New facility - not in our database' (added by collect-new-facilities). For ingestion."
-        ),
-        "sme_action": "Read only. Nothing from it is in Review_Queue.",
+        "purpose": "Landfills none of our sites is, as SMEs have marked them. For ingestion.",
+        "sme_action": "Read only.",
         "editable": "nothing",
     },
     {
         "tab_name": "(file) possible_duplicates.csv",
         "purpose": (
-            "Pairs of our sites that may be one facility recorded twice: a source placed within 2 km of "
-            "both that its name couldn't settle, or one page cited by both sites' searches. For ingestion."
+            "Pairs of our sites whose searches cited the same page under the same facility name: perhaps "
+            "one facility recorded twice, or one search claiming another site's source. Their values are "
+            "sent to SME review. For ingestion."
         ),
         "sme_action": "Read only.",
         "editable": "nothing",
@@ -252,26 +180,6 @@ REVIEW_INSTRUCTIONS = [
             "reads only the entry it used, so ingestion can load the rest of the page once, as a source of its own."
         ),
         "sme_action": "Read only.",
-        "editable": "nothing",
-    },
-    {
-        "tab_name": "(file) outside_run_matches.csv",
-        "purpose": (
-            "Sources this run filed under a site outside its selection: another batch's country, or an "
-            "excluded country it did not search. Their values are not in Review_Queue."
-        ),
-        "sme_action": "Read only.",
-        "editable": "nothing",
-    },
-    {
-        "tab_name": "Leads",
-        "purpose": (
-            "Findings that lost: a value that disagrees with the database's but is from a Tier 4-5 "
-            "source or from a source less credible than the database's own, a value whose source "
-            "link is dead or whose unit could not be converted, a 'Not a Waste Facility' verdict about "
-            "a site it was not offered for; plus the agent's own unverified leads."
-        ),
-        "sme_action": "Read only. Promote something by hand if you judge the source good enough.",
         "editable": "nothing",
     },
     {
@@ -291,11 +199,11 @@ REVIEW_INSTRUCTIONS = [
     },
 ]
 
-RESOLUTION_FILLS = {
-    "Conflict - needs review": "FFF2CC",
-    "Overrides baseline": "FCE4D6",
-    "Filled empty baseline": "E2EFDA",
-    "Insufficient credibility": "EDEDED",
+# Each found value's row is shaded by its status, so the tab reads at a glance.
+STATUS_FILLS = {
+    AUTO_APPROVED: "E2EFDA",
+    SME_REVIEW: "FFF2CC",
+    NOT_USED: "EDEDED",
 }
 
 
@@ -330,7 +238,7 @@ def add_definitions(ws) -> None:
 def add_validations(wb, ws) -> None:
     """Attach dropdowns to the editable review columns only.
 
-    A dropdown on a pipeline-set column (resolution, tiers) reads as an invitation to change it.
+    A dropdown on a pipeline-set column (status, tiers) reads as an invitation to change it.
     """
     def_sheet = wb["Definitions"]
     columns = {def_sheet.cell(1, c).value: c for c in range(1, def_sheet.max_column + 1)}
@@ -349,117 +257,32 @@ def add_validations(wb, ws) -> None:
         target = get_column_letter(headers[header])
         validation.add(f"{target}2:{target}{last_row}")
 
-    # corrected_value offers the allowed values of the attribute on its row, read from the same
-    # Definitions columns as everything else; attributes without a vocabulary stay free text.
-    if {"corrected_value", "attribute_name"} <= set(headers):
-        rows_by_attribute: dict[str, list[int]] = {}
-        for r in range(2, ws.max_row + 1):
-            attribute = ws.cell(r, headers["attribute_name"]).value
-            if attribute in CORRECTED_VALUE_CHOICES:
-                rows_by_attribute.setdefault(attribute, []).append(r)
-        target = get_column_letter(headers["corrected_value"])
-        for attribute, rows in rows_by_attribute.items():
-            definition_name, strict = CORRECTED_VALUE_CHOICES[attribute]
-            if definition_name not in columns:
-                continue
-            letter = get_column_letter(columns[definition_name])
-            count = len(DEFINITION_VALUES[definition_name])
-            validation = DataValidation(
-                type="list", formula1=f"=Definitions!${letter}$2:${letter}${count + 1}",
-                allow_blank=True, showDropDown=False, showErrorMessage=strict,
-            )
-            ws.add_data_validation(validation)
-            for start, end in _runs(rows):
-                validation.add(f"{target}{start}" if start == end else f"{target}{start}:{target}{end}")
 
-
-def _runs(rows: list[int]) -> list[tuple[int, int]]:
-    """Consecutive row numbers as (first, last) runs, to keep a validation's range list short."""
-    runs: list[tuple[int, int]] = []
-    for r in rows:
-        if runs and r == runs[-1][1] + 1:
-            runs[-1] = (runs[-1][0], r)
-        else:
-            runs.append((r, r))
-    return runs
-
-
-def add_site_choices(ws, rows: list[dict[str, Any]]) -> None:
-    """Offer each row's candidate sites in corrected_site_id, where there is more than one.
-
-    The candidates are the site the value is filed under, the site searched, and the other sites
-    its source fitted: our sites within 2 km of where it says the facility is, or namesakes of
-    its name. For a source with no location they also include every other site whose search cited
-    the same page. A typed site id is still accepted, so the list suggests rather than restricts.
-    """
-    headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
-    if "corrected_site_id" not in headers:
-        return
-    target = get_column_letter(headers["corrected_site_id"])
-    rows_by_choices: dict[tuple[str, ...], list[int]] = {}
-    for offset, record in enumerate(rows):
-        choices = tuple(str(choice) for choice in record.get("_site_choices") or ())
-        if len(choices) > 1:
-            rows_by_choices.setdefault(choices, []).append(offset + 2)
-    for choices, row_numbers in rows_by_choices.items():
-        # A list written into the rule itself may hold at most 255 characters.
-        listed = ",".join(choices)
-        while len(listed) > 253 and "," in listed:
-            listed = listed.rsplit(",", 1)[0]
-        validation = DataValidation(
-            type="list", formula1=f'"{listed}"', allow_blank=True, showDropDown=False, showErrorMessage=False,
-        )
-        ws.add_data_validation(validation)
-        for start, end in _runs(row_numbers):
-            validation.add(f"{target}{start}" if start == end else f"{target}{start}:{target}{end}")
-
-
-# The match column is coloured where a value needs a second look at which site it belongs to: it
-# is filed under a site other than the one searched, its source gives no location, or several of
-# our sites tied for it.
-MATCH_FILLS = {
-    "another site": "F4B183",
-    "no location": "BDD7EE",
-    "tie": "FFD966",
-}
-# An evidence_summary flagging that the winning source's own page doesn't bear it out.
+# A quote_on_page or location_on_page result saying the source's own page doesn't bear it out.
 NOT_ON_PAGE_FILL = "F8CBAD"
 
 
 def add_conditionals(ws) -> None:
-    """Shade each row by its resolution so the queue reads at a glance, and the match column by
-    why the value is filed where it is."""
+    """Shade each row by its status, and a page check the source's page doesn't bear out."""
     headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
     last = max(ws.max_row, 2)
-    if {"match", "site_id", "searched_site_id"} <= set(headers):
-        # Added first, so on the match column they win over the row's resolution colour.
-        match = get_column_letter(headers["match"])
-        site = get_column_letter(headers["site_id"])
-        searched = get_column_letter(headers["searched_site_id"])
-        cells = f"{match}2:{match}{last}"
-        formulas = {
-            "another site": f'AND(${searched}2<>"",${site}2<>${searched}2)',
-            "no location": f'LEFT(${match}2,11)="No location"',
-            "tie": f'LEFT(${match}2,3)="Tie"',
-        }
-        for name, formula in formulas.items():
-            ws.conditional_formatting.add(
-                cells, FormulaRule(formula=[formula], fill=PatternFill("solid", fgColor=MATCH_FILLS[name]))
-            )
-    if "evidence_summary" in headers:
-        summary = get_column_letter(headers["evidence_summary"])
+    for header in ("quote_on_page", "location_on_page"):
+        if header not in headers:
+            continue
+        # Added first, so on these columns they win over the row's status colour.
+        letter = get_column_letter(headers[header])
         ws.conditional_formatting.add(
-            f"{summary}2:{summary}{last}",
+            f"{letter}2:{letter}{last}",
             FormulaRule(
-                formula=[f'ISNUMBER(SEARCH("on the source\'s page",${summary}2))+ISNUMBER(SEARCH("on its page",${summary}2))'],
+                formula=[f'OR(${letter}2="{NOT_FOUND}",${letter}2="{PARTLY}")'],
                 fill=PatternFill("solid", fgColor=NOT_ON_PAGE_FILL),
             ),
         )
-    if "resolution" not in headers:
+    if "status" not in headers:
         return
-    letter = get_column_letter(headers["resolution"])
+    letter = get_column_letter(headers["status"])
     span = f"A2:{get_column_letter(ws.max_column)}{last}"
-    for value, color in RESOLUTION_FILLS.items():
+    for value, color in STATUS_FILLS.items():
         ws.conditional_formatting.add(
             span,
             FormulaRule(formula=['$%s2="%s"' % (letter, value)], fill=PatternFill("solid", fgColor=color)),
@@ -470,14 +293,11 @@ def write_review_workbook(
     path: Path,
     *,
     run_config: list[dict[str, Any]],
-    review_queue: list[dict[str, Any]],
-    leads: list[dict[str, Any]],
+    found_values: list[dict[str, Any]],
     parse_warnings: list[dict[str, Any]],
 ) -> Path:
-    """The SME-facing artifact: only rows that need a human decision (Q31).
-
-    Evidence and sources stay as CSV sidecars for audit. They are far too large to review by hand at
-    full scale, and nothing in them requires a decision.
+    """The SME-facing artifact. Sources stay a CSV sidecar for audit, and the lists for ingestion
+    too: nothing in them requires a decision.
     """
     wb = Workbook()
     wb.remove(wb.active)
@@ -488,12 +308,8 @@ def write_review_workbook(
     ws_config = wb.create_sheet("Run_Config")
     write_sheet(ws_config, ["setting", "value"], run_config)
 
-    ws_queue = wb.create_sheet("Review_Queue")
-    write_sheet(ws_queue, REVIEW_QUEUE_HEADERS, review_queue)
-
-
-    ws_leads = wb.create_sheet("Leads")
-    write_sheet(ws_leads, SUPPLEMENTARY_LEADS_HEADERS, leads)
+    ws_found = wb.create_sheet("Found_Values")
+    write_sheet(ws_found, FOUND_VALUES_HEADERS, found_values)
 
     ws_warnings = wb.create_sheet("Parse_Warnings")
     write_sheet(ws_warnings, PARSE_WARNING_HEADERS, parse_warnings)
@@ -501,9 +317,8 @@ def write_review_workbook(
     ws_defs = wb.create_sheet("Definitions")
     add_definitions(ws_defs)
 
-    add_validations(wb, ws_queue)
-    add_site_choices(ws_queue, review_queue)
-    add_conditionals(ws_queue)
+    add_validations(wb, ws_found)
+    add_conditionals(ws_found)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)

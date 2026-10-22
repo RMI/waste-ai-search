@@ -8,12 +8,15 @@ module turns them into a latitude and longitude, and says how far the point can 
 
 | Basis | From | coordinates_from | Used for |
 |---|---|---|---|
-| coordinates | Coordinates with 3 or more decimals (or seconds) | stated | Matching, and a location value |
-| grid reference | A UK or Irish grid reference, 100 m or finer | grid reference | Matching, and a location value |
-| rooftop | An address geocoded to the building or address point | address (building) | Matching, and a location value |
-| street | An address geocoded only to its street | address (street) | Matching only |
+| coordinates | Coordinates with 3 or more decimals (or seconds) | stated | The 5 km check |
+| grid reference | A UK or Irish grid reference, 100 m or finer | grid reference | The 5 km check |
+| rooftop | An address geocoded to the building or address point | address (building) | The 5 km check |
+| street | An address geocoded only to its street | address (street) | The 5 km check, though a point on a street can be a kilometre or more from the address |
 | hint | Coordinates with fewer decimals, or a coarser grid reference | - | Nothing yet: approximate |
 | none | Anything else, or a location a guard throws out | - | - |
+
+The 5 km check (found_values.py) sends a Tier 1-2 source to SME review where it places the facility
+more than 5 km from our site.
 
 Stated coordinates win over the address, unless the address puts the facility more than 2 km from
 them, when the source has no location. A source's name and location are only ever used to check
@@ -51,8 +54,9 @@ from .schema import normalize_scalar
 
 SOURCE_LOCATIONS_FILE = "source_locations.json"
 
-# What a stated location became. The first three are a location value; street is good enough to
-# match a source to a site but not to load; a hint is too coarse for either.
+# What a stated location became. The first four place the facility well enough to measure how far
+# it is from our site (MATCHING_BASES); the first three are exact to the building; a hint is too
+# coarse for either.
 COORDINATES = "coordinates"
 GRID_REFERENCE = "grid reference"
 ROOFTOP = "rooftop"
@@ -181,8 +185,8 @@ def states_location(source: dict[str, Any]) -> bool:
 
 def stated_location_text(source: dict[str, Any]) -> str:
     """Everything a source states about where the facility is, as one text: its coordinates, then
-    its address, joined by " | " where it gives both. For notes and the review queue, which show
-    them together; the locate step reads the two apart. `source` may be a source or an evidence
+    its address, joined by " | " where it gives both. For notes, which show them together; the
+    locate step reads the two apart. `source` may be a source or an evidence
     row, which carries both fields."""
     return f" {PART_SEPARATOR} ".join(text for text in (stated_coordinates(source), stated_address(source)) if text)
 

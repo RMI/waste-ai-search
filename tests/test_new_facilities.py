@@ -1,26 +1,37 @@
 """SMEs' new facilities join the run's list for ingestion (build step 5 of the source-matching plan).
 
-Arbitration lists the located sources that match none of our sites in new_facility_candidates.csv.
-An SME can find another, a value whose source is about a landfill we don't hold, and reject it as
-"New facility - not in our database". collect-new-facilities reads the reviewed workbook and adds
-those to the same list, once each, and arbitrating the run again keeps them.
+An SME reviewing a workbook's Review_Queue can find a value whose source is about a landfill we
+don't hold, and reject it as "New facility - not in our database". collect-new-facilities reads the
+reviewed workbook and adds those to new_facility_candidates.csv, once each, and arbitrating the run
+again keeps them. Arbitration lists none of its own since the matcher went (step 2 of the
+approve-sources plan), and a workbook arbitrated since has no Review_Queue, so nothing to collect.
 """
 from __future__ import annotations
 
 import csv
 import json
 
+from openpyxl import Workbook
+
 from waste_ai_search.cli import main
 from waste_ai_search.input_loader import write_csv_records
-from waste_ai_search.match import NEW_FACILITY_HEADERS
+from waste_ai_search.lists import NEW_FACILITY_HEADERS
 from waste_ai_search.new_facilities import collect_new_facilities, reviewed_workbook, sme_candidates
-from waste_ai_search.schema import LOCATION_ATTRIBUTE, NEW_FACILITY_REASON, REVIEW_QUEUE_HEADERS
+from waste_ai_search.schema import LOCATION_ATTRIBUTE, NEW_FACILITY_REASON
 from waste_ai_search.seed_source import seed_headers
-from waste_ai_search.workbook_io import write_review_workbook
+from waste_ai_search.workbook_io import write_review_workbook, write_sheet
+
+# The Review_Queue columns collect-new-facilities reads, as a reviewed workbook from before
+# found_values.csv has them.
+QUEUE_HEADERS = [
+    "site_id", "site_name", "country_iso3", "searched_site_id", "attribute_name", "resolved_value",
+    "winning_source_url", "facility_name_in_source", "stated_location", "location_basis", "validation_status",
+    "rejection_reason", "corrected_value", "reviewer", "reviewed_date", "researcher_notes",
+]
 
 
 def queue_row(attribute, **values):
-    return {header: "" for header in REVIEW_QUEUE_HEADERS} | {
+    return {header: "" for header in QUEUE_HEADERS} | {
         "site_id": "7", "site_name": "domestic landfill", "country_iso3": "CAN", "searched_site_id": "7",
         "attribute_name": attribute, "winning_source_url": "https://council.example/tip",
         "facility_name_in_source": "Hartney Waste Disposal Grounds", "stated_location": "Road 22 N, Hartney",
@@ -30,7 +41,12 @@ def queue_row(attribute, **values):
 
 
 def reviewed(tmp_path, rows, name="run_review.xlsx"):
-    return write_review_workbook(tmp_path / name, run_config=[], review_queue=rows, leads=[], parse_warnings=[])
+    """A reviewed workbook with a Review_Queue, as runs arbitrated before found_values.csv have."""
+    workbook = Workbook()
+    write_sheet(workbook.active, QUEUE_HEADERS, rows)
+    workbook.active.title = "Review_Queue"
+    workbook.save(tmp_path / name)
+    return tmp_path / name
 
 
 def listed(run_dir):
@@ -122,3 +138,14 @@ def test_the_smes_copy_is_found_in_the_review_folder_first(tmp_path):
     (shared / "run" / "run_review.xlsx").write_bytes(b"")
     assert reviewed_workbook(run_dir, "run", shared) == shared / "run" / "run_review.xlsx"
     assert reviewed_workbook(run_dir, "run", None) == run_dir / "run_review.xlsx"
+
+
+def test_a_workbook_with_no_review_queue_has_nothing_to_collect(tmp_path, capsys):
+    """A workbook arbitrated since found_values.csv replaced the review queue: the command says so
+    and stops, rather than failing."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    workbook = write_review_workbook(tmp_path / "new.xlsx", run_config=[], found_values=[], parse_warnings=[])
+    assert main(["collect-new-facilities", "--run-id", "run", "--run-dir", str(run_dir), "--workbook", str(workbook), "--local"]) == 1
+    assert "has no Review_Queue tab" in capsys.readouterr().err
+    assert not (run_dir / "new_facility_candidates.csv").exists()

@@ -130,7 +130,7 @@ def normalize_url(url: Any) -> str:
 def source_id_for(url: Any, fallback: str) -> str:
     """A source's id, derived from its exact URL, so it is the same wherever the URL is cited.
 
-    evidence.csv and sources.csv both carry it, so the two files join. A citation with no URL has
+    found_values.csv and sources.csv both carry it, so the two files join. A citation with no URL has
     nothing to derive an id from, and keeps `fallback`, its own per-citation id.
     """
     exact = normalize_url(url)

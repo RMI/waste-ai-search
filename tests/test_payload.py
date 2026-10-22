@@ -133,7 +133,8 @@ def test_each_value_keeps_how_its_own_citation_described_the_page():
     assert {entry["source_type"] for entry in sources} == {"Company directory listing", "Operator disclosure"}
 
 
-def test_a_converted_location_is_tiered_by_the_citation_of_its_coordinates():
+def test_a_converted_responses_coordinates_are_where_its_source_places_the_facility():
+    """No longer a value of their own (step 2 of the approve-sources plan): they check the match."""
     blog = dict(NEWS, source_type="Wiki or aggregator", url=PERMIT["url"])
     old = {"site_id": "7", "attributes": [
         attribute("operator", "Ecoserv Ltd", blog),
@@ -142,8 +143,9 @@ def test_a_converted_location_is_tiered_by_the_citation_of_its_coordinates():
     ]}
     site = {"site_id": "7", "internal_facility_id": "7", "site_name": "Ecoserv", "country_iso3": "GBR"}
     _by_attribute, rows, _sources, _warnings = extract_evidence(site, old, "run", "v", date(2026, 1, 1))
-    location = next(row for row in rows if row["attribute_name"] == "found_location")
-    assert (location["location_basis"], location["source_tier"]) == ("coordinates", "Tier 1")
+    [operator] = rows
+    assert operator["attribute_name"] == "operator"
+    assert (operator["stated_coordinates"], operator["location_basis"]) == ("54.12345, -1.54321", "coordinates")
 
 
 def test_a_citation_without_a_url_stays_a_source_of_its_own():
@@ -322,8 +324,8 @@ def test_a_source_first_run_arbitrates_and_a_tool_failure_is_still_retried(tmp_p
     run_dir = write_run(tmp_path, {"8": {**NEW, "site_id": "8"}, "9": failed})
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
-    queue = list(csv.DictReader((run_dir / "review_queue.csv").open(encoding="utf-8-sig")))
-    assert ("8", "operator", "Ecoserv Ltd") in {(row["site_id"], row["attribute_name"], row["resolved_value"]) for row in queue}
+    found = list(csv.DictReader((run_dir / "found_values.csv").open(encoding="utf-8-sig")))
+    assert ("8", "operator", "Ecoserv Ltd") in {(row["site_id"], row["attribute_name"], row["value"]) for row in found}
     retry = list(csv.DictReader((run_dir / "sites_to_retry.csv").open(encoding="utf-8-sig")))
     assert [row["site_id"] for row in retry] == ["9"]
 

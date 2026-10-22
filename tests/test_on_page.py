@@ -28,7 +28,6 @@ from waste_ai_search.on_page import (
 )
 from waste_ai_search.page_text import PAGE_TEXT_DIR, save_page_text
 from waste_ai_search.run_context import PipelineConfig
-from waste_ai_search.schema import LOCATION_ATTRIBUTE
 from waste_ai_search.seed_source import seed_headers
 
 
@@ -212,7 +211,9 @@ def rows(run_dir, name):
     return list(csv.DictReader((run_dir / name).open(encoding="utf-8-sig")))
 
 
-def test_the_queue_flags_a_winning_source_its_own_page_doesnt_bear_out(tmp_path):
+def test_found_values_says_whether_each_quote_and_location_is_on_its_page(tmp_path):
+    """The flags the Site_Review tab will show (step 3 of the approve-sources plan); the review queue's
+    CHECK notes went with it."""
     run_dir = tmp_path / "run"
     write_csv_records(run_dir / "seed.csv", [seed("901", "Otaihanga Landfill", -40.8836, 175.0277)], seed_headers())
     council, news, blocked = "https://kapiticoast.example/otaihanga", "https://news.example/otaihanga", "https://blocked.example/x"
@@ -232,38 +233,13 @@ def test_the_queue_flags_a_winning_source_its_own_page_doesnt_bear_out(tmp_path)
     save_page_text(run_dir / PAGE_TEXT_DIR, news, "Coastal news. The Otaihanga site is now a park.")
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
-    evidence = {(row["attribute_name"], row["claimed_value"]): row for row in rows(run_dir, "evidence.csv")}
-    assert (evidence[("operator", "Kapiti Coast District Council")]["quote_on_page"],
-            evidence[("operator", "Kapiti Coast District Council")]["location_on_page"]) == (FOUND, FOUND)
-    assert (evidence[("closing_year", "2011")]["quote_on_page"], evidence[("closing_year", "2011")]["location_on_page"]) == (NOT_FOUND, NOT_FOUND)
-    assert evidence[("facility_status", "Inactive")]["quote_on_page"] == NO_PAGE_TEXT
-
-    queue = {row["attribute_name"]: row for row in rows(run_dir, "review_queue.csv")}
-    assert "CHECK" not in queue["operator"]["evidence_summary"]
-    assert "CHECK: its quote is not on the source's page." in queue["closing_year"]["evidence_summary"]
-    # The source was filed by the location it states, so that is flagged too.
-    assert "CHECK: the location the source states is not on its page." in queue["closing_year"]["evidence_summary"]
-    # No text kept is not evidence against it: nothing is flagged.
-    assert "CHECK" not in queue["facility_status"]["evidence_summary"]
+    found = {row["attribute_name"]: row for row in rows(run_dir, "found_values.csv")}
+    assert (found["operator"]["quote_on_page"], found["operator"]["location_on_page"]) == (FOUND, FOUND)
+    assert (found["closing_year"]["quote_on_page"], found["closing_year"]["location_on_page"]) == (NOT_FOUND, NOT_FOUND)
+    assert found["facility_status"]["quote_on_page"] == NO_PAGE_TEXT
 
     config = {row[0]: row[1] for row in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].values}
     assert config["quotes_on_page"].startswith("found ") and "not found 1" in config["quotes_on_page"]
     assert "not found 1" in config["locations_on_page"]
-    queue_sheet = load_workbook(run_dir / "run_review.xlsx")["Review_Queue"]
-    assert any("on its page" in str(rule.formula) for ranges in queue_sheet.conditional_formatting for rule in ranges.rules)
-
-
-def test_a_found_location_row_flags_a_location_not_on_its_page(tmp_path):
-    run_dir = tmp_path / "run"
-    write_csv_records(run_dir / "seed.csv", [seed("902", "Otaihanga Landfill", -40.8836, 175.0277)], seed_headers())
-    page_url = "https://register.example/otaihanga"
-    raw = run_dir / "raw_foundry_responses"
-    raw.mkdir(parents=True)
-    # A location 0.6 km from ours, so a value to review; the page gives other coordinates.
-    (raw / "site_902.json").write_text(json.dumps({"site_id": "902", "sources": [
-        source(page_url, [], location="-40.8890, 175.0300"),
-    ]}))
-    save_page_text(run_dir / PAGE_TEXT_DIR, page_url, "Otaihanga Landfill. Coordinates -40.8836, 175.0277.")
-    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
-    [location] = [row for row in rows(run_dir, "review_queue.csv") if row["attribute_name"] == LOCATION_ATTRIBUTE]
-    assert "CHECK: the location the source states is not on its page." in location["evidence_summary"]
+    sheet = load_workbook(run_dir / "run_review.xlsx")["Found_Values"]
+    assert any(NOT_FOUND in str(rule.formula) for ranges in sheet.conditional_formatting for rule in ranges.rules)

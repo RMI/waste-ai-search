@@ -3,12 +3,12 @@
 Like the trusted name (WP-531), the rule needs POSITIVE per-attribute provenance, for both axes.
 Since step 1 of the approve-sources plan no site's location is asked for: each source states where
 it puts the facility, only to check that it is about this site. Trusted coordinates are called
-confirmed in the prompt, and arbitration records the sources' locations for such a site rather than
-queueing them. These tests were rewritten on purpose for that change.
+confirmed in the prompt. These tests were rewritten on purpose for that change, and again when a
+source's location stopped being a value of its own (step 2), so trust no longer decides whether
+the sources' locations are reviewed.
 """
 from __future__ import annotations
 
-from waste_ai_search.arbitrate import location_reviewed
 from waste_ai_search.credibility import trusted_baseline_coordinates
 from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
 
@@ -30,9 +30,8 @@ def site(**overrides):
     return base
 
 
-def test_tier_1_2_coordinates_leave_the_sources_locations_recorded_not_reviewed():
+def test_tier_1_2_coordinates_on_both_axes_are_trusted():
     assert trusted_baseline_coordinates(site(attribute_sources=TRUSTED))
-    assert not location_reviewed(site(attribute_sources=TRUSTED))
 
 
 def test_a_location_is_never_asked_for_whoever_supplied_ours():
@@ -40,15 +39,14 @@ def test_a_location_is_never_asked_for_whoever_supplied_ours():
         assert "found_location" not in requested_attributes(site(attribute_sources=provenance)), provenance
 
 
-def test_untrusted_missing_or_inexact_coordinates_have_the_sources_locations_reviewed():
+def test_untrusted_or_missing_coordinates_are_not_trusted():
     for provenance in (
         "",                                                      # none
         "found_latitude@eprtr_2022",                             # one axis only
         "found_latitude@osm_2022; found_longitude@osm_2022",     # below Tier 2
     ):
-        assert location_reviewed(site(attribute_sources=provenance)), provenance
+        assert not trusted_baseline_coordinates(site(attribute_sources=provenance)), provenance
     assert not trusted_baseline_coordinates(site(attribute_sources=TRUSTED, longitude=""))
-    assert location_reviewed(site(attribute_sources=TRUSTED, is_location_exact="FALSE"))
 
 
 def test_a_previous_pass_is_tiered_by_its_own_source():

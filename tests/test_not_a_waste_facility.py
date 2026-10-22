@@ -9,10 +9,11 @@ redeveloped landfill read as "not a landfill". Those sites keep emitting methane
 are exactly what WasteMAP tracks, so "it's a park now" must never become "Not a Waste Facility".
 
 By decision on WP-525 the value is handled like any facility_type: it reaches the next pass's seed,
-and it is always reviewed. Nothing is accepted automatically now, so the second needs no rule of its
-own. Tests below pin both, so changing either is deliberate.
+and it is always reviewed. A Tier 1-2 value filling an empty field is approved automatically again
+(step 2 of the approve-sources plan), so the verdict is one of the exceptions that send its source to
+an SME whatever its tier. Tests below pin both, so changing either is deliberate.
 
-All offline: agent responses are hand-built payloads fed through the real extraction, resolution,
+All offline: agent responses are hand-built payloads fed through the real extraction, sorting,
 arbitration, refresh and workbook code.
 """
 from __future__ import annotations
@@ -21,8 +22,8 @@ from datetime import date
 
 from openpyxl import load_workbook
 
-from waste_ai_search.arbitrate import closure_reported, extract_evidence, review_summary
-from waste_ai_search.arbitration import needs_review, resolve
+from waste_ai_search.arbitrate import extract_evidence
+from waste_ai_search.found_values import AUTO_APPROVED, SME_REVIEW, pick_values, sort_values
 from waste_ai_search.prompt_builder import (
     build_site_prompt,
     needs_contradiction_check,
@@ -94,16 +95,20 @@ def attribute(name, value, sources, summary="summary"):
 
 
 def arbitrate(site, *attributes):
-    """Run one site's payload through extraction and resolution, as run_arbitration does."""
+    """Run one site's payload through extraction and sorting, as run_arbitration does: its
+    found_values.csv rows."""
     payload = {"site_id": site["site_id"], "attributes": list(attributes)}
-    by_attr, evidence, _sources, _warn = extract_evidence(site, payload, "run", "v", date(2026, 1, 1))
-    names = list(requested_attributes(site)) + [n for n in by_attr if n not in requested_attributes(site)]
-    resolved = [resolve(site, n, by_attr.get(n, [])) for n in names]
-    return resolved, evidence
+    _by_attr, evidence, sources, _warn = extract_evidence(site, payload, "run", "v", date(2026, 1, 1))
+    cited = {}
+    for entry in sources:
+        cited.setdefault((entry["site_id"], entry["source_index"]), entry)
+    found = sort_values(evidence, list(cited.values()), {site["site_id"]: site}, 2026).rows
+    return found, evidence
 
 
-def row_for(resolved, name):
-    return next(r for r in resolved if r["attribute_name"] == name)
+def row_for(found, name):
+    """The value that would load for an attribute (found_values.pick_values)."""
+    return next(row for (_site, attribute, _year), row in pick_values(found).items() if attribute == name)
 
 
 def quarry(sources=(REGULATOR,), summary="Active granite quarry."):
@@ -129,70 +134,70 @@ def test_the_ordinary_facility_types_are_unchanged():
 
 # --- criterion 1: a positive contradiction ------------------------------------------------------
 def test_a_source_describing_a_quarry_yields_not_a_waste_facility_with_a_clickable_source():
-    resolved, _ = arbitrate(unconfirmed_site(), quarry())
-    row = row_for(resolved, "facility_type")
+    found, _ = arbitrate(unconfirmed_site(), quarry())
+    row = row_for(found, "facility_type")
 
-    assert row["resolved_value"] == NOT_A_WASTE_FACILITY
-    assert row["winning_source_url"].startswith("https://")
-    assert row["winning_source_tier"] == "Tier 1"
+    assert row["value"] == NOT_A_WASTE_FACILITY
+    assert row["source_url"].startswith("https://")
+    assert row["source_tier"] == "Tier 1"
 
 
 def test_even_a_tier_1_verdict_is_routed_to_review():
-    resolved, _ = arbitrate(unconfirmed_site(), quarry())
-    row = row_for(resolved, "facility_type")
+    found, _ = arbitrate(unconfirmed_site(), quarry())
+    row = row_for(found, "facility_type")
 
-    assert row["validation_status"] == "Needs review"
-    assert needs_review(row)
+    assert row["status"] == SME_REVIEW
+    assert row["status_reason"] == f"Tier 1 source; it says the site is {NOT_A_WASTE_FACILITY}."
 
 
-def test_an_ordinary_tier_1_facility_type_is_reviewed_too():
-    """Reversed on purpose: this once auto-validated, and a rule of its own kept the verdict from
-    doing the same. Nothing is accepted automatically now, so that rule is gone."""
-    resolved, _ = arbitrate(unconfirmed_site(), attribute("facility_type", "Dumpsite", [REGULATOR]))
-    assert needs_review(row_for(resolved, "facility_type"))
+def test_an_ordinary_tier_1_facility_type_is_auto_approved():
+    """Reversed twice on purpose: this once auto-validated, then nothing was accepted automatically,
+    and now batch 1's rule is back. The verdict alone is an exception."""
+    found, _ = arbitrate(unconfirmed_site(), attribute("facility_type", "Dumpsite", [REGULATOR]))
+    assert row_for(found, "facility_type")["status"] == AUTO_APPROVED
 
 
 # --- a low-tier contradiction -------------------------------------------------------------------
 def test_a_low_tier_verdict_still_reaches_review_marked_with_its_tier():
-    resolved, _ = arbitrate(unconfirmed_site(), quarry(sources=[WIKI]))
-    row = row_for(resolved, "facility_type")
+    found, _ = arbitrate(unconfirmed_site(), quarry(sources=[WIKI]))
+    row = row_for(found, "facility_type")
 
-    assert row["resolved_value"] == NOT_A_WASTE_FACILITY
-    assert row["winning_source_tier"] == "Tier 4"
-    assert needs_review(row)
+    assert row["value"] == NOT_A_WASTE_FACILITY
+    assert row["source_tier"] == "Tier 4"
+    assert row["status"] == SME_REVIEW
 
 
 def test_a_higher_tier_source_wins():
-    resolved, _ = arbitrate(unconfirmed_site(), quarry(sources=[WIKI, REGULATOR]))
-    assert row_for(resolved, "facility_type")["winning_source_tier"] == "Tier 1"
+    found, _ = arbitrate(unconfirmed_site(), quarry(sources=[WIKI, REGULATOR]))
+    assert row_for(found, "facility_type")["source_tier"] == "Tier 1"
 
 
 # --- criterion 2: closure is not a contradiction ------------------------------------------------
 def test_a_capped_landfill_keeps_its_type_and_reports_closure():
     """The agent is told a park-on-a-landfill keeps its landfill type, with closure recorded
     through facility_status and closing_year. That is an ordinary fill, not a verdict."""
-    resolved, evidence = arbitrate(
+    found, evidence = arbitrate(
         unconfirmed_site(),
         attribute("facility_type", "Sanitary Landfill", [NEWS]),
         attribute("facility_status", "Inactive", [NEWS]),
         attribute("closing_year", "2009", [NEWS]),
     )
 
-    assert row_for(resolved, "facility_type")["resolved_value"] == "Sanitary Landfill"
-    assert row_for(resolved, "facility_status")["resolved_value"] == "Inactive"
-    assert row_for(resolved, "closing_year")["resolved_value"] == "2009"
-    assert "CHECK:" not in review_summary(row_for(resolved, "facility_type"), closure_reported(resolved))
+    assert row_for(found, "facility_type")["value"] == "Sanitary Landfill"
+    assert row_for(found, "facility_status")["value"] == "Inactive"
+    assert row_for(found, "closing_year")["value"] == "2009"
+    assert "CHECK:" not in row_for(found, "facility_type")["status_reason"]
 
 
 def test_a_capped_landfill_wrongly_called_not_waste_is_caught_by_the_closure_cross_check():
     """If the agent misreads "now a park" anyway, the reviewer is told to look twice."""
-    resolved, evidence = arbitrate(
+    found, evidence = arbitrate(
         unconfirmed_site(),
         quarry(sources=[NEWS], summary="Now a public park."),
         attribute("facility_status", "Inactive", [NEWS]),
         attribute("closing_year", "2009", [NEWS]),
     )
-    summary = review_summary(row_for(resolved, "facility_type"), closure_reported(resolved))
+    summary = row_for(found, "facility_type")["status_reason"]
 
     assert "CHECK: this run also found" in summary
     assert "facility_status = Inactive" in summary
@@ -208,25 +213,23 @@ def test_the_guidance_tells_the_agent_closure_is_not_a_contradiction():
 
 # --- criterion 3: silence is never a negative ---------------------------------------------------
 def test_no_contradicting_evidence_leaves_facility_type_empty():
-    resolved, evidence = arbitrate(unconfirmed_site())
-    row = row_for(resolved, "facility_type")
+    found, evidence = arbitrate(unconfirmed_site(), attribute("operator", "Fraser Valley Regional District", [REGULATOR]))
 
-    assert row["resolved_value"] == ""
-    assert row["resolution"] == "Not found"
-    assert all(r["resolved_value"] != NOT_A_WASTE_FACILITY for r in resolved)
+    assert [row["attribute_name"] for row in found] == ["operator"]
+    assert all(row["value"] != NOT_A_WASTE_FACILITY for row in found)
 
 
 def test_a_site_the_agent_could_not_find_gets_no_verdict():
     """An empty attributes list - the agent's "I could not find this facility" - decides nothing."""
-    resolved, _ = arbitrate(unconfirmed_site())
-    assert all(r["resolved_value"] != NOT_A_WASTE_FACILITY for r in resolved)
+    found, _ = arbitrate(unconfirmed_site())
+    assert found == []
 
 
 # --- criterion 4, as decided on WP-525: carried forward, and always reviewed --------------------
 def test_a_real_arbitration_queues_the_verdict_and_the_refresh_carries_it_forward(tmp_path):
     """Decided on WP-525: flows like any facility_type value. Pinned so reversing it is deliberate.
 
-    The verdict is in the review queue, not resolved.csv, and refresh-seed still reads it there, as
+    The verdict waits for SME review in found_values.csv, and refresh-seed still reads it there, as
     it reads every value awaiting review.
     """
     import json
@@ -249,7 +252,7 @@ def test_a_real_arbitration_queues_the_verdict_and_the_refresh_carries_it_forwar
 
     rows = read_arbitrated_rows(run_dir)
     [verdict] = [row for row in rows if row["attribute_name"] == "facility_type"]
-    assert (verdict["resolved_value"], verdict["validation_status"]) == (NOT_A_WASTE_FACILITY, "Needs review")
+    assert (verdict["value"], verdict["status"]) == (NOT_A_WASTE_FACILITY, SME_REVIEW)
     [refreshed], _stats = refresh_sites([site], rows, "run")
     assert refreshed["facility_type"] == NOT_A_WASTE_FACILITY
 
@@ -260,8 +263,8 @@ def test_the_verdict_is_merged_into_the_next_pass_seed_and_not_offered_again():
     from waste_ai_search.seed_refresh import refresh_sites
 
     site = unconfirmed_site()
-    resolved, _ = arbitrate(site, quarry())
-    [refreshed], _stats = refresh_sites([site], resolved, "run")
+    found, _ = arbitrate(site, quarry())
+    [refreshed], _stats = refresh_sites([site], found, "run")
 
     assert refreshed["facility_type"] == NOT_A_WASTE_FACILITY
     assert not needs_contradiction_check(refreshed)
@@ -277,19 +280,19 @@ def test_the_value_is_declared_as_waiting_on_the_database():
 
 def test_the_verdict_is_reviewed_on_its_own_facility_type_row():
     """No separate tab: the facility_type row carries the verdict, its source and tier."""
-    resolved, _ = arbitrate(unconfirmed_site(), quarry())
-    row = row_for(resolved, "facility_type")
+    found, _ = arbitrate(unconfirmed_site(), quarry())
+    row = row_for(found, "facility_type")
 
-    assert row["resolved_value"] == NOT_A_WASTE_FACILITY
-    assert row["winning_source_tier"] == "Tier 1"
-    assert row["validation_status"] == "Needs review"
-    assert "CHECK:" not in review_summary(row, closure_reported(resolved))
+    assert row["value"] == NOT_A_WASTE_FACILITY
+    assert row["source_tier"] == "Tier 1"
+    assert row["status"] == SME_REVIEW
+    assert "CHECK:" not in row["status_reason"]
 
 
 def test_the_workbook_has_no_contradictions_tab(tmp_path):
     from waste_ai_search.workbook_io import write_review_workbook
 
-    path = write_review_workbook(tmp_path / "r.xlsx", run_config=[], review_queue=[], leads=[], parse_warnings=[])
+    path = write_review_workbook(tmp_path / "r.xlsx", run_config=[], found_values=[], parse_warnings=[])
     assert "Contradictions" not in load_workbook(path).sheetnames
 
 

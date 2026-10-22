@@ -17,7 +17,7 @@ import io
 import json
 from collections import Counter, defaultdict
 from contextlib import redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -31,6 +31,9 @@ Reader = Callable[[str], Optional[bytes]]
 
 SEED = "seed.csv"
 RUN_LOG = "foundry_run_log.csv"
+# What an arbitrated run's values are in: found_values.csv since step 2 of the approve-sources plan,
+# resolved.csv and the review queue before it, as batch 1 still has them.
+FOUND_VALUES = "found_values.csv"
 RESOLVED = "resolved.csv"
 REVIEW_QUEUE = "review_queue.csv"
 MANIFEST = f"{SNAPSHOT_DIR_NAME}/{MANIFEST_NAME}"
@@ -44,7 +47,8 @@ SOURCE_GROUPS = [MAP_ONLY, OTHER_SOURCES]
 # resolved.csv holds the values a run accepted without review. Only batch 1 and earlier runs have
 # any: later runs accept nothing automatically, write it header-only and queue every new value. A
 # confirmation adds nothing new: every row in the review queue is a candidate except one, which
-# batch 1 queued only for a failed identity check and later runs never queue.
+# batch 1 queued only for a failed identity check and later runs never queue. In found_values.csv,
+# a new value is one that fills an empty field: auto-approved, or for SME review.
 CONFIRMED = "Confirmed baseline"
 NEW_VALUE_RESOLUTIONS = {"Filled empty baseline", "Overrides baseline"}
 # An SME's rejection of a value as about another facility. Since build step 5 of the
@@ -107,15 +111,22 @@ class RunFiles:
     run_id: str
     seed: list[dict[str, str]]
     run_log: list[dict[str, str]]
+    # The values accepted without review, and those for review, as resolved.csv and the review
+    # queue gave them; a run with found_values.csv has its rows read into the same shape.
     resolved: list[dict[str, str]]
     review: list[dict[str, str]]
     manifest: Optional[dict[str, Any]]
     # Review_Queue rows from the reviewed workbook; None when there is no workbook to read.
     sme: Optional[list[dict[str, str]]] = None
+    # The sites a source named the facility for. A run with found_values.csv no longer has a name as
+    # a value, so this stands for found_facility_name there.
+    named: set[str] = field(default_factory=set)
 
 
 def load_run(run_id: str, read: Reader) -> RunFiles:
-    data = {name: read(name) for name in (SEED, RUN_LOG, RESOLVED, REVIEW_QUEUE)}
+    found = read(FOUND_VALUES)
+    names = (SEED, RUN_LOG) if found is not None else (SEED, RUN_LOG, RESOLVED, REVIEW_QUEUE)
+    data = {name: read(name) for name in names}
     missing = [name for name, content in data.items() if content is None]
     if missing:
         raise FileNotFoundError(
@@ -123,14 +134,35 @@ def load_run(run_id: str, read: Reader) -> RunFiles:
             "measured."
         )
     manifest = read(MANIFEST)
-    return RunFiles(
+    run = RunFiles(
         run_id=run_id,
         seed=csv_rows(data[SEED]),
         run_log=csv_rows(data[RUN_LOG]),
-        resolved=csv_rows(data[RESOLVED]),
-        review=csv_rows(data[REVIEW_QUEUE]),
+        resolved=csv_rows(data.get(RESOLVED)),
+        review=csv_rows(data.get(REVIEW_QUEUE)),
         manifest=json.loads(manifest) if manifest is not None else None,
     )
+    if found is not None:
+        run.resolved, run.review, run.named = from_found_values(csv_rows(found))
+    return run
+
+
+def from_found_values(rows: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, str]], set[str]]:
+    """found_values.csv read as resolved.csv and the review queue were: its auto-approved values as
+    accepted, and its values for SME review as queued, each a new value filling an empty field; and
+    the sites whose sources named the facility."""
+    from .found_values import AUTO_APPROVED, SME_REVIEW
+
+    accepted, queued = [], []
+    for row in rows:
+        status = normalize_scalar(row.get("status"))
+        if status not in (AUTO_APPROVED, SME_REVIEW):
+            continue
+        (accepted if status == AUTO_APPROVED else queued).append({
+            **row, "resolution": "Filled empty baseline", "resolved_value": normalize_scalar(row.get("value")),
+        })
+    named = {_site_id(row) for row in rows if normalize_scalar(row.get("facility_name_in_source"))}
+    return accepted, queued, named
 
 
 def read_review_workbook(path: Path) -> Optional[list[dict[str, str]]]:
@@ -235,7 +267,7 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
             "new_values_accepted": len(accepted[site_id]),
             "new_values_to_review": len(to_review[site_id]),
             "found_attributes": "; ".join(attributes),
-            "found_name": NAME_ATTRIBUTE in attributes,
+            "found_name": NAME_ATTRIBUTE in attributes or site_id in run.named,
             "filed_under_another_site": elsewhere[site_id],
             "not_a_waste_facility": any(
                 normalize_scalar(row.get("attribute_name")) == "facility_type"

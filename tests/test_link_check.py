@@ -148,11 +148,11 @@ def verdict(url, v, resolved=None, status="404"):
     return LinkResult(url=url, verdict=v, status=status, resolved_url=resolved or url)
 
 
-def test_a_dead_link_is_not_promoted_and_says_why():
+def test_a_dead_link_is_not_used_and_says_why():
     url = "https://x.org/gone.pdf"
     _by, evidence, row = arbitrate(payload(url), {url: verdict(url, BROKEN)})
     assert evidence[0]["promotion_eligible"] == "FALSE"
-    assert evidence[0]["exclusion_reason"] == "Source link broken (404); not promoted."
+    assert evidence[0]["exclusion_reason"] == "Source link broken (404)."
     assert evidence[0]["link_status"] == BROKEN
     assert row["resolution"] == "Not found"
 
@@ -193,7 +193,7 @@ def test_without_a_link_check_nothing_changes():
     assert row["resolved_value"] == "Active"
 
 
-# --- end to end: offline arbitration, leads, and Run_Config ------------------------------------
+# --- end to end: offline arbitration, found_values.csv, and Run_Config ---------------------------
 def build_run(tmp_path, links):
     from waste_ai_search.input_loader import write_csv_records
     from waste_ai_search.seed_source import seed_headers
@@ -219,13 +219,13 @@ def test_arbitration_reads_the_verdicts_without_reaching_the_network(tmp_path, m
         "url": "https://x.org/gone.pdf", "verdict": BROKEN, "status": "404", "resolved_url": "https://x.org/gone.pdf"}})
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
-    leads = (run_dir / "supplementary_leads.csv").read_text()
-    assert "Source link broken (404)" in leads
+    found = (run_dir / "found_values.csv").read_text()
+    assert "Source link broken (404)" in found
 
     from openpyxl import load_workbook
     config = {r[0]: r[1] for r in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].iter_rows(values_only=True)}
     assert config["links_checked"] == 1 and config["links_broken"] == 1
-    assert config["broken_link_route"] == "routed to leads"
+    assert config["broken_link_route"] == "not used"
 
 
 def test_the_search_phase_checks_links_and_can_be_told_not_to(tmp_path, monkeypatch):
@@ -396,8 +396,8 @@ def test_one_malformed_url_does_not_stop_the_others(monkeypatch):
     assert results["https://fine.example/a"].verdict == OK
 
 
-# --- Copilot review: a dead source reaches Leads even when the value was filled elsewhere -------
-def test_a_dead_source_reaches_leads_when_a_working_source_filled_the_attribute(tmp_path, monkeypatch):
+# --- Copilot review: a dead source is listed even when the value was filled elsewhere ------------
+def test_a_dead_source_is_listed_when_a_working_source_filled_the_attribute(tmp_path, monkeypatch):
     from waste_ai_search.arbitrate import run_arbitration
     from waste_ai_search.input_loader import write_csv_records
     from waste_ai_search.run_context import PipelineConfig
@@ -417,10 +417,9 @@ def test_a_dead_source_reaches_leads_when_a_working_source_filled_the_attribute(
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
     import csv
-    queued = [r for r in csv.DictReader((run_dir / "review_queue.csv").open()) if r["attribute_name"] == "facility_status"]
-    assert queued[0]["resolved_value"] == "Active"  # filled from the working source
-    leads = list(csv.DictReader((run_dir / "supplementary_leads.csv").open()))
-    assert [l["url"] for l in leads if "Source link broken" in l["exclusion_reason"]] == [dead]
+    found = {r["source_url"]: r for r in csv.DictReader((run_dir / "found_values.csv").open())}
+    assert (found[alive]["value"], found[alive]["status"]) == ("Active", "auto-approved")  # the working source
+    assert (found[dead]["status"], found[dead]["status_reason"]) == ("not used", "Source link broken (404).")
 
 
 def test_environment_proxies_are_ignored(monkeypatch):

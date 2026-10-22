@@ -31,7 +31,9 @@ def response(*sources):
 
 
 def source(url, address="", coordinates="", **extra):
-    return {**PERMIT, "url": url, "stated_address": address, "stated_coordinates": coordinates, "values": [], **extra}
+    operator = {"attribute_name": "operator", "value": "Wicklow County Council", "unit": "", "value_basis": "Direct",
+                "confidence_score": "High", "value_date": "2022", "evidence_summary": "The licence names it."}
+    return {**PERMIT, "url": url, "stated_address": address, "stated_coordinates": coordinates, "values": [operator], **extra}
 
 
 ADDRESS = source("https://epa.example.ie/licence/W0123", address="Ballynagran, Coolbeg, Co. Wicklow")
@@ -39,7 +41,8 @@ GRID = source("https://epa.example.ie/licence/W0124", coordinates="T 285 935")
 
 
 def stated(row):
-    return row["stated_address"] or row["stated_coordinates"]
+    """What a found_values.csv row's source states of where the facility is, as written."""
+    return row["source_address"] or row["stated_coordinates"]
 
 
 class FakeGeocoder:
@@ -94,8 +97,8 @@ def test_the_search_locates_each_stated_location_after_the_link_check(tmp_path, 
     geocoder.calls.clear()
     run_arbitration(config)
     assert geocoder.calls == []
-    bases = {stated(row): row["location_basis"] for row in csv.DictReader((config.run_dir / "evidence.csv").open())}
-    assert bases == {ADDRESS["stated_address"]: ROOFTOP, GRID["stated_coordinates"]: "grid reference"}
+    bases = {stated(row): row["coordinates_from"] for row in csv.DictReader((config.run_dir / "found_values.csv").open())}
+    assert bases == {ADDRESS["stated_address"]: "address (building)", GRID["stated_coordinates"]: "grid reference"}
 
     run_config = {row[0]: row[1] for row in load_workbook(config.run_dir / "run_review.xlsx")["Run_Config"].iter_rows(values_only=True)}
     assert run_config["locations_stated"] == "2 (grid reference 1, rooftop 1)"
@@ -127,7 +130,7 @@ def test_no_locate_skips_the_step(tmp_path, monkeypatch):
     assert geocoder.calls == []
     # Arbitration still reads coordinates and grid references itself; an address waits for locate.
     run_arbitration(config)
-    reasons = {stated(row): row["location_reason"] for row in csv.DictReader((config.run_dir / "evidence.csv").open())}
+    reasons = {stated(row): row["location_note"] for row in csv.DictReader((config.run_dir / "found_values.csv").open())}
     assert reasons == {ADDRESS["stated_address"]: NOT_LOCATED, GRID["stated_coordinates"]: ""}
     run_config = {row[0]: row[1] for row in load_workbook(config.run_dir / "run_review.xlsx")["Run_Config"].iter_rows(values_only=True)}
     assert run_config["geocoder"] == "locate step not run"

@@ -76,8 +76,8 @@ GAP_FILL_ATTRIBUTES = [
 # TIME_VARYING_ATTRIBUTE_COLUMNS, in RMI/waste_data_ingestion_pipeline's
 # facility_etl/consolidation/consolidation_techniques.py, less the columns this repository never
 # reads (gccs_lfg_collected_cubic_meters, mcf, ch4_emissions_metric_tonnes). Keep the two aligned.
-# Each year a source reports one of these for is reviewed on its own row (build step 5 of the
-# source-matching plan); every other attribute has one row per site.
+# One value is loaded for each year a source reports one of these for (build step 5 of the
+# source-matching plan); every other attribute has one value per site.
 TIME_VARYING_ATTRIBUTES = [
     "facility_status",
     "waste_depth",
@@ -100,9 +100,9 @@ UNSEARCHED_ATTRIBUTES = {
     "gccs_ch4_flow_to_project_metric_tonnes",
 }
 
-# A location is one fact, valued "lat, lon", so it is reviewed and loaded as a pair, from one
-# source, or not at all. It is read from where each source states the facility is (locate.py),
-# not from coordinates the agent returns as values.
+# A location is one fact, valued "lat, lon". Arbitration once read a found location from where
+# each source states the facility is; it no longer does (step 2 of the approve-sources plan), and
+# the name is kept for the seed's provenance and older review queues.
 LOCATION_ATTRIBUTE = "found_location"
 
 # The two coordinates a location is made of. The seed and refresh-seed record a location's
@@ -110,10 +110,10 @@ LOCATION_ATTRIBUTE = "found_location"
 # plan returned them as values.
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
 
-# No longer requested (step 1 of the approve-sources plan): the agent returns only sources about
-# the site searched, and the name and location each source gives are only used to check that, never
-# to replace ours. Kept so older cached responses, the seed's provenance and refresh-seed still read
-# them. Arbitration still reads a found location from what each source states.
+# No longer requested or loaded (steps 1 and 2 of the approve-sources plan): the agent returns only
+# sources about the site searched, and the name and location each source gives are only used to
+# check that, never to replace ours. Kept so older cached responses and the seed's provenance still
+# read them.
 IDENTITY_ATTRIBUTES = [
     "found_facility_name",
     LOCATION_ATTRIBUTE,
@@ -239,11 +239,11 @@ CALCULATED_ATTRIBUTES = [
 
 TARGET_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *CALCULATED_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
 REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
-# What a source reports as a value. A location is not one: each source states where the facility
-# is, and arbitration reads the found location from those (locate.py).
-VALUE_ATTRIBUTES = [
-    name for name in REQUESTABLE_ATTRIBUTES if name not in COORDINATE_ATTRIBUTES and name != LOCATION_ATTRIBUTE
-]
+# What a source reports as a value: an attribute we fill where ours is empty. Older responses also
+# gave the facility's name and coordinates as values. Those are read, and never used as values: a
+# source's name and location only check that it is about the site searched.
+VALUE_ATTRIBUTES = list(GAP_FILL_ATTRIBUTES)
+IDENTITY_VALUES = {*IDENTITY_ATTRIBUTES, *COORDINATE_ATTRIBUTES}
 
 BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover", "has_flare"}
 ARRAY_TARGET_ATTRIBUTES = {"cover_types", "gccs_energy_project_type", "gccs_current_project_status"}
@@ -522,46 +522,30 @@ BOOLEAN_INPUT_MAP = {
 # spelling and its language, so a reviewer can check results against the original name.
 SITE_NAME_COLUMNS = ["site_name", "original_site_name", "source_language"]
 
-SOURCE_FACILITY_COLUMNS = [
-    "facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates",
-    "location_basis", "located_latitude", "located_longitude", "location_reason",
+# found_values.csv: every value the search found, one row per site, year, source and attribute,
+# with its status (found_values.py). It replaces evidence.csv, resolved.csv, review_queue.csv and
+# supplementary_leads.csv.
+FOUND_VALUES_HEADERS = [
+    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "year",
+    # The source, as sources.csv lists it, and its tier.
+    "source_id", "source_url", "source_title", "publisher", "source_tier", "tier_rule_applied", "link_status",
+    # The facility the source describes, as it writes it: its name, address and coordinates or grid
+    # reference (stated_coordinates). source_coordinates is the point read from them (locate.py),
+    # "lat, lon" to paste into Google Maps, coordinates_from says from what, and distance_km is how
+    # far that is from our site's coordinates. location_note says why there is no point.
+    "facility_name_in_source", "facility_name_english", "source_address", "stated_coordinates",
+    "source_coordinates", "coordinates_from", "distance_km", "location_note",
+    # The value, converted and mapped, and as the agent wrote it; our_value is ours for that year.
+    "attribute_name", "value", "unit", "value_as_written", "value_date", "our_value",
+    # The agent's quote, and whether it, and the location the source states, are on the source's page
+    # as the link check kept its text (on_page.py).
+    "quote", "quote_on_page", "location_on_page", "agent_note", "value_basis", "agent_confidence",
+    # review_id is the site-source pair whose status this is; accept-reviews fills the last two.
+    "review_id", "status", "status_reason", "sme_decision", "loaded",
 ]
 
-EVIDENCE_HEADERS = [
-    "evidence_id", "run_id", "dataset_version", "site_id", *SITE_NAME_COLUMNS, "internal_facility_id",
-    "attribute_name", "claimed_value", "claimed_unit", "normalized_value", "normalized_unit",
-    "unit_conversion_note", "mapped_value", "mapping_note", "value_basis", "value_date",
-    "agent_confidence", "source_id", "link_status", "source_tier", "agent_proposed_tier", "tier_rule_applied",
-    "evidence_summary", "quoted_evidence_short", "search_terms_used", "promotion_eligible",
-    "exclusion_reason", "record_created_date",
-    # The facility each source describes, as it writes it - its name, address and coordinates - and
-    # the point read from them (locate.py): every row of a source carries them. location_reason says
-    # why what it states is not a usable point.
-    *SOURCE_FACILITY_COLUMNS,
-    # site_id is the site a source is filed under (match.py), blank for a likely new facility, and
-    # searched_site_id the site whose search found it; match says which rule filed it there.
-    "searched_site_id", "match",
-    # Whether the source's quote, and the location it states, are on its page, as the link check
-    # kept its text (on_page.py): found, partly found, not found, or no page text.
-    "quote_on_page", "location_on_page",
-]
-
-# resolved.csv is written with this header and no rows. Nothing is accepted automatically, so every
-# value goes to review, and ingestion reads the SMEs' decisions from the review workbook. The file
-# stays because ingestion's loader expects it, and runs from before still carry rows.
-RESOLVED_HEADERS = [
-    "site_id", "internal_facility_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name",
-    "baseline_value", "baseline_source", "baseline_tier",
-    "resolved_value", "resolved_unit", "resolution", "resolution_rule",
-    "winning_evidence_id", "winning_source_tier", "winning_source_url", "winning_link_status",
-    "best_tier_available",
-    "value_date", "confidence_score", "validation_status", "reviewer", "reviewed_date",
-    "researcher_notes",
-]
-
-# The validation_status of a row that leaves our database as it is: a source confirmed our value,
-# or nothing was found. It is neither queued nor loaded. A found value that differs from ours is
-# "Needs review", and one weaker than ours "Routed to leads": nothing is accepted automatically.
+# The validation_status resolve gives a decision that leaves our database as it is: a source
+# confirmed our value, or nothing was found.
 NOTHING_TO_REVIEW = "Nothing to review"
 
 SOURCES_HEADERS = [
@@ -569,41 +553,6 @@ SOURCES_HEADERS = [
     "source_tier", "tier_rule_applied", "agent_proposed_tier", "publication_date",
     "has_publication_date", "language", "paywall_flag", "subscription_followup_needed",
     "first_seen_run_id", "times_cited", "cited_site_count",
-]
-
-# The filtered queue an SME actually works through (Q31). One row per (site, attribute), and for
-# a yearly attribute (TIME_VARYING_ATTRIBUTES) per (site, attribute, year): ingestion's key.
-REVIEW_QUEUE_HEADERS = [
-    # translation_note sits beside the names it is about: the SME compares the two spellings and
-    # records a translation problem there, separately from researcher_notes.
-    # baseline_coordinates is "lat, lon" as Google Maps accepts it pasted into its search box.
-    # Every site column describes the site the value is filed under (match.py). searched_site_id
-    # is the one column about the search that found it, and match says why it is filed here.
-    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "baseline_coordinates",
-    "searched_site_id", "match",
-    "attribute_name", "resolution",
-    "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
-    "winning_source_tier", "winning_source_url", "winning_link_status",
-    # The facility the winning source describes, as it writes it: stated_location is its
-    # coordinates and address, joined by " | " where it gives both. source_coordinates is where that
-    # places it, "lat, lon" like baseline_coordinates, so an SME can paste both into Google Maps;
-    # blank where its location placed nothing match could use. location_basis says how a
-    # found_location was read: coordinates, a grid reference or a rooftop address.
-    "facility_name_in_source", "stated_location", "source_coordinates", "location_basis",
-    "value_date", "agreeing_source_count",
-    # corrected_value is the right value when the found one is wrong. resolved_value is never
-    # edited, so the AI's own answer survives for measuring its error rate. corrected_value_date
-    # is the date a correction applies to, where that isn't the source's value_date - a current
-    # figure replacing one rejected as outdated, say. corrected_site_id re-files the value under
-    # another of our sites.
-    "evidence_summary", "validation_status", "rejection_reason", "corrected_value",
-    "corrected_value_date", "corrected_site_id", "reviewer", "reviewed_date",
-    "researcher_notes",
-]
-
-SUPPLEMENTARY_LEADS_HEADERS = [
-    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "searched_site_id", "attribute_name",
-    "lead_value", "source_tier", "lead_summary", "url", "exclusion_reason",
 ]
 
 FOUNDRY_RUN_LOG_HEADERS = [
@@ -685,23 +634,6 @@ DEFINITION_VALUES = {
     ],
     # Booleans as resolved_value shows them, so a correction reads like the value it replaces.
     "true_false": ["TRUE", "FALSE"],
-}
-
-# What corrected_value offers, per attribute under review: (Definitions column, strict). A strict
-# list accepts nothing else; a multi-value field suggests single values but still takes a typed
-# combination ("clay cover; sand cover"). Numbers, years and names stay free text.
-CORRECTED_VALUE_CHOICES = {
-    "facility_status": ("facility_status", True),
-    "facility_type": ("facility_type", True),
-    "bulk_waste_type": ("bulk_waste_type", True),
-    "waste_depth": ("waste_depth", True),
-    "has_landfill_gas_collection": ("true_false", True),
-    "has_cover": ("true_false", True),
-    "has_biocover": ("true_false", True),
-    "has_flare": ("true_false", True),
-    "cover_types": ("cover_type", False),
-    "gccs_energy_project_type": ("gccs_energy_project_type", False),
-    "gccs_current_project_status": ("gccs_current_project_status", False),
 }
 
 # Columns a reviewer may edit, and the vocabulary each offers. Anything absent here is
@@ -825,6 +757,6 @@ def validate_foundry_payload(payload: dict[str, Any], iso3: str = "") -> list[st
             # Same canonicalisation as extract_evidence, so a pre-rename cached response is not
             # reported as unsupported by one and accepted by the other.
             name = canonical_attribute(normalize_scalar(value.get("attribute_name")))
-            if name and name not in VALUE_ATTRIBUTES:
+            if name and name not in VALUE_ATTRIBUTES and name not in IDENTITY_VALUES:
                 warnings.append(f"sources[{index}].values[{value_index}] has unsupported attribute_name {name!r}.")
     return list(dict.fromkeys(warnings))

@@ -72,9 +72,10 @@ def test_bulk_waste_type_maps_the_prompts_own_examples(claimed, expected):
 
 def test_refresh_seed_prints_a_search_narrowed_to_the_unlocked_sites(tmp_path, capsys):
     from waste_ai_search.cli import run_refresh_seed
+    from waste_ai_search.found_values import AUTO_APPROVED, FOUND_VALUES_FILE
     from waste_ai_search.input_loader import run_seed_path, write_csv_records
     from waste_ai_search.run_context import PipelineConfig
-    from waste_ai_search.schema import RESOLVED_HEADERS
+    from waste_ai_search.schema import FOUND_VALUES_HEADERS
 
     config = PipelineConfig(input_csv=None, run_dir=tmp_path / "run", run_id="r")
     write_csv_records(
@@ -84,17 +85,16 @@ def test_refresh_seed_prints_a_search_narrowed_to_the_unlocked_sites(tmp_path, c
         ["site_id", "site_name", "country_iso3", "has_landfill_gas_collection"],
     )
     write_csv_records(
-        config.run_dir / "resolved.csv",
-        [{"site_id": "2", "attribute_name": "has_landfill_gas_collection", "resolved_value": "TRUE",
-          "resolution": "Filled empty baseline", "winning_source_tier": "Tier 1"}],
-        RESOLVED_HEADERS,
+        config.run_dir / FOUND_VALUES_FILE,
+        [{"site_id": "2", "year": "2024", "attribute_name": "has_landfill_gas_collection", "value": "TRUE",
+          "source_tier": "Tier 1", "status": AUTO_APPROVED}],
+        FOUND_VALUES_HEADERS,
     )
-    # Only a site in the run's selection is followed up, and the selection is the countries the run
-    # searched (build step 5), so the run needs a cached response.
+    # Every value is filed under the site searched, and only a site the run searched is followed up.
     (config.run_dir / "raw_foundry_responses").mkdir()
-    (config.run_dir / "raw_foundry_responses" / "site_1.json").write_text('{"sources": []}')
+    (config.run_dir / "raw_foundry_responses" / "site_2.json").write_text('{"sources": []}')
 
-    assert run_refresh_seed(config, config.run_dir / "refreshed_seed.csv", merge_identity=False) == 0
+    assert run_refresh_seed(config, config.run_dir / "refreshed_seed.csv") == 0
     out = capsys.readouterr().out
     assert "--site-ids 2" in out
     assert "Do not search the refreshed seed without --site-ids" in out

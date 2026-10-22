@@ -154,8 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     arbitrate.add_argument(
         "--keep-broken-link-evidence",
         action="store_true",
-        help="Let a source whose link is dead (404/410/redirect loop) stay promotable instead of "
-        "routing it to leads.",
+        help="Let a source whose link is dead (404/410/redirect loop) stay usable instead of listing "
+        "its values as not used.",
     )
 
     links = subparsers.add_parser(
@@ -204,7 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument(
         "--keep-broken-link-evidence",
         action="store_true",
-        help="Let a source with a dead link stay promotable instead of routing it to leads.",
+        help="Let a source with a dead link stay usable instead of listing its values as not used.",
     )
 
     collect = subparsers.add_parser(
@@ -222,65 +222,47 @@ def build_parser() -> argparse.ArgumentParser:
 
     refresh = subparsers.add_parser(
         "refresh-seed",
-        help="Merge a run's promoted values into the seed so a second pass sees them.",
+        help="Merge a run's found values, auto-approved or for SME review, into the seed so a second "
+        "pass sees them.",
     )
     add_common(refresh)
     refresh.add_argument("--output-csv", default="", help="Refreshed seed path.")
-    refresh.add_argument(
-        "--merge-identity",
-        action="store_true",
-        help="Also overwrite seed site_name/latitude/longitude with promoted identity findings.",
-    )
 
     return parser
 
 
 def read_arbitrated_rows(run_dir: Path) -> list[dict[str, str]]:
-    """Every arbitrated value worth carrying into the next pass: resolved.csv plus the review queue.
-
-    Nothing is accepted automatically, so a run's resolved.csv is header-only and every value it
-    found is in the queue, awaiting review. A refresh merges those too, so a gas collection system
-    found in pass 1 still unlocks the pass-2 follow-up. resolved.csv is still read for runs
-    arbitrated before (batch 1), which wrote the values they accepted there.
-
-    Rows are keyed by the site a value is filed under, which may not be the site searched. A yearly
-    attribute has a row per year, newest first, so the newest is the one kept.
-    """
+    """A run's found_values.csv, which a refresh merges into the seed: its values auto-approved or
+    for SME review, so a gas collection system found in pass 1 still unlocks the pass-2 follow-up
+    before anyone has reviewed it (seed_refresh.mergeable_rows). Empty where the run has none."""
     import csv
 
-    rows: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for name in ("resolved.csv", "review_queue.csv"):
-        path = run_dir / name
-        if path.exists():
-            with path.open(newline="", encoding="utf-8-sig") as handle:
-                for csv_row in csv.DictReader(handle):
-                    row = dict(csv_row)
-                    key = (row.get("site_id", ""), row.get("attribute_name", ""))
-                    if key not in seen:
-                        seen.add(key)
-                        rows.append(row)
-    return rows
+    from .found_values import FOUND_VALUES_FILE
+
+    path = run_dir / FOUND_VALUES_FILE
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
 
 
-def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: bool) -> int:
+def run_refresh_seed(config: PipelineConfig, output_csv: Path) -> int:
 
+    from .found_values import FOUND_VALUES_FILE
     from .input_loader import resolve_sites
-    from .match import run_selection
     from .prompt_builder import has_gas_collection, requested_attributes
     from .schema import normalize_scalar
     from .seed_refresh import refresh_sites, write_refreshed_seed
 
-    resolved_path = config.run_dir / "resolved.csv"
-    if not resolved_path.exists():
-        print(f"No resolved.csv in {config.run_dir}. Run arbitrate first.")
+    if not (config.run_dir / FOUND_VALUES_FILE).exists():
+        print(f"No {FOUND_VALUES_FILE} in {config.run_dir}. Run arbitrate first.")
         return 1
 
     sites, headers = resolve_sites(config, allow_database=False)
-    resolved_rows = read_arbitrated_rows(config.run_dir)
+    found = read_arbitrated_rows(config.run_dir)
 
     before = sum(len(requested_attributes(site)) for site in sites)
-    refreshed, stats = refresh_sites(sites, resolved_rows, config.run_id, merge_identity=merge_identity)
+    refreshed, stats = refresh_sites(sites, found, config.run_id)
     after = sum(len(requested_attributes(site)) for site in refreshed)
 
     write_refreshed_seed(output_csv, refreshed, headers)
@@ -294,13 +276,13 @@ def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: b
     # The refreshed seed holds the whole seeded corpus, not just the sites this run searched, so
     # a search on it without --site-ids would search everything again.
     had_gas = {normalize_scalar(site.get("site_id")) for site in sites if has_gas_collection(site)}
-    selection = run_selection(sites, searched_site_ids(config.run_dir))
+    searched = searched_site_ids(config.run_dir)
     unlocked = [
         site_id
         for site in refreshed
         if has_gas_collection(site)
         and (site_id := normalize_scalar(site.get("site_id"))) not in had_gas
-        and site_id in selection
+        and site_id in searched
     ]
     if unlocked:
         print("\nGas collection was discovered at these sites; to search them again by hand:")
@@ -415,7 +397,6 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
 
     from .arbitrate import run_arbitration
     from .input_loader import resolve_sites
-    from .match import run_selection
     from .prompt_builder import has_gas_collection
     from .schema import GCCS_ATTRIBUTES, normalize_scalar
     from .search import run_search
@@ -432,24 +413,22 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
     if not followup:
         return 0
 
-    resolved_rows = read_arbitrated_rows(config.run_dir)
+    found = read_arbitrated_rows(config.run_dir)
 
     sites, headers = resolve_sites(config, allow_database=False)
     before = {
         normalize_scalar(site.get("site_id")): has_gas_collection(site) for site in sites
     }
-    refreshed, _stats = refresh_sites(sites, resolved_rows, config.run_id)
+    refreshed, _stats = refresh_sites(sites, found, config.run_id)
 
-    # A value is keyed by the site it is filed under, which may not be the site searched. Only a
-    # site in the run's selection is followed up: a value is never filed outside it, and an older
-    # run's resolved.csv must not send the follow-up into a country the run left out.
-    selection = run_selection(sites, searched_site_ids(config.run_dir))
+    # Every value is filed under the site searched, so only a site this run searched is followed up.
+    searched = searched_site_ids(config.run_dir)
     unlocked = [
         normalize_scalar(site.get("site_id"))
         for site in refreshed
         if has_gas_collection(site)
         and not before.get(normalize_scalar(site.get("site_id")))
-        and normalize_scalar(site.get("site_id")) in selection
+        and normalize_scalar(site.get("site_id")) in searched
     ]
     if not unlocked:
         print("\n== no newly discovered gas collection; no follow-up needed ==")
@@ -544,7 +523,11 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
             if args.workbook
             else reviewed_workbook(config.run_dir, config.run_id, review_dir())
         )
-        collect_new_facilities(config.run_dir, workbook)
+        try:
+            collect_new_facilities(config.run_dir, workbook)
+        except FileNotFoundError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         sync.up()
         return 0
 
@@ -554,7 +537,7 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
             if args.output_csv
             else refreshed_seed_path(config)
         )
-        return run_refresh_seed(config, output, args.merge_identity)
+        return run_refresh_seed(config, output)
 
     if args.command == "arbitrate":
         sync = RunSync(config, local=args.local)

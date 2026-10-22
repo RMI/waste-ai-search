@@ -1,10 +1,12 @@
 """Add the values SMEs marked as a new facility to a run's new_facility_candidates.csv.
 
-Arbitration lists the located sources that match none of our sites (match.py). An SME reviewing
-the workbook can find another: a value filed under one of our sites whose source is about a
-landfill we don't hold, rejected as "New facility - not in our database". The
-collect-new-facilities command reads the reviewed workbook and appends those to the same list,
+An SME reviewing a workbook's Review_Queue could find a value filed under one of our sites whose
+source is about a landfill we don't hold, and reject it as "New facility - not in our database".
+The collect-new-facilities command reads the reviewed workbook and appends those to the run's list,
 once each, and a later arbitration keeps them. Read-only on the workbook.
+
+A workbook arbitrated since found_values.csv replaced the review queue (step 2 of the
+approve-sources plan) has no Review_Queue tab, and so nothing for this to collect.
 """
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .input_loader import SEED_NAME, load_sites, write_csv_records
-from .match import FOUND_BY_SME, NEW_FACILITY_FILE, NEW_FACILITY_HEADERS, Site, SiteIndex, candidate_id
+from .lists import FOUND_BY_SME, NEW_FACILITY_FILE, NEW_FACILITY_HEADERS, Site, SiteIndex, candidate_id
 from .name_yield import read_review_workbook
 from .schema import LOCATION_ATTRIBUTE, NEW_FACILITY_REASON, normalize_scalar
 
@@ -115,6 +117,11 @@ def collect_new_facilities(run_dir: Path, workbook: Path) -> int:
     """Append the workbook's new-facility rejections to the run's list. Returns how many were new."""
     rows = read_review_workbook(workbook)
     if rows is None:
+        if Path(workbook).is_file():
+            raise FileNotFoundError(
+                f"{workbook} has no Review_Queue tab: it was arbitrated after found_values.csv replaced "
+                "the review queue, so it holds no rejections to collect."
+            )
         raise FileNotFoundError(f"No reviewed workbook with a Review_Queue tab at {workbook}.")
     path = run_dir / NEW_FACILITY_FILE
     existing: list[dict[str, str]] = []

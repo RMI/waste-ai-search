@@ -1,6 +1,6 @@
 """WP-531 item 2: search for the facility operator, in the review layer only.
 
-The upstream standardized spec has no operator column yet, so operator reaches the review queue but
+The upstream standardized spec has no operator column yet, so operator reaches found_values.csv but
 has no standardized column to go to. Adding one is a separate follow-up once upstream adds the
 column; these tests pin today's boundary so that change is deliberate.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 
 from waste_ai_search.arbitrate import extract_evidence
-from waste_ai_search.arbitration import resolve
+from waste_ai_search.found_values import AUTO_APPROVED, SME_REVIEW, sort_values
 from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
 from waste_ai_search.schema import (
     ATTRIBUTE_TO_STANDARD_COLUMN,
@@ -41,7 +41,8 @@ def site(**overrides):
     return base
 
 
-def resolve_operator(value, sources):
+def sort_operator(value, sources):
+    """The site, and the operator's row in found_values.csv."""
     s = site()
     payload = {"site_id": "1", "attributes": [{
         "attribute_name": "operator",
@@ -52,8 +53,12 @@ def resolve_operator(value, sources):
         "evidence_summary": "Contract awarded.",
         "sources": sources,
     }]}
-    by_attr, _evidence, _sources, _warn = extract_evidence(s, payload, "run", "v", date(2026, 1, 1))
-    return s, resolve(s, "operator", by_attr.get("operator", []))
+    _by_attr, evidence, sources, _warn = extract_evidence(s, payload, "run", "v", date(2026, 1, 1))
+    cited = {}
+    for entry in sources:
+        cited.setdefault((entry["site_id"], entry["source_index"]), entry)
+    [row] = sort_values(evidence, list(cited.values()), {"1": s}, 2026).rows
+    return s, row
 
 
 def test_operator_is_requestable_and_gap_filled():
@@ -80,19 +85,16 @@ def test_the_prompt_asks_for_the_operator_not_the_owner_or_regulator():
     assert "not the owner, landlord or regulator" in prompt
 
 
-def test_a_found_operator_is_resolved_as_text_with_its_source_and_tier():
-    _s, row = resolve_operator("Lagos Waste Management Authority", [NEWS])
-    assert row["resolved_value"] == "Lagos Waste Management Authority"
-    assert row["resolution"] == "Filled empty baseline"
-    assert row["winning_source_tier"] == "Tier 3"
-    assert row["winning_source_url"] == NEWS["url"]
+def test_a_found_operator_is_listed_as_text_with_its_source_and_tier():
+    _s, row = sort_operator("Lagos Waste Management Authority", [NEWS])
+    assert row["value"] == "Lagos Waste Management Authority"
+    assert row["source_tier"] == "Tier 3"
+    assert row["source_url"] == NEWS["url"]
 
 
-def test_a_tier_3_operator_reaches_the_review_queue():
-    from waste_ai_search.arbitration import needs_review
-
-    _s, row = resolve_operator("Lagos Waste Management Authority", [NEWS])
-    assert needs_review(row)
+def test_a_tier_3_operator_goes_to_an_sme():
+    _s, row = sort_operator("Lagos Waste Management Authority", [NEWS])
+    assert row["status"] == SME_REVIEW
 
 
 def test_operator_has_no_standardized_column():
@@ -105,19 +107,16 @@ def test_a_found_operator_is_carried_into_the_next_pass_seed():
     """A gap-fill attribute: once found, a later pass does not ask again."""
     from waste_ai_search.seed_refresh import refresh_sites
 
-    s, row = resolve_operator("Lagos Waste Management Authority", [NEWS])
+    s, row = sort_operator("Lagos Waste Management Authority", [NEWS])
     [refreshed], _stats = refresh_sites([s], [row], "run")
 
     assert refreshed["operator"] == "Lagos Waste Management Authority"
     assert "operator" not in requested_attributes(refreshed)
 
 
-def test_a_tier_1_operator_reaches_the_review_queue_too():
-    """Reversed on purpose: a Tier 1-2 fill once auto-validated. Like any attribute, every found
-    operator now reaches the review queue, whatever its tier."""
-    from waste_ai_search.arbitration import needs_review
-
+def test_a_tier_1_operator_is_auto_approved_like_any_attribute():
+    """Reversed twice on purpose: a Tier 1-2 fill once auto-validated, then every found value was
+    reviewed, and now batch 1's rule is back (step 2 of the approve-sources plan)."""
     regulator = dict(NEWS, source_type="Regulator", url="https://agency.example.gov/permit")
-    _s, row = resolve_operator("Lagos Waste Management Authority", [regulator])
-    assert row["validation_status"] == "Needs review"
-    assert needs_review(row)
+    _s, row = sort_operator("Lagos Waste Management Authority", [regulator])
+    assert row["status"] == AUTO_APPROVED

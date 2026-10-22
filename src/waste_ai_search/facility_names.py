@@ -1,8 +1,10 @@
 # Started as a copy of RMI/waste_data_ingestion_pipeline#225's name scoring
 # (facility_etl/entity_linkage/facility_names.py, as of b79aa81 on entity-linkage-precise-v1), and is
-# this repository's own since. Matching sources to sites doesn't depend on entity linkage: AI search
-# rows join the facility named by the wastemap_id they carry (#264), so the two needn't agree.
-# Where this copy has moved on, the generic words this corpus needs, it is marked below.
+# this repository's own since. It no longer matches sources to sites (step 2 of the approve-sources
+# plan removed the matcher); datasets_found.csv tells a page's facility names apart by their
+# distinctive words. AI search rows join the facility named by the wastemap_id they carry (#264), so
+# this needn't agree with entity linkage. Where this copy has moved on, the generic words this corpus
+# needs, it is marked below.
 """
 Comparing facility names: whether two source records' names describe the same place.
 

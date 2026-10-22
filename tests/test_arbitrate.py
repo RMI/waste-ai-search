@@ -287,39 +287,16 @@ def located_by(coordinates, source=GAZETTEER):
     return {"site_id": "1", "sources": [{**source, "stated_address": "", "stated_coordinates": coordinates, "values": []}]}
 
 
-def test_a_gazetteer_location_is_tier_3_and_a_reviewable_conflict():
-    """Reversed on purpose for build step 4: the location is read from what the source states, as one
-    found_location, not as two coordinates the agent returned. A map directory keeps its Tier 3."""
-    s = site(latitude="6.5", longitude="3.3")
-    by_attr, rows, _sources, _warn = extract(s, located_by("6.512345, 3.312345"))
-
-    (item,) = by_attr["found_location"]
-    assert (item["value"], item["tier"]) == ("6.512345, 3.312345", 3)
-    assert rows[0]["location_basis"] == "coordinates"
-    location = resolve(s, "found_location", by_attr["found_location"])
-    assert location["baseline_value"] == "6.5, 3.3"
-    assert location["resolution"] == "Conflict - needs review"
-    assert location["resolved_value"] == "6.512345, 3.312345"
-
-
-def test_a_location_equal_to_ours_at_comparison_precision_confirms_it():
-    # Six significant digits: a longitude past 100 degrees compares to about 100 m.
-    s = site(latitude="14.84481", longitude="120.331538")
-    by_attr, _rows, _sources, _warn = extract(s, located_by("14.844812, 120.331912"))
-    location = resolve(s, "found_location", by_attr["found_location"])
-    assert (location["resolution"], location["validation_status"]) == ("Confirmed baseline", NOTHING_TO_REVIEW)
-
-
-def test_a_location_equal_to_ours_is_a_location_and_confirms_it():
+def test_a_location_equal_to_ours_is_a_location_and_one_equal_to_the_prompts_is_copied():
     """Reversed on purpose for build step 5: a point within 10 m of ours no longer counts as copied,
-    since the prompt carries only our rounded point. One equal to the prompt's still does."""
+    since the prompt carries only our rounded point. One equal to the prompt's still does. A source
+    giving no value is still a source, which says where it places the facility."""
     s = site(latitude="6.5123456", longitude="3.3123456")
-    by_attr, rows, _sources, _warn = extract(s, located_by("6.5123456, 3.3123456"))
-    assert rows[0]["location_basis"] == "coordinates"
-    location = resolve(s, "found_location", by_attr["found_location"])
-    assert location["resolution"] == "Confirmed baseline"
-    _by, rows, _sources, _warn = extract(s, located_by("6.510, 3.310"))
-    assert (rows[0]["location_basis"], rows[0]["exclusion_reason"]) == ("none", "No location: copied from the prompt.")
+    by_attr, rows, (source,), _warn = extract(s, located_by("6.5123456, 3.3123456"))
+    assert (by_attr, rows) == ({}, [])
+    assert (source["location_basis"], source["located_latitude"]) == ("coordinates", "6.512346")
+    _by, _rows, (source,), _warn = extract(s, located_by("6.510, 3.310"))
+    assert (source["location_basis"], source["location_reason"]) == ("none", "copied from the prompt")
 
 
 def test_gazetteer_metadata_cannot_beat_an_existing_value():
@@ -333,15 +310,6 @@ def test_gazetteer_metadata_cannot_beat_an_existing_value():
     resolved = resolve(s, "annual_incoming_waste_metric_tonnes", by_attr["annual_incoming_waste_metric_tonnes"])
     assert resolved["resolution"] == "Conflict - lower credibility"
     assert resolved["validation_status"] == "Routed to leads"
-
-
-def test_a_location_200_m_from_ours_goes_to_review():
-    """Reversed on purpose. Four of five pilot coordinate conflicts were under 200 m apart, and the
-    1 km rule (feedback 5) settled them as the same place. Every value that differs from ours is
-    now reviewed; one equal to ours to comparison precision is still a confirmation."""
-    s = site(latitude="14.844807966", longitude="120.33153842")
-    by_attr, _rows, _sources, _warn = extract(s, located_by("14.84566, 120.32995"))
-    assert needs_review(resolve(s, "found_location", by_attr["found_location"]))
 
 
 def test_lead_routed_rows_are_not_in_the_review_queue():
@@ -381,26 +349,6 @@ def test_unconvertible_depth_unit_is_not_promoted():
     assert rows[0]["promotion_eligible"] == "FALSE"
 
 
-def test_a_finding_is_never_both_promoted_and_listed_as_a_lead():
-    """Feedback 1 lets low-tier evidence win; feedback 3 says don't also list it as a lead.
-
-    Mirrors the promoted-attribute filter in `arbitrate.run_arbitration`.
-    """
-    wiki = dict(REGULATOR, source_type="Wiki or aggregator")
-    by_attr, site_evidence, _sources, _warn = extract(
-        site(), payload(attribute("facility_status", "active", sources=[wiki]))
-    )
-    site_resolved = [resolve(site(), "facility_status", by_attr["facility_status"])]
-
-    # The evidence was tier-ineligible but still filled the empty baseline.
-    assert site_evidence[0]["promotion_eligible"] == "FALSE"
-    assert site_resolved[0]["resolved_value"] == "Active"
-
-    promoted = {r["attribute_name"] for r in site_resolved if r["resolved_value"]}
-    leads = [r for r in site_evidence if r["exclusion_reason"] and r["attribute_name"] not in promoted]
-    assert leads == []
-
-
 def test_no_row_is_signed_off_by_the_agent():
     """Reversed on purpose: rows the pipeline once accepted itself carried reviewer = AI Agent.
     Nothing is accepted automatically now, so the reviewer columns are left for the SME."""
@@ -420,19 +368,6 @@ def test_no_row_is_signed_off_by_the_agent():
     assert rows[0]["researcher_notes"] == ""
     assert rows[2]["resolution"] == "Not found"
     assert not needs_review(rows[2])
-
-
-def test_dropped_columns_are_gone_from_resolved_output():
-    from waste_ai_search.schema import RESOLVED_HEADERS
-
-    for gone in (
-        "baseline_carried_from_earlier_year",
-        "baseline_staleness_note",
-        "agreeing_source_count",
-        "dissenting_source_count",
-        "credibility_margin",
-    ):
-        assert gone not in RESOLVED_HEADERS
 
 
 def test_per_attribute_provenance_beats_the_facility_composite():
@@ -477,13 +412,6 @@ def test_a_previous_ai_pass_outranks_the_ledger():
     assert row["baseline_source"] == "ai_search_2026"
     assert row["baseline_tier"] == "Tier 3"
     assert row["resolution"] == "Overrides baseline"
-
-
-def test_baseline_source_is_published_in_resolved_and_the_review_queue():
-    from waste_ai_search.schema import RESOLVED_HEADERS, REVIEW_QUEUE_HEADERS
-
-    assert "baseline_source" in RESOLVED_HEADERS
-    assert "baseline_source" in REVIEW_QUEUE_HEADERS
 
 
 def test_an_empty_baseline_reports_no_source_and_no_tier():
@@ -555,14 +483,14 @@ def test_biocover_contradicting_cover_types_is_flagged():
     from waste_ai_search.arbitrate import cover_consistency_warnings
 
     contradiction = [
-        {"attribute_name": "has_biocover", "resolved_value": "TRUE"},
-        {"attribute_name": "cover_types", "resolved_value": "clay cover; sand cover"},
+        {"attribute_name": "has_biocover", "value": "TRUE"},
+        {"attribute_name": "cover_types", "value": "clay cover; sand cover"},
     ]
     assert cover_consistency_warnings(contradiction)
 
     other_way = [
-        {"attribute_name": "has_biocover", "resolved_value": "FALSE"},
-        {"attribute_name": "cover_types", "resolved_value": "organic cover"},
+        {"attribute_name": "has_biocover", "value": "FALSE"},
+        {"attribute_name": "cover_types", "value": "organic cover"},
     ]
     assert cover_consistency_warnings(other_way)
 
@@ -571,12 +499,12 @@ def test_consistent_or_partial_cover_answers_are_not_flagged():
     from waste_ai_search.arbitrate import cover_consistency_warnings
 
     for rows in (
-        [{"attribute_name": "has_biocover", "resolved_value": "TRUE"},
-         {"attribute_name": "cover_types", "resolved_value": "clay cover; organic cover"}],
-        [{"attribute_name": "has_biocover", "resolved_value": "FALSE"},
-         {"attribute_name": "cover_types", "resolved_value": "clay cover"}],
-        [{"attribute_name": "has_biocover", "resolved_value": "TRUE"}],
-        [{"attribute_name": "cover_types", "resolved_value": "organic cover"}],
+        [{"attribute_name": "has_biocover", "value": "TRUE"},
+         {"attribute_name": "cover_types", "value": "clay cover; organic cover"}],
+        [{"attribute_name": "has_biocover", "value": "FALSE"},
+         {"attribute_name": "cover_types", "value": "clay cover"}],
+        [{"attribute_name": "has_biocover", "value": "TRUE"}],
+        [{"attribute_name": "cover_types", "value": "organic cover"}],
     ):
         assert cover_consistency_warnings(rows) == []
 

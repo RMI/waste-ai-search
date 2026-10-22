@@ -1,19 +1,24 @@
-"""The workbook is the only file an SME opens, so its affordances must match the instructions."""
+"""The workbook is the only file an SME opens, so its affordances must match the instructions.
+
+Since step 2 of the approve-sources plan it shows found_values.csv, read-only, in place of the
+Review_Queue and Leads tabs; the tests of the queue's dropdowns (validation_status,
+rejection_reason, corrected_value, corrected_site_id) and of its match column went with it. The
+Site_Review tab, where SMEs decide each site-source pair, is step 3.
+"""
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from waste_ai_search.schema import DEFINITION_VALUES, REVIEW_QUEUE_HEADERS
-from waste_ai_search.workbook_io import write_review_workbook
+from waste_ai_search.schema import FOUND_VALUES_HEADERS
+from waste_ai_search.workbook_io import STATUS_FILLS, write_review_workbook
 
 
-def build(tmp_path, queue_rows=None):
+def build(tmp_path, found_rows=None):
     path = write_review_workbook(
         tmp_path / "r_review.xlsx",
         run_config=[{"setting": "run_id", "value": "r"}],
-        review_queue=queue_rows
-        if queue_rows is not None
-        else [{h: "" for h in REVIEW_QUEUE_HEADERS} | {"site_id": "1", "resolution": "Filled empty baseline"}],
-        leads=[],
+        found_values=found_rows
+        if found_rows is not None
+        else [{h: "" for h in FOUND_VALUES_HEADERS} | {"site_id": "1", "status": "SME review"}],
         parse_warnings=[],
     )
     return load_workbook(path)
@@ -21,37 +26,15 @@ def build(tmp_path, queue_rows=None):
 
 def test_expected_tabs_exist(tmp_path):
     wb = build(tmp_path)
-    assert wb.sheetnames == [
-        "ReadMe", "Run_Config", "Review_Queue", "Leads", "Parse_Warnings", "Definitions",
-    ]
+    assert wb.sheetnames == ["ReadMe", "Run_Config", "Found_Values", "Parse_Warnings", "Definitions"]
 
 
-def test_only_the_review_decision_columns_have_dropdowns(tmp_path):
+def test_found_values_is_read_only(tmp_path):
     """A dropdown on a pipeline-set column reads as permission to change it."""
-    ws = build(tmp_path)["Review_Queue"]
-    headers = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
-
-    validated_columns = set()
-    for dv in ws.data_validations.dataValidation:
-        for rng in str(dv.sqref).split():
-            validated_columns.add("".join(ch for ch in rng.split(":")[0] if ch.isalpha()))
-
-    assert validated_columns == {headers["validation_status"], headers["rejection_reason"]}  # no facility_type row here
-    assert headers["resolution"] not in validated_columns
-    assert headers["winning_source_tier"] not in validated_columns
-
-
-def test_the_dropdown_offers_only_reviewer_choosable_outcomes(tmp_path):
-    wb = build(tmp_path)
-    ws = wb["Review_Queue"]
-    defs = wb["Definitions"]
-    columns = {defs.cell(1, c).value: c for c in range(1, defs.max_column + 1)}
-
-    queue = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
-    dv = next(d for d in ws.data_validations.dataValidation if str(d.sqref).startswith(queue["validation_status"]))
-    letter = get_column_letter(columns["review_decision"])
-    assert f"${letter}$" in dv.formula1
-    assert DEFINITION_VALUES["review_decision"] == ["Validated", "Rejected"]
+    ws = build(tmp_path)["Found_Values"]
+    assert list(ws.data_validations.dataValidation) == []
+    readme = {row[0]: row for row in list(build(tmp_path)["ReadMe"].values)[1:]}
+    assert readme["Found_Values"][3] == "nothing"
 
 
 def test_definitions_tab_publishes_the_tier_scale(tmp_path):
@@ -64,33 +47,33 @@ def test_definitions_tab_publishes_the_tier_scale(tmp_path):
 def test_readme_tab_documents_every_tab_and_the_csv_sidecars(tmp_path):
     wb = build(tmp_path)
     described = {row[0] for row in list(wb["ReadMe"].values)[1:]}
-    for tab in ("Review_Queue", "Leads", "Parse_Warnings", "Definitions"):
+    for tab in ("Found_Values", "Parse_Warnings", "Definitions"):
         assert tab in described
     assert any(str(name).startswith("(file)") for name in described)
 
 
-def test_a_rejection_reason_is_picked_from_a_fixed_list(tmp_path):
-    """Rejections are counted by cause to find where the AI errs, so the reason is a dropdown.
+def test_the_readme_says_what_each_status_means(tmp_path):
+    purpose = {row[0]: row[1] for row in list(build(tmp_path)["ReadMe"].values)[1:]}["Found_Values"]
+    for words in ("auto-approved", "SME review", "not used", "more than 5 km", "Not a Waste Facility", "review_id"):
+        assert words in purpose
 
-    Changed on purpose for build step 5: a wrong facility is either another site of ours or one we
-    don't hold, with plain hyphens, since ingestion matches the text as typed. Plain "Wrong
-    facility" stays for batch 1's workbook."""
-    wb = build(tmp_path)
-    ws = wb["Review_Queue"]
-    defs = wb["Definitions"]
-    columns = {defs.cell(1, c).value: c for c in range(1, defs.max_column + 1)}
-    queue = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
 
-    dv = next(d for d in ws.data_validations.dataValidation if str(d.sqref).startswith(queue["rejection_reason"]))
-    letter = get_column_letter(columns["rejection_reason"])
-    assert f"${letter}$2:${letter}$8" in dv.formula1
-    offered = [defs.cell(r, columns["rejection_reason"]).value for r in range(2, 9)]
-    assert offered == [
-        "Wrong facility - another site in our database", "New facility - not in our database", "Wrong facility",
-        "Not in source", "Wrong value", "Outdated", "Other",
-    ]
-    assert all(value.isascii() for value in offered)
-    assert REVIEW_QUEUE_HEADERS.index("rejection_reason") == REVIEW_QUEUE_HEADERS.index("validation_status") + 1
+def test_the_readme_describes_the_lists_for_ingestion(tmp_path):
+    described = {row[0]: row[1] for row in list(build(tmp_path)["ReadMe"].values)[1:]}
+    for name in ("new_facility_candidates.csv", "possible_duplicates.csv", "datasets_found.csv"):
+        assert f"(file) {name}" in described
+    assert "(file) outside_run_matches.csv" not in described
+    assert "same page under the same facility name" in described["(file) possible_duplicates.csv"]
+
+
+def test_each_row_is_shaded_by_its_status_and_a_check_the_page_fails(tmp_path):
+    ws = build(tmp_path)["Found_Values"]
+    letters = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
+    formulas = [rule.formula[0] for rules in ws.conditional_formatting for rule in rules.rules]
+    for status in STATUS_FILLS:
+        assert f'${letters["status"]}2="{status}"' in formulas
+    quote = letters["quote_on_page"]
+    assert f'OR(${quote}2="not found",${quote}2="partly found")' in formulas
 
 
 def test_baseline_coordinates_paste_straight_into_google_maps():
@@ -99,83 +82,3 @@ def test_baseline_coordinates_paste_straight_into_google_maps():
 
     assert baseline_coordinates({"latitude": "45.51234", "longitude": "-73.55432"}) == "45.512340, -73.554320"
     assert baseline_coordinates({"latitude": "", "longitude": "-73.5"}) == ""
-    assert REVIEW_QUEUE_HEADERS.index("baseline_coordinates") == REVIEW_QUEUE_HEADERS.index("country_iso3") + 1
-
-
-def test_corrected_value_offers_the_values_of_the_attribute_on_its_row(tmp_path):
-    """Site 2529: an SME picks "Transfer Station" without overwriting the AI's own answer."""
-    blank = {h: "" for h in REVIEW_QUEUE_HEADERS}
-    rows = [
-        ("facility_type", "Not a Waste Facility"),   # row 2
-        ("opening_year", "1990"),                    # row 3: free text
-        ("has_flare", "TRUE"),                       # row 4
-        ("cover_types", "clay cover"),               # row 5
-        ("facility_type", "Dumpsite"),               # row 6
-    ]
-    wb = build(tmp_path, [blank | {"site_id": "1", "attribute_name": a, "resolved_value": v} for a, v in rows])
-    ws = wb["Review_Queue"]
-    defs = wb["Definitions"]
-    target = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}["corrected_value"]
-    def_col = {defs.cell(1, c).value: get_column_letter(c) for c in range(1, defs.max_column + 1)}
-    by_list = {d.formula1: d for d in ws.data_validations.dataValidation if target in str(d.sqref)}
-
-    ft = by_list[next(f for f in by_list if f"${def_col['facility_type']}$" in f)]
-    assert str(ft.sqref) == f"{target}2 {target}6" and ft.showErrorMessage
-    flare = by_list[next(f for f in by_list if f"${def_col['true_false']}$" in f)]
-    assert str(flare.sqref) == f"{target}4" and flare.showErrorMessage
-    cover = by_list[next(f for f in by_list if f"${def_col['cover_type']}$" in f)]
-    assert str(cover.sqref) == f"{target}5" and not cover.showErrorMessage  # combinations may be typed
-    assert not any(f"{target}3" in str(d.sqref).split() for d in by_list.values())  # opening_year: free text
-    assert "Transfer Station" in DEFINITION_VALUES["facility_type"]
-    assert REVIEW_QUEUE_HEADERS.index("corrected_value") == REVIEW_QUEUE_HEADERS.index("rejection_reason") + 1
-
-
-# --- where each value is filed (build step 5 of the source-matching plan) -------------------------
-def test_the_queue_says_which_search_found_a_value_and_why_it_is_filed_here():
-    for column in ("searched_site_id", "match", "facility_name_in_source", "stated_location", "location_basis"):
-        assert column in REVIEW_QUEUE_HEADERS
-    assert REVIEW_QUEUE_HEADERS.index("match") == REVIEW_QUEUE_HEADERS.index("searched_site_id") + 1
-    assert REVIEW_QUEUE_HEADERS.index("corrected_site_id") == REVIEW_QUEUE_HEADERS.index("corrected_value_date") + 1
-
-
-def test_corrected_site_id_offers_each_rows_candidate_sites(tmp_path):
-    """Where a source fitted several of our sites, the SME picks the one it is about. A typed site
-    id is still accepted, so the list suggests rather than restricts."""
-    blank = {h: "" for h in REVIEW_QUEUE_HEADERS}
-    wb = build(tmp_path, [
-        blank | {"site_id": "2", "attribute_name": "operator", "_site_choices": ["2", "1", "3"]},  # row 2
-        blank | {"site_id": "1", "attribute_name": "operator", "_site_choices": []},                # row 3
-        blank | {"site_id": "2", "attribute_name": "opening_year", "_site_choices": ["2", "1", "3"]},  # row 4
-    ])
-    ws = wb["Review_Queue"]
-    target = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}["corrected_site_id"]
-    [dv] = [d for d in ws.data_validations.dataValidation if target in str(d.sqref)]
-    assert (dv.formula1, str(dv.sqref), dv.showErrorMessage) == ('"2,1,3"', f"{target}2 {target}4", False)
-    # The ReadMe lists the column among the few an SME edits.
-    readme = {row[0]: row for row in list(wb["ReadMe"].values)[1:]}
-    assert "corrected_site_id" in readme["Review_Queue"][3]
-
-
-def test_the_match_column_is_coloured_where_a_value_needs_a_second_look_at_its_site(tmp_path):
-    ws = build(tmp_path)["Review_Queue"]
-    letters = {ws.cell(1, c).value: get_column_letter(c) for c in range(1, ws.max_column + 1)}
-    match = letters["match"]
-    formulas = [
-        rule.formula[0]
-        for rules in ws.conditional_formatting
-        if str(rules.sqref) == f"{match}2"
-        for rule in rules.rules
-    ]
-    assert formulas == [
-        f'AND(${letters["searched_site_id"]}2<>"",${letters["site_id"]}2<>${letters["searched_site_id"]}2)',
-        f'LEFT(${match}2,11)="No location"',
-        f'LEFT(${match}2,3)="Tie"',
-    ]
-
-
-def test_the_readme_describes_the_lists_for_ingestion(tmp_path):
-    described = {row[0]: row[1] for row in list(build(tmp_path)["ReadMe"].values)[1:]}
-    for name in ("new_facility_candidates.csv", "possible_duplicates.csv", "outside_run_matches.csv"):
-        assert f"(file) {name}" in described
-    assert "New facility - not in our database" in described["(file) new_facility_candidates.csv"]
-    assert "searched_site_id" in described["Review_Queue"]

@@ -125,8 +125,8 @@ NEWER_SOURCE_YEARS = 3
 # The exception is deliberately narrow: only coordinates, and only from a coordinate directory.
 # Wikis and aggregators stay at Tier 4 even for coordinates; they are not gazetteers.
 # Tier 3 is the right level: matching coordinates confirm the baseline, differing ones become a
-# reviewable conflict, and neither can silently override. A location is now read from what each
-# source states, as found_location.
+# reviewable conflict, and neither can silently override. Since step 2 of the approve-sources plan
+# a location is no longer a value, only a check on the match, so nothing asks for this tier now.
 ATTRIBUTE_SOURCE_TYPE_TIERS = {
     ("found_location", "map or coordinate directory"): TIER_3,
 }
