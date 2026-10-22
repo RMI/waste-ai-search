@@ -240,8 +240,9 @@ Each branch is cut from the one before. The first is cut from `approve-sources-s
   or would change ours at the site searched.
 - **An SME's decision applies whatever the pair's status:** a pair marked Junk loads nothing even
   if a later arbitration auto-approves it.
-- **Arbitrating again removes `accepted_values.csv`,** since it sorts the values again. `review_id`
-  is stable, so running `accept-reviews` again restores it.
+- **Arbitrating again empties `accepted_values.csv`** to its header row, since it sorts the values
+  again. It is emptied rather than deleted so the push replaces the copy in blob, which a pull would
+  otherwise bring back. `review_id` is stable, so running `accept-reviews` again restores it.
 - **`collect-new-facilities` is removed,** not kept as an alias, and `refresh-seed
   --merge-identity` with it.
 

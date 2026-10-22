@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import json
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from openpyxl import load_workbook
@@ -337,7 +338,7 @@ def test_a_decision_changed_since_is_applied_as_it_now_stands(tmp_path):
     assert {r["loaded"] for r in found(run_dir)} == {""}
 
 
-def test_arbitrating_again_removes_accepted_values_and_keeps_the_smes_new_sites(tmp_path):
+def test_arbitrating_again_empties_accepted_values_and_keeps_the_smes_new_sites(tmp_path):
     """Arbitrating again sorts every value afresh with sme_decision and loaded blank, so an
     accepted_values.csv beside it would be out of date; the review_ids are the same, so accepting
     again from the reviewed workbook restores it."""
@@ -349,10 +350,48 @@ def test_arbitrating_again_removes_accepted_values_and_keeps_the_smes_new_sites(
     before = (run_dir / ACCEPTED_VALUES_FILE).read_bytes()
 
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
-    assert not (run_dir / ACCEPTED_VALUES_FILE).exists()
+    assert accepted(run_dir) == []
+    with (run_dir / ACCEPTED_VALUES_FILE).open(encoding="utf-8-sig") as handle:
+        assert next(csv.reader(handle)) == ACCEPTED_VALUES_HEADERS
     assert [row["found_by"] for row in rows(run_dir / "new_facility_candidates.csv")] == ["SME"]
     accept_reviews(run_dir, reviewed)
     assert (run_dir / ACCEPTED_VALUES_FILE).read_bytes() == before
+
+
+class Blob:
+    """Just enough of a blob container to push a run folder up and pull it to another machine."""
+
+    def __init__(self):
+        self.blobs = {}
+
+    def upload_blob(self, name, data, overwrite=False):
+        self.blobs[name] = data.read()
+
+    def list_blobs(self, name_starts_with=""):
+        return [SimpleNamespace(name=name) for name in self.blobs if name.startswith(name_starts_with)]
+
+    def download_blob(self, name):
+        payload = self.blobs[name]
+        return SimpleNamespace(readinto=lambda handle: handle.write(payload))
+
+
+def test_arbitrating_again_replaces_the_accepted_values_in_blob_too(tmp_path):
+    """Push never deletes a blob, so a deleted accepted_values.csv would come back on the next pull,
+    to this machine or another, beside found values that no longer load it. The emptied file is
+    pushed over it instead."""
+    from waste_ai_search import storage
+
+    blob = Blob()
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [NEWS]})
+    accept_reviews(run_dir, decide(run_dir, {NEWS["url"]: {"decision": CORRECT_SITE}}))
+    storage.push(run_dir, "outputs/runs/run", client=blob)
+    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
+    storage.push(run_dir, "outputs/runs/run", client=blob)
+
+    other_machine = tmp_path / "other"
+    storage.pull("outputs/runs/run", other_machine, client=blob)
+    assert accepted(other_machine) == []
+    assert {row["loaded"] for row in found(other_machine)} == {""}
 
 
 def test_a_decision_on_a_pair_the_run_no_longer_has_is_reported_not_applied(tmp_path, capsys):

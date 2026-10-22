@@ -70,6 +70,7 @@ from .snapshot import recorded_run
 from .schema import (
     canonical_attribute,
     NOT_A_WASTE_FACILITY,
+    ACCEPTED_VALUES_HEADERS,
     ARRAY_TARGET_ATTRIBUTES,
     ATTRIBUTE_RANGES,
     BOOLEAN_TARGET_ATTRIBUTES,
@@ -558,20 +559,27 @@ def remove_retired_outputs(run_dir: Path) -> list[Path]:
 
 
 def remove_stale_acceptance(run_dir: Path) -> bool:
-    """Delete the accepted_values.csv accept-reviews wrote from the found values this arbitration
-    sorts again.
+    """Empty the accepted_values.csv accept-reviews wrote from the found values this arbitration sorts
+    again, leaving its header row.
 
     Arbitrating rewrites found_values.csv with its sme_decision and loaded blank, and may sort a value
     differently - a link found dead since, say - so an accepted_values.csv left beside it would load
     what the run no longer says. accept-reviews writes it again from the same reviewed workbook, as
     review_id is the same each time.
+
+    The file is emptied rather than deleted because push never deletes a blob: a deleted file's copy
+    in blob would stay, and the next pull would bring the old values back to this machine or any
+    other. The emptied file is newer, so the push after arbitrating replaces that copy.
     """
     path = run_dir / ACCEPTED_VALUES_FILE
     if not path.exists():
         return False
-    path.unlink()
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        if len(list(csv.reader(handle))) <= 1:
+            return False  # emptied already, or never written to
+    write_csv_records(path, [], ACCEPTED_VALUES_HEADERS)
     print(
-        f"Removed {ACCEPTED_VALUES_FILE}: it was written from the found values this arbitration sorts again. "
+        f"Emptied {ACCEPTED_VALUES_FILE}: it was written from the found values this arbitration sorts again. "
         "Run accept-reviews again to load the approved values."
     )
     return True

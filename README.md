@@ -1005,7 +1005,7 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 |---|---|
 | `<run_id>_review.xlsx` | **The SME artifact.** Its Site_Review tab lists the site–source pairs an SME needs to decide, grouped by our site (see [SME Review Workflow](#sme-review-workflow)). `accept-reviews` reads the decisions back from it. |
 | `found_values.csv` | **Every value found**, one row per site, year, source and attribute, with its status (`auto-approved`, `SME review` or `not used`) and `status_reason` (see [Filing and approving each source](#filing-and-approving-each-source)). Each row gives our site, the source and its tier, the facility the source describes (`facility_name_in_source`, `facility_name_english`, `source_address`, `stated_coordinates`) and where that puts it (`source_coordinates`, `coordinates_from`, `distance_km`, and `location_note` where there is no point), the value as converted and as written, our value for that year, the agent's quote and whether it and the location are on the page, and the pair's `review_id`. `accept-reviews` fills `sme_decision` and `loaded`. The agent's unverified leads are listed too, as not used. The audit trail. |
-| `accepted_values.csv` | **For ingestion**, written by `accept-reviews`: one value per site, attribute and, for a yearly attribute, year, from the auto-approved pairs and those SMEs approve on Site_Review (Correct site, or Different site with `other_site_id`, where that site's field is empty). Where accepted values disagree, the best tier wins, then the newest, then the value most sources give. Columns: `run_id`, `site_id`, `site_name`, `country_iso3`, `attribute_name`, `value`, `unit`, `year`, `source_url`, `source_tier`, `approved_by` (`auto` or the reviewer), `reviewed_date`, `review_id`. Arbitrating again removes it; run `accept-reviews` again. |
+| `accepted_values.csv` | **For ingestion**, written by `accept-reviews`: one value per site, attribute and, for a yearly attribute, year, from the auto-approved pairs and those SMEs approve on Site_Review (Correct site, or Different site with `other_site_id`, where that site's field is empty). Where accepted values disagree, the best tier wins, then the newest, then the value most sources give. Columns: `run_id`, `site_id`, `site_name`, `country_iso3`, `attribute_name`, `value`, `unit`, `year`, `source_url`, `source_tier`, `approved_by` (`auto` or the reviewer), `reviewed_date`, `review_id`. Arbitrating again empties it to its header row; run `accept-reviews` again. |
 | `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below), its tier, and how many sites cited it. |
 | `source_locations.json` | Each stated location's point, keyed by its text and country (see [Locating each source](#locating-each-source)). |
 | `page_text/` | The text of each page that loaded, one gzip file per exact URL named by its `source_id` (see [The text of each page that loads](#the-text-of-each-page-that-loads)). `found_values.csv`'s `quote_on_page` and `location_on_page` say whether each source's quote and stated location are on it. |
@@ -1222,9 +1222,11 @@ that isn't Correct site, Different site, New site or Junk; a Different site with
 another decision; a filled row with no `review_id`; or two rows deciding one pair two ways.
 
 **Run it any time.** A pair not yet decided loads nothing until it runs again, and running it again
-on the same decisions writes the same files. Arbitrating a run again removes `accepted_values.csv`
-and blanks `sme_decision` and `loaded`, since it sorts the values again. `review_id` stays the same,
-so run `accept-reviews` again on the same reviewed workbook. A decision on a pair the run no longer
+on the same decisions writes the same files. Arbitrating a run again empties `accepted_values.csv`
+to its header row and blanks `sme_decision` and `loaded`, since it sorts the values again. The file
+is emptied, not deleted, because a push never deletes a blob: the emptied file replaces the old copy
+in blob, so a later pull, here or on another machine, doesn't bring the old values back. `review_id`
+stays the same, so run `accept-reviews` again on the same reviewed workbook. A decision on a pair the run no longer
 has (the search no longer cites that page under that name) is reported, not applied.
 
 **Re-arbitrating writes a new workbook with blank decisions.** Published to SharePoint, it goes
