@@ -567,6 +567,13 @@ Two rules keep the loop honest:
 Identity findings are **not** merged unless `--merge-identity` is passed: overwriting seed
 coordinates changes what the distance-based identity gate (Q34) is measuring against.
 
+> **Superseded in part by F41** (the approve-sources plan). `refresh-seed` now reads
+> `found_values.csv`, and merges the fills of empty fields that are auto-approved or waiting on an
+> SME, one per site and attribute (the newest year's, picked by tier first), so "only promoted values
+> merge" no longer holds: a value still awaiting an SME can become the next pass's baseline. A
+> source's name or location never replaces ours, so there are no identity findings to merge, and
+> `--merge-identity` is gone. Merged values still keep their own tier.
+
 ### Search-tool failure is not "no data found" (F9/F10)
 
 The Foundry agent's own web-search tool fails transiently. It arrives as a **successful API call
