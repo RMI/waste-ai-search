@@ -478,6 +478,19 @@ def test_found_values_csv_replaces_the_evidence_the_decisions_the_queue_and_the_
     assert workbook.sheetnames == ["ReadMe", "Run_Config", "Site_Review", "Parse_Warnings", "Definitions"]
 
 
+def test_batch_1s_resolved_review_queue_and_leads_columns_are_kept_for_its_re_key():
+    """Nothing writes resolved.csv, a Review_Queue or Leads now, but #26's re-key imports their columns to
+    check batch 1's files, and git merges the two without a conflict to warn anyone. They are batch
+    1's columns, not the stack's: no match columns, and the queue's translation_note."""
+    from waste_ai_search.schema import RESOLVED_HEADERS, REVIEW_QUEUE_HEADERS, SUPPLEMENTARY_LEADS_HEADERS
+
+    assert RESOLVED_HEADERS[:3] == ["site_id", "internal_facility_id", "site_name"]
+    assert {"resolved_value", "resolution", "validation_status"} <= set(RESOLVED_HEADERS)
+    assert {"translation_note", "baseline_coordinates", "rejection_reason", "corrected_value"} <= set(REVIEW_QUEUE_HEADERS)
+    assert not {"searched_site_id", "match", "corrected_site_id", "stated_location"} & set(REVIEW_QUEUE_HEADERS)
+    assert {"lead_value", "lead_summary", "exclusion_reason"} <= set(SUPPLEMENTARY_LEADS_HEADERS)
+
+
 def test_run_config_counts_the_pairs_and_values_by_status(tmp_path):
     site = {**BRADY, "facility_type": "Sanitary Landfill"}
     run_dir = arbitrate(tmp_path, [site, NEARBY], {

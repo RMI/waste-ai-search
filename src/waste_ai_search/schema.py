@@ -573,6 +573,35 @@ SITE_REVIEW_HEADERS = [
 # What an SME fills in on Site_Review; everything else there is set by the pipeline.
 SITE_REVIEW_EDITABLE = ["decision", "other_site_id", "reviewer", "reviewed_date", "notes"]
 
+# Batch 1's resolved.csv, Review_Queue and Leads columns, as main wrote them before the
+# approve-sources plan. Nothing here writes those now (found_values.csv and Site_Review replace them),
+# but the batch 1 re-key (#26, relabel.py) checks batch 1's files against these, and the batch 1
+# conversion (build step 5) reads those files. They are batch 1's columns, not the ones the stack's own runs
+# wrote before step 2.
+RESOLVED_HEADERS = [
+    "site_id", "internal_facility_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name",
+    "baseline_value", "baseline_source", "baseline_tier",
+    "resolved_value", "resolved_unit", "resolution", "resolution_rule",
+    "winning_evidence_id", "winning_source_tier", "winning_source_url", "winning_link_status",
+    "best_tier_available",
+    "value_date", "confidence_score", "validation_status", "reviewer", "reviewed_date",
+    "researcher_notes",
+]
+REVIEW_QUEUE_HEADERS = [
+    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "baseline_coordinates",
+    "attribute_name", "resolution",
+    "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
+    "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
+    "agreeing_source_count",
+    "evidence_summary", "validation_status", "rejection_reason", "corrected_value", "reviewer",
+    "reviewed_date",
+    "researcher_notes",
+]
+SUPPLEMENTARY_LEADS_HEADERS = [
+    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name", "lead_value",
+    "source_tier", "lead_summary", "url", "exclusion_reason",
+]
+
 # The validation_status resolve gives a decision that leaves our database as it is: a source
 # confirmed our value, or nothing was found.
 NOTHING_TO_REVIEW = "Nothing to review"
