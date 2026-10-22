@@ -166,24 +166,49 @@ def from_found_values(rows: list[dict[str, str]]) -> tuple[list[dict[str, str]],
 
 
 def read_review_workbook(path: Path) -> Optional[list[dict[str, str]]]:
-    """The SMEs' Review_Queue rows, or None when the workbook isn't there. Opened read-only."""
+    """The SMEs' decisions, or None when the workbook isn't there or has neither tab. Opened read-only.
+
+    A workbook from before the approve-sources plan has a Review_Queue, one row per value. One since
+    has a Site_Review, one row per site-source pair, read as the queue was: Correct site validated;
+    Different site and New site rejected as the wrong facility, since the search looked at another
+    place; Junk rejected for another reason.
+    """
     if not Path(path).is_file():
         return None
     from openpyxl import load_workbook
 
+    from .site_review import SITE_REVIEW_SHEET
+
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
-        if REVIEW_SHEET not in workbook.sheetnames:
+        sheet = next((name for name in (REVIEW_SHEET, SITE_REVIEW_SHEET) if name in workbook.sheetnames), None)
+        if sheet is None:
             return None
-        rows = workbook[REVIEW_SHEET].iter_rows(values_only=True)
+        rows = workbook[sheet].iter_rows(values_only=True)
         headers = [normalize_scalar(value) for value in next(rows, ())]
-        return [
+        read = [
             dict(zip(headers, (normalize_scalar(value) for value in row)))
             for row in rows
             if any(value not in (None, "") for value in row)
         ]
     finally:
         workbook.close()
+    return read if sheet == REVIEW_SHEET else [_as_queue_row(row) for row in read]
+
+
+def _as_queue_row(row: dict[str, str]) -> dict[str, str]:
+    """A Site_Review row as a Review_Queue row's validation_status and rejection_reason."""
+    from .accept_reviews import DECISION_BY_TEXT, _folded
+    from .schema import CORRECT_SITE, DIFFERENT_SITE, JUNK, NEW_SITE
+
+    decision = DECISION_BY_TEXT.get(_folded(row.get("decision")), "")
+    status, reason = {
+        CORRECT_SITE: ("Validated", ""),
+        DIFFERENT_SITE: ("Rejected", f"{WRONG_FACILITY} - another site in our database"),
+        NEW_SITE: ("Rejected", f"{WRONG_FACILITY} - not in our database"),
+        JUNK: ("Rejected", JUNK),
+    }.get(decision, ("", ""))
+    return {**row, "validation_status": status, "rejection_reason": reason}
 
 
 def source_group(site: dict[str, Any]) -> str:
@@ -464,7 +489,11 @@ def forecast(
 
 
 def describe_run(run: RunFiles) -> str:
-    sme = "no reviewed workbook found" if run.sme is None else f"{len(run.sme):,} reviewed-workbook rows"
+    sme = (
+        "no reviewed workbook with a Review_Queue or Site_Review tab found"
+        if run.sme is None
+        else f"{len(run.sme):,} reviewed-workbook rows"
+    )
     return (
         f"Run {run.run_id}: {len(run.run_log):,} sites searched; {sme}.\n"
         f"  Consolidation run its seed read: {describe_manifest_run(run.manifest)}."

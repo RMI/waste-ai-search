@@ -222,6 +222,30 @@ def test_sme_decisions_come_from_the_reviewed_workbook(tmp_path):
     assert ny.read_review_workbook(tmp_path / "missing.xlsx") is None
 
 
+def test_sme_decisions_come_from_a_site_review_tab_since_the_approve_sources_plan(tmp_path):
+    """One row per site-source pair: Correct site is validated; Different site and New site are the
+    wrong facility; Junk is rejected for another reason; a blank decision is undecided."""
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Site_Review"
+    sheet.append(["review_id", "site_id", "decision", "other_site_id"])
+    sheet.append(["WAIREV-1-a", "1", "Correct site", None])
+    sheet.append(["WAIREV-1-b", "1", "different site", 4])
+    sheet.append(["WAIREV-1-c", "1", "New site", None])
+    sheet.append(["WAIREV-1-d", "1", "Junk", None])
+    sheet.append(["WAIREV-2-a", "2", None, None])
+    path = tmp_path / "run_review.xlsx"
+    workbook.save(path)
+
+    run = ny.load_run("batch1", ny.local_reader(_fake_run(tmp_path / "batch1")))
+    run.sme = ny.read_review_workbook(path)
+    rows = {row["site_id"]: row for row in ny.site_rows(run)}
+    assert (rows["1"]["sme_validated"], rows["1"]["sme_rejected"], rows["1"]["sme_wrong_facility"]) == (1, 3, 2)
+    assert (rows["2"]["sme_validated"], rows["2"]["sme_rejected"]) == (0, 0)
+
+
 def test_a_run_that_was_never_arbitrated_is_refused(tmp_path):
     run_dir = _fake_run(tmp_path / "r")
     (run_dir / "resolved.csv").unlink()
@@ -297,7 +321,7 @@ def test_the_script_measures_a_run_folder_and_writes_its_csvs(tmp_path, capsys):
 
     assert code == 0
     printed = capsys.readouterr().out
-    assert "Run batch1: 4 sites searched; no reviewed workbook found." in printed
+    assert "Run batch1: 4 sites searched; no reviewed workbook with a Review_Queue or Site_Review tab found." in printed
     assert "Consolidation run its seed read: x (the only run in the table)." in printed
     assert "Sites from OSM or Global Plastic Watch only" in printed
     assert (out / "batch1_sites.csv").exists()
