@@ -461,6 +461,19 @@ def test_the_command_accepts_the_reviewed_workbook(tmp_path, capsys):
     assert len(accepted(run_dir)) == 3
 
 
+def test_the_command_removes_the_retired_outputs_a_pull_brings_back(tmp_path):
+    """Blob keeps what an earlier arbitration wrote, and the pull before accepting brings it back;
+    beside accepted_values.csv, an old resolved.csv or review queue would look current."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [NEWS]})
+    workbook = decide(run_dir, {NEWS["url"]: {"decision": CORRECT_SITE}})
+    retired = ["evidence.csv", "resolved.csv", "review_queue.csv", "supplementary_leads.csv", "outside_run_matches.csv"]
+    for name in retired:
+        (run_dir / name).write_text("pulled back from blob")
+    assert main(["accept-reviews", "--run-id", "run", "--run-dir", str(run_dir), "--workbook", str(workbook), "--local"]) == 0
+    assert not [name for name in retired if (run_dir / name).exists()]
+    assert len(accepted(run_dir)) == 2
+
+
 def test_the_command_says_why_it_stopped(tmp_path, capsys):
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [NEWS]})
     workbook = decide(run_dir, {NEWS["url"]: {"decision": "Maybe"}})

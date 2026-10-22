@@ -542,7 +542,7 @@ def remove_retired_outputs(run_dir: Path) -> list[Path]:
     Left beside this arbitration's outputs they would look current: a standardized table would look
     ready to load, and an old review queue ready to review. Only the local copies go: a copy pushed
     to blob stays there as the record of that arbitration, and comes back down on the next pull, so
-    this runs on every arbitration.
+    this runs on every arbitration, and after accept-reviews' pull.
     """
     removed = []
     for pattern in RETIRED_OUTPUTS:

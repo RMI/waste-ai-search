@@ -515,10 +515,14 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
 
     if args.command == "accept-reviews":
         from .accept_reviews import ReviewError, accept_reviews, reviewed_workbook
+        from .arbitrate import remove_retired_outputs
         from .publish import review_dir
 
         sync = RunSync(config, local=args.local)
         sync.down()  # found_values.csv and the new-facility list as arbitration last left them
+        # A pull brings back what an earlier arbitration wrote and the last one removed, as blob
+        # keeps it. Left beside accepted_values.csv, an old resolved.csv would look current.
+        remove_retired_outputs(config.run_dir)
         workbook = (
             Path(args.workbook).expanduser()
             if args.workbook
