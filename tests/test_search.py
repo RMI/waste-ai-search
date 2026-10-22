@@ -348,6 +348,18 @@ def test_naming_brazil_finds_nothing_left_to_ask_of_its_inexact_sites(tmp_path):
     assert selected_ids(seed, iso3=["BRA"]) == []
 
 
+def test_searching_brazil_says_why_there_is_nothing_to_search(tmp_path, capsys):
+    """Its sites match, but there is nothing left to ask them. Once a traceback saying no site
+    matched the filters, which they did; now an error the command line prints, exiting 1."""
+    from waste_ai_search.cli import main
+
+    seed = seed_with_countries(tmp_path, "USA", "PHL", "BRA")
+    args = ["search", "--iso3", "BRA", "--input-csv", str(seed), "--run-id", "t", "--run-dir", str(tmp_path / "run"),
+            "--local", "--no-link-check", "--no-locate"]
+    assert main(args) == 1
+    assert "error: Nothing to search in BRA: it is scoped to coordinates alone" in capsys.readouterr().err
+
+
 def test_brazil_with_an_exact_location_drops_out_of_selection_entirely(tmp_path):
     seed = seed_with_countries(tmp_path, "USA", "PHL", "BRA", is_location_exact="TRUE")
     assert selected_ids(seed) == ["2"]

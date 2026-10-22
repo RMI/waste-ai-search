@@ -745,8 +745,9 @@ thing worth confirming, for the 3,913 of 4,225 sites, all from SINIR, whose loca
 inexact. But since [the approve-sources plan](docs/plans/2026-10-21-approve-sources-site-by-site.md)
 a site's location is no longer asked for, and a source's coordinates never replace ours. So a
 Brazilian site has nothing to ask, and is not searched even when Brazil is asked for: the run
-counts it among the sites with no attributes left to search. A Brazilian response cached before
-then still arbitrates, and loads nothing.
+counts it among the sites with no attributes left to search, and a search of Brazil alone
+(`--iso3 BRA`) stops with an error saying so. A Brazilian response cached before then still
+arbitrates, and loads nothing.
 
 The rest of this rule describes how Brazil was searched before, for when it is taken up again (see
 [docs/future_improvements.md](docs/future_improvements.md)).

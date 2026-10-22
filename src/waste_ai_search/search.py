@@ -49,6 +49,7 @@ from .run_context import (
     agent_identity,
 )
 from .schema import (
+    COORDINATES_ONLY_ISO3,
     DEFAULT_EXCLUDED_ISO3,
     DEFAULT_EXCLUSION_REASONS,
     FOUNDRY_RUN_LOG_HEADERS,
@@ -61,6 +62,10 @@ from .searchable_names import (
     record_skips,
     skip_unsearchable_names,
 )
+
+
+class NothingToSearch(ValueError):
+    """A search whose selection leaves no site to search: an instruction to the user, not a bug."""
 
 
 def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[dict[str, Any]]:
@@ -291,7 +296,18 @@ def run_search(
             if reusing
             else ""
         )
-        raise ValueError(f"No sites matched the selection filters.{hint}")
+        asked = {value.strip().upper() for value in config.iso3 or ()}
+        if asked and asked <= COORDINATES_ONLY_ISO3:
+            # Its sites match, but a coordinates-only country is asked only for coordinates, and a
+            # source's coordinates never replace ours (the approve-sources plan), so nothing is left.
+            raise NothingToSearch(
+                f"Nothing to search in {', '.join(sorted(asked))}: it is scoped to coordinates alone, and a "
+                "search no longer asks for a site's location, since a source's never replaces ours."
+            )
+        raise NothingToSearch(
+            "No sites to search: none matched the selection filters, or every one that did has nothing "
+            f"left to ask (counted above).{hint}"
+        )
     # The run's list of sites skipped by name, for review and for Run_Config. Each search adds its
     # skips to the list and takes off the sites it selects or the run has already searched, so a
     # narrower search under the same run id doesn't shrink it and a site searched after all isn't

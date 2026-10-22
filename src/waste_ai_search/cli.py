@@ -464,10 +464,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return dispatch(args, config)
     except Exception as exc:  # noqa: BLE001
+        from .search import NothingToSearch
         from .storage import StorageError
 
-        if isinstance(exc, StorageError):
-            # A firewall block or a missing container is an instruction to the user, not a bug.
+        if isinstance(exc, (StorageError, NothingToSearch)):
+            # A firewall block, a missing container, or a selection with nothing to search is an
+            # instruction to the user, not a bug.
             print(f"error: {exc}", file=sys.stderr)
             return 1
         raise
