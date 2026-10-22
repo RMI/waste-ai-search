@@ -173,11 +173,11 @@ def resolve(
     """Arbitrate one (facility, attribute) pair.
 
     Since step 2 of the approve-sources plan, a value's status is decided for its site-source pair
-    (found_values.py), and only fills of empty fields load. What arbitration asks of this is the
-    one value to load among those approved for an empty field (found_values.pick_values): the best
-    tier, then the newest, then the value the most sources give, then the agent's order. Its
-    comparisons with a value we hold - confirmed, overridden, a conflict, or a weaker disagreement
-    for leads - are no longer reached by arbitration.
+    (found_values.py), and only fills of empty fields load, so arbitration no longer calls this. The
+    one value to load among those approved is picked by found_values.pick_values, by tier first;
+    this function's status recency override could put a lower tier first. Its comparisons with a
+    value we hold - confirmed, overridden, a conflict, or a weaker disagreement for leads - are kept
+    for the tests that pin them.
     """
     site_id = normalize_scalar(site.get("site_id"))
     baseline = baseline_for(site, attribute_name)

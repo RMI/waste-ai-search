@@ -39,7 +39,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from .arbitration import baseline_for, comparable, date_key, decision_key, resolve, site_for_year, value_year
+from .arbitration import baseline_for, comparable, date_key, decision_key, site_for_year, source_counts, value_year
 from .credibility import TIER_2, TIER_5, TIER_BY_LABEL, tier_label
 from .lists import citation_point, id_order, plain
 from .locate import coordinates_from, format_point, haversine_km, seed_point
@@ -449,31 +449,33 @@ def judged_on_our_value(row: dict[str, Any]) -> bool:
 def pick_values(rows: list[dict[str, Any]], statuses: tuple[str, ...] = LOADABLE) -> dict[tuple[str, str, Any], dict[str, Any]]:
     """The one value to load for each site, attribute and year (for a yearly attribute; otherwise
     each site and attribute), among the rows with one of `statuses`, where they disagree: the best
-    tier, then the newest, then the value the most sources give, then the agent's order
-    (decision 6). arbitration.resolve weighs them as it fills an empty field.
+    tier, then the newest value_date, then the value the most sources give (a page giving it twice
+    counts once), then the agent's order (decision 6).
+
+    Tier always comes first. arbitration.resolve, which this once went through, let a status from a
+    lower tier win when it was dated years later, which within one year's key only happens where a
+    date was misread: one after the run's year, which value_year folds into the run's, or one before
+    1950.
 
     Returns the chosen found_values.csv row by key (arbitration.decision_key).
     """
-    by_key: dict[tuple[str, str, Any], list[dict[str, Any]]] = {}
+    by_key: dict[tuple[str, str, Any], list[tuple[int, dict[str, Any]]]] = {}
     for order, row in enumerate(rows):
         if row.get("status") not in statuses or is_blank(row.get("value")):
             continue
         key = decision_key(normalize_scalar(row["site_id"]), row["attribute_name"], int(row["year"]))
-        by_key.setdefault(key, []).append({
-            "evidence_id": str(order),
-            "source_id": row.get("source_id", ""),
-            "value": row["value"],
-            "unit": row.get("unit", ""),
-            "tier": TIER_BY_LABEL.get(normalize_scalar(row.get("source_tier")), TIER_5),
-            "order": order,
-            "url": row.get("source_url", ""),
-            "value_date": row.get("value_date", ""),
-            "confidence": row.get("agent_confidence", ""),
-        })
+        by_key.setdefault(key, []).append((order, row))
     picked = {}
-    for (site_id, attribute, year), items in by_key.items():
-        decided = resolve({"site_id": site_id}, attribute, items)
-        picked[(site_id, attribute, year)] = rows[int(decided["winning_evidence_id"])]
+    for key, items in by_key.items():
+        attribute = key[1]
+        counts = source_counts([row for _order, row in items], attribute)
+        _order, best = min(items, key=lambda item: (
+            TIER_BY_LABEL.get(normalize_scalar(item[1].get("source_tier")), TIER_5),
+            tuple(-part for part in date_key(item[1].get("value_date"))),
+            -counts[comparable(item[1].get("value"), attribute)],
+            item[0],
+        ))
+        picked[key] = best
     return picked
 
 

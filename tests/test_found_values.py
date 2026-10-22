@@ -472,6 +472,18 @@ def test_one_value_is_loaded_per_site_attribute_and_year_best_tier_then_newest_t
     assert picked == {"operator": "B", "closing_year": "D", "opening_year": "F"}
 
 
+@pytest.mark.parametrize("lower_date", ["2030", "1940", "2026-11"])
+def test_a_better_tier_always_wins_within_one_key_however_the_other_is_dated(lower_date):
+    """A status dated after the run's year, or before 1950, counts as the run's year, so it shares a
+    key with this year's. It once won from Tier 3 over a Tier 1 status, as a status years newer."""
+    rows_ = [
+        found_row("Active", "Tier 1", "2026-02", "s1", attribute="facility_status", year=2026),
+        found_row("Inactive", "Tier 3", lower_date, "s2", attribute="facility_status", year=2026),
+    ]
+    [(key, row)] = pick_values(rows_).items()
+    assert (key, row["value"], row["source_tier"]) == (("1", "facility_status", 2026), "Active", "Tier 1")
+
+
 def test_a_yearly_attribute_loads_one_value_per_year_and_any_other_one_per_site():
     rows_ = [
         found_row("Active", "Tier 1", "2024", attribute="facility_status", year=2024),
