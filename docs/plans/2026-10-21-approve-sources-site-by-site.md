@@ -236,6 +236,11 @@ Each branch is cut from the one before. The first is cut from `approve-sources-s
 - **Not used also covers** a value the agent itself marked an excluded candidate, and the agent's
   unverified leads, which `found_values.csv` lists with a blank `review_id`.
 - **The 5 km flag shows on any listed pair** more than 5 km away, Tier 3–5 included.
+- **`possible_duplicates.csv` leaves out a page cited with no facility name,** though both pairs
+  still go to SMEs: a blank name says nothing of two sites being one. In gpt-5.4, Ontario's
+  province-wide gas dataset paired North Bay and Guelph, 332 km apart, and re-arbitrating batch 1's
+  nameless responses listed 909 pairs. A pair more than 5 km apart says one search more likely
+  claimed the other's source.
 - **A flag says where an auto-approved value disagrees.** One value loads per site, attribute and
   year, by tier first, and auto-approved pairs aren't on Site_Review, so an SME's approval could lose
   to a value they never saw. Where an auto-approved source gives a different value for a field a

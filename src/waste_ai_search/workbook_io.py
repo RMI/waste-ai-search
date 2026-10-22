@@ -238,8 +238,9 @@ REVIEW_INSTRUCTIONS = [
         "tab_name": "(file) possible_duplicates.csv",
         "purpose": (
             "Pairs of our sites whose searches cited the same page under the same facility name: perhaps "
-            "one facility recorded twice, or one search claiming another site's source. The page is sent "
-            "to Site_Review under each site. For ingestion."
+            "one facility recorded twice, or one search claiming another site's source, which reason "
+            "says is likelier where the sites are more than 5 km apart. A page cited with no name is "
+            "left out. The page is sent to Site_Review under each site. For ingestion."
         ),
         "sme_action": "Read only.",
         "editable": "nothing",

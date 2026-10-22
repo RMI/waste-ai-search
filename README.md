@@ -438,9 +438,10 @@ found for it fills an empty field.
 
 1. **The same page and facility name are cited for two or more of our sites.** It is about one of
    them at most, unless they are one facility recorded twice. Each site's pair goes to SMEs, and
-   the sites go on `possible_duplicates.csv`. For this check, names are compared by their
-   distinctive words, so "The Eastview Landfill" and "Eastview Landfill site" are one name, though
-   each is still its own pair.
+   the sites go on `possible_duplicates.csv` (unless the name is blank). For this check, names are
+   compared by their distinctive words, so "The Eastview Landfill" and "Eastview Landfill site" are
+   one name, though each is still its own pair. A page cited with no name for two sites counts as
+   one name here too.
 2. **The source places the facility more than 5 km from our site's coordinates.** This is batch 1's
    check, now run per source (see [Locating each source](#locating-each-source)). Coordinates too
    coarse to show, and a doubtful pair's coordinates and address, are still measured. A source
@@ -463,7 +464,10 @@ values. Pairs for review are split into Tier 3–5 and the Tier 1–2 pairs each
 - **`possible_duplicates.csv`:** pairs of our sites whose searches cited the same page under the
   same facility name. They may be one facility recorded twice, as E-PRTR's re-registrations are
   (Cowpen Bewley, Foxhall), or one search may have claimed another site's source, as batch 1's
-  Brandon page under 14 sites did.
+  Brandon page under 14 sites did. `reason` says the second is likelier where the sites are more
+  than 5 km apart. A page cited with no facility name is left out: both pairs still go to an SME,
+  but a blank name says nothing of two sites being one, and in the gpt-5.4 test Ontario's
+  province-wide landfill gas dataset paired two sites 332 km apart.
 - **`datasets_found.csv`:** pages that look like datasets, such as a regulator's list of its
   landfills. A search reports only the entry it used, so the rest of such a page goes unread, and
   every site on it pays its own search to find it again. Loaded once through ingestion, as E-PRTR
@@ -1025,7 +1029,7 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 | `sites_to_retry.csv` | Sites whose search tool failed, so nothing was searched (see [If a site could not be searched](#if-a-site-could-not-be-searched)). |
 | `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
 | `new_facility_candidates.csv` | For ingestion: landfills none of our sites is, from the sources SMEs mark New site on Site_Review (`found_by` = `SME`). One row per source, with its URL, name as written and in English, stated location, the point and where it came from, our nearest site and its distance, the searches that cited it, and a note of who marked it and the values it gives. `accept-reviews` adds each once; arbitrating again keeps them. |
-| `possible_duplicates.csv` | For ingestion (entity linkage's #225 tackles E-PRTR re-registrations): pairs of our sites whose searches cited the same page under the same facility name, with their names, the distance between them, the pages and the names. |
+| `possible_duplicates.csv` | For ingestion (entity linkage's #225 tackles E-PRTR re-registrations): pairs of our sites whose searches cited the same page under the same facility name (not a blank one), with their names, the distance between them, the pages, the names, and a `reason` that says when the sites are too far apart to be one facility. |
 | `datasets_found.csv` | For ingestion: pages that look like datasets, such as a regulator's list of its landfills (see [What else is listed for ingestion](#what-else-is-listed-for-ingestion)). It gives the page, its publisher, type and tier, how many searches cited it and how many facilities it names and places, the searches, the names it gave, and why it is listed. |
 
 **Gone since the approve-sources plan:** `evidence.csv`, `resolved.csv`, `review_queue.csv` and

@@ -340,7 +340,8 @@ def test_two_spellings_of_one_name_on_one_page_are_the_same_page_and_name(tmp_pa
 
 def test_one_page_naming_different_facilities_for_two_sites_is_no_duplicate(tmp_path):
     """A regulator's list gives each site its own entry: a different name is a different source. A
-    page cited with no name for both is one name, though."""
+    page cited with no name for both is one name, though, and goes to an SME for each; but a blank
+    name says nothing of the two being one facility, so they aren't listed as possible duplicates."""
     council = [seed("101", "Smith Road Landfill", -41.0, 175.0, "NZL"), seed("102", "Jones Road Landfill", -41.09, 175.0, "NZL")]
     register = "https://council.example.nz/closed-landfills"
     named = arbitrate(tmp_path / "named", council, {
@@ -354,7 +355,7 @@ def test_one_page_naming_different_facilities_for_two_sites_is_no_duplicate(tmp_
         "102": [source(register, values=[value("operator", "Council")])],
     })
     assert {row["status"] for row in rows(unnamed)} == {SME_REVIEW}
-    assert len(rows(unnamed, "possible_duplicates.csv")) == 1
+    assert rows(unnamed, "possible_duplicates.csv") == []
 
 
 def test_a_not_a_waste_facility_verdict_sends_its_whole_pair_to_an_sme(tmp_path):

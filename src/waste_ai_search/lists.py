@@ -33,6 +33,10 @@ SAME_PLACE_KM = 2.0
 # A reported area is not always the landfill's own footprint, so past this radius it is not
 # trusted to stretch a site's edge (#225's MAX_AREA_RADIUS_METERS).
 MAX_AREA_RADIUS_KM = 2.0
+# Two of our sites further apart than this, cited under the same page and name, are more likely one
+# search claiming the other's source than one facility recorded twice: batch 1's 5 km check, as
+# found_values.EXCEPTION_KM.
+DUPLICATE_WITHIN_KM = 5.0
 
 NEW_FACILITY_FILE = "new_facility_candidates.csv"
 POSSIBLE_DUPLICATES_FILE = "possible_duplicates.csv"
@@ -190,21 +194,31 @@ def possible_duplicates(
     returns only sources about the site searched, so a page and name cited for two sites says they
     may be one facility recorded twice, as E-PRTR re-registrations are (Cowpen Bewley, Foxhall), or
     that one search claimed another site's source, as batch 1's Brandon page under 14 sites was.
+    The reason says which is likelier: the second where the sites are more than DUPLICATE_WITHIN_KM
+    apart.
+
+    A page cited with no facility name is left out. Both pairs still go to an SME, but a blank name
+    says nothing of the two sites being one facility: in the gpt-5.4 test, Ontario's province-wide
+    landfill gas dataset paired North Bay with Guelph, 332 km apart, and re-arbitrating batch 1's
+    nameless responses listed 909 pairs, most far apart.
     """
     rows: dict[tuple[str, str], dict[str, Any]] = {}
-    for cited in shared.values():
+    for (_page, name), cited in shared.items():
+        if not name:
+            continue
         site_ids = sorted({normalize_scalar(citation.get("site_id")) for citation in cited}, key=id_order)
         for index, one in enumerate(site_ids):
             for two in site_ids[index + 1:]:
                 a, b = sites_by_id.get(one, {}), sites_by_id.get(two, {})
                 points = seed_point(a), seed_point(b)
+                km = haversine_km(*points[0], *points[1]) if None not in points else None
                 row = rows.setdefault((one, two), {
                     "site_id_a": one,
                     "site_name_a": normalize_scalar(a.get("site_name")),
                     "site_id_b": two,
                     "site_name_b": normalize_scalar(b.get("site_name")),
-                    "distance_km": f"{haversine_km(*points[0], *points[1]):.2f}" if None not in points else "",
-                    "_urls": set(), "_names": set(),
+                    "distance_km": f"{km:.2f}" if km is not None else "",
+                    "_km": km, "_urls": set(), "_names": set(),
                 })
                 for citation in cited:
                     row["_urls"].add(normalize_scalar(citation.get("url")))
@@ -218,9 +232,20 @@ def possible_duplicates(
             "source_urls": "; ".join(sorted(url for url in row["_urls"] if url)),
             "facility_names_in_source": "; ".join(sorted(row["_names"])),
             "searched_site_ids": f"{one}; {two}",
-            "reason": "Both sites' searches cited the same page under the same facility name",
+            "reason": duplicate_reason(row["_km"]),
         })
     return out
+
+
+def duplicate_reason(km: float | None) -> str:
+    """Why two of our sites are listed in possible_duplicates.csv, and which reading is likelier."""
+    same = "Both sites' searches cited the same page under the same facility name"
+    if km is None or km <= DUPLICATE_WITHIN_KM:
+        return same
+    return (
+        f"{same}, but the sites are {km:,.0f} km apart: more likely one search claimed the other's "
+        "source than one facility recorded twice"
+    )
 
 
 # --- datasets ------------------------------------------------------------------------------------

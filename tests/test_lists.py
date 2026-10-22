@@ -94,12 +94,30 @@ def test_two_sites_cited_under_the_same_page_and_name_are_listed_once_with_every
     assert row["source_urls"] == f"{appendix}; {index}"
     assert row["facility_names_in_source"] == "City of Brandon - Eastview Landfill; Eastview Landfill"
     assert float(row["distance_km"]) > 1600
-    assert row["reason"] == "Both sites' searches cited the same page under the same facility name"
+    assert row["reason"] == (
+        "Both sites' searches cited the same page under the same facility name, but the sites are 1,646 km "
+        "apart: more likely one search claimed the other's source than one facility recorded twice"
+    )
+
+
+def test_two_sites_close_together_on_one_page_and_name_may_be_one_facility():
+    """Cowpen Bewley's E-PRTR re-registration: two records of ours at one place."""
+    sites = {"18572": seed("18572", "Cowpen Bewley", 54.6136, -1.24064), "19041": seed("19041", "Cowpen Bewley", 54.6136, -1.24064)}
+    page = "https://environment.data.gov.uk/public-register/view/EPR-RP3531DV"
+    [row] = possible_duplicates({(page, "cowpen bewley"): [cite("18572", page, "Cowpen Bewley"), cite("19041", page, "Cowpen Bewley")]}, sites)
+    assert (row["distance_km"], row["reason"]) == ("0.00", "Both sites' searches cited the same page under the same facility name")
+
+
+def test_a_page_cited_with_no_name_for_two_sites_is_no_duplicate():
+    """Both pairs still go to an SME, but a blank name says nothing of two sites being one: in the
+    gpt-5.4 test, Ontario's province-wide landfill gas dataset paired sites 332 km apart."""
+    sites = {sid: seed(sid, f"Site {sid}", -41.0, 175.0) for sid in ("9", "10")}
+    assert possible_duplicates({("https://p.example", ""): [cite(sid, "https://p.example") for sid in ("10", "9")]}, sites) == []
 
 
 def test_three_sites_on_one_page_and_name_are_three_pairs():
     sites = {sid: seed(sid, f"Site {sid}", -41.0, 175.0) for sid in ("9", "10", "11")}
-    shared = {("https://p.example", ""): [cite(sid, "https://p.example") for sid in ("10", "9", "11")]}
+    shared = {("https://p.example", "site"): [cite(sid, "https://p.example", "Site") for sid in ("10", "9", "11")]}
     pairs = [(row["site_id_a"], row["site_id_b"]) for row in possible_duplicates(shared, sites)]
     assert pairs == [("9", "10"), ("9", "11"), ("10", "11")]
     assert {row["distance_km"] for row in possible_duplicates(shared, sites)} == {"0.00"}
