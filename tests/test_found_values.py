@@ -309,6 +309,35 @@ def test_the_same_page_and_name_cited_for_two_sites_goes_to_smes_for_both(tmp_pa
     assert (config["pairs_sme_review"], config["possible_duplicates"]) == ("2: same page and name as another site 2 (2 values)", 1)
 
 
+def test_two_spellings_of_one_name_on_one_page_are_the_same_page_and_name(tmp_path):
+    """In the mini test, Brandon's search cited a Manitoba report as "The Eastview Landfill" and
+    Guelph's as "Eastview Landfill"; with no address it would have been approved at Guelph. Names are
+    compared by their distinctive words for this. Each spelling is still its own pair, and one
+    search's two spellings are not a second site."""
+    brandon = seed("13338", "Eastview Landfill", 49.83866, -99.88844)
+    guelph = seed("18499", "Eastview Landfill", 43.5742, -80.2323)
+    report = "https://www.gov.mb.ca/sd/eal/registries/eap/eap_20141215.pdf"
+    run_dir = arbitrate(tmp_path, [brandon, guelph], {
+        "13338": [
+            source(report, "The Eastview Landfill", values=[value("opening_year", "2015")]),
+            source(report, "Eastview Landfill site", values=[value("closing_year", "2060")]),
+        ],
+        "18499": [source(report, "Eastview Landfill", values=[value("operator", "City of Brandon")])],
+    })
+    found = {(row["site_id"], row["attribute_name"]): row for row in rows(run_dir)}
+    assert found[("18499", "operator")]["status_reason"] == "Tier 1 source; the same page and name are also cited for site 13338."
+    assert found[("13338", "opening_year")]["status_reason"] == "Tier 1 source; the same page and name are also cited for site 18499."
+    assert found[("13338", "opening_year")]["review_id"] != found[("13338", "closing_year")]["review_id"]
+    [pair] = rows(run_dir, "possible_duplicates.csv")
+    assert (pair["site_id_a"], pair["site_id_b"]) == ("13338", "18499")
+
+    alone = arbitrate(tmp_path / "alone", [brandon], {"13338": [
+        source(report, "The Eastview Landfill", values=[value("opening_year", "2015")]),
+        source(report, "Eastview Landfill site", values=[value("closing_year", "2060")]),
+    ]})
+    assert {row["status"] for row in rows(alone)} == {AUTO_APPROVED}
+
+
 def test_one_page_naming_different_facilities_for_two_sites_is_no_duplicate(tmp_path):
     """A regulator's list gives each site its own entry: a different name is a different source. A
     page cited with no name for both is one name, though."""

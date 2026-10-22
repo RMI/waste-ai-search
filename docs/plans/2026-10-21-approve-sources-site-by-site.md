@@ -227,7 +227,9 @@ Each branch is cut from the one before. The first is cut from `approve-sources-s
   spellings of one name is two pairs. So gpt-5.4 has 61 pairs (23 auto-approved, 51 values; 38 to
   SMEs) and mini 41 (20 auto-approved, 52 values; 21 to SMEs: 14 Tier 3–5, 4 same page and name,
   3 more than 5 km away), against the table above. In gpt-5.4, gmf-fmv.ca is cited as both
-  "Merrick Landfill" and "Merrick Landfill site". In mini, Cowpen Bewley's register entry is Tier 1
+  "Merrick Landfill" and "Merrick Landfill site". The same-page check across sites compares names by
+  their distinctive words, though, so "The Eastview Landfill" and "Eastview Landfill" under two of
+  our sites are caught. In mini, Cowpen Bewley's register entry is Tier 1
   in pass 1 and Tier 3 (undated) in the gas follow-up, and counts as Tier 1.
 - **Brazil is not searched at all.** A coordinates-only site has nothing to ask now, so it is
   dropped from selection, even when Brazil is asked for.

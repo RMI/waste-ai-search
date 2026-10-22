@@ -182,7 +182,7 @@ class SiteIndex:
 
 # --- possible duplicates -------------------------------------------------------------------------
 def possible_duplicates(
-    shared: dict[tuple[str, str], list[dict[str, Any]]], sites_by_id: dict[str, dict[str, Any]]
+    shared: dict[tuple[str, Any], list[dict[str, Any]]], sites_by_id: dict[str, dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """possible_duplicates.csv: every two of our sites cited under the same page and facility name.
 

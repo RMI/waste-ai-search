@@ -41,6 +41,7 @@ from typing import Any
 
 from .arbitration import baseline_for, comparable, date_key, decision_key, site_for_year, source_counts, value_year
 from .credibility import TIER_2, TIER_5, TIER_BY_LABEL, tier_label
+from .facility_names import distinctive_words
 from .lists import citation_point, id_order, plain
 from .locate import coordinates_from, format_point, haversine_km, seed_point
 from .payload import normalize_url
@@ -213,12 +214,24 @@ class Sorted:
 
     rows: list[dict[str, Any]]
     pairs: list[Pair]
-    shared: dict[tuple[str, str], list[dict[str, Any]]]
+    shared: dict[tuple[str, Any], list[dict[str, Any]]]
 
 
-def pair_up(citations: list[dict[str, Any]]) -> tuple[dict[tuple[str, Any], Pair], dict[tuple[str, str], list[Pair]]]:
+def same_name(name: Any) -> Any:
+    """A facility name as the same-page check compares it: by its distinctive words, so "The
+    Eastview Landfill" and "Eastview Landfill", or "Merrick Landfill" and "Merrick Landfill site", are
+    one name; else, for a name of generic words only or in a script those words don't cover, as
+    plain() gives it. A blank name is one name."""
+    return frozenset(distinctive_words(normalize_scalar(name))) or plain(name)
+
+
+def pair_up(citations: list[dict[str, Any]]) -> tuple[dict[tuple[str, Any], Pair], dict[tuple[str, Any], list[Pair]]]:
     """Every citation's pair, keyed by (site, source number), and the pages and names cited for
-    two or more of our sites."""
+    two or more of our sites.
+
+    A pair is one exact name (plain), which its review_id is built from. Whether two sites' pairs are
+    the same page and name goes by same_name, which is looser: in the mini test, Brandon's search
+    cited a Manitoba report as "The Eastview Landfill" and Guelph's as "Eastview Landfill"."""
     pairs: dict[tuple[str, str, str], Pair] = {}
     pair_of: dict[tuple[str, Any], Pair] = {}
     for citation in citations:
@@ -230,13 +243,16 @@ def pair_up(citations: list[dict[str, Any]]) -> tuple[dict[tuple[str, Any], Pair
         pair.citations.append(citation)
         pair_of[(site_id, citation.get("source_index"))] = pair
 
-    by_source: dict[tuple[str, str], list[Pair]] = {}
+    by_source: dict[tuple[str, Any], list[Pair]] = {}
     for pair in pairs.values():
         if pair.has_page:
-            by_source.setdefault((pair.page, pair.name), []).append(pair)
-    shared = {key: group for key, group in by_source.items() if len(group) > 1}
+            cited = pair.citations[0]
+            name = same_name(cited.get("facility_name_in_source") or cited.get("facility_name_english"))
+            by_source.setdefault((pair.page, name), []).append(pair)
+    # Two spellings cited by one search are two pairs of one site, not two sites.
+    shared = {key: group for key, group in by_source.items() if len({pair.site_id for pair in group}) > 1}
     for group in shared.values():
-        site_ids = sorted((pair.site_id for pair in group), key=id_order)
+        site_ids = sorted({pair.site_id for pair in group}, key=id_order)
         for pair in group:
             pair.shared_with = [site_id for site_id in site_ids if site_id != pair.site_id]
     return pair_of, shared

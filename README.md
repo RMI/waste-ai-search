@@ -438,7 +438,9 @@ found for it fills an empty field.
 
 1. **The same page and facility name are cited for two or more of our sites.** It is about one of
    them at most, unless they are one facility recorded twice. Each site's pair goes to SMEs, and
-   the sites go on `possible_duplicates.csv`.
+   the sites go on `possible_duplicates.csv`. For this check, names are compared by their
+   distinctive words, so "The Eastview Landfill" and "Eastview Landfill site" are one name, though
+   each is still its own pair.
 2. **The source places the facility more than 5 km from our site's coordinates.** This is batch 1's
    check, now run per source (see [Locating each source](#locating-each-source)). Coordinates too
    coarse to show, and a doubtful pair's coordinates and address, are still measured. A source
