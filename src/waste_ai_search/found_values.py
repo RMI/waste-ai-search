@@ -79,7 +79,8 @@ UNUSABLE = "could not be converted or mapped"
 NOT_OFFERED = f"{NOT_A_WASTE_FACILITY} not offered"
 EXCLUDED_BY_AGENT = "excluded by the agent"
 UNVERIFIED = "the agent's unverified lead"
-NOT_USED_REASONS = [CONFIRMS, CHANGES, DEAD_LINK, NO_LINK, UNUSABLE, EXCLUDED_BY_AGENT, NOT_OFFERED, UNVERIFIED]
+COVERED = "an auto-approved source already gives it"
+NOT_USED_REASONS = [CONFIRMS, CHANGES, DEAD_LINK, NO_LINK, UNUSABLE, EXCLUDED_BY_AGENT, NOT_OFFERED, UNVERIFIED, COVERED]
 # How status_reason begins for a value not used only because of the value we hold at the site
 # searched. That says nothing of another site, so an SME's Different site weighs it again there
 # (accept_reviews.py).
@@ -285,6 +286,7 @@ def sort_values(
         site = sites_by_id.get(row["site_id"], {})
         found.append(found_row(row, pair_of[key], citation_of[key], site, run_year, order))
     rows = collapse(found)
+    skip_covered(rows)
     flag_closures(rows)
     return Sorted(rows, pairs, {key: [c for pair in group for c in pair.citations] for key, group in shared.items()})
 
@@ -400,6 +402,45 @@ def collapse(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             kept["status_reason"] = f"{kept['status_reason']} The source also gives {'; '.join(others)}."
         out.append(kept)
     return out
+
+
+def skip_covered(rows: list[dict[str, Any]]) -> None:
+    """Mark not used a pair for review whose every value an auto-approved source of a better tier
+    already gives for the same site, attribute and year (a yearly attribute's year only), so no SME
+    is asked about it.
+
+    The pick (pick_values) puts tier first, so approving such a pair could load nothing. That is
+    every Tier 3-5 pair whose values a Tier 1-2 source gives; a Tier 1 source sent to review by an
+    exception can still beat an auto-approved Tier 2 value, so it is reviewed. So is a pair that
+    says the site is Not a Waste Facility: it contradicts the site rather than adding to it.
+    """
+    def key(row: dict[str, Any]) -> tuple[str, str, Any]:
+        return decision_key(normalize_scalar(row["site_id"]), row["attribute_name"], int(row["year"]))
+
+    def tier(row: dict[str, Any]) -> int:
+        return TIER_BY_LABEL.get(normalize_scalar(row.get("source_tier")), TIER_5)
+
+    best_given: dict[tuple[str, str, Any], int] = {}
+    for row in rows:
+        if row["status"] == AUTO_APPROVED:
+            best_given[key(row)] = min(best_given.get(key(row), TIER_5), tier(row))
+    by_pair: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        if row["status"] == SME_REVIEW:
+            by_pair.setdefault(row["review_id"], []).append(row)
+    for pair_rows in by_pair.values():
+        if any(row["attribute_name"] == "facility_type" and row["value"] == NOT_A_WASTE_FACILITY for row in pair_rows):
+            continue
+        if all(key(row) in best_given and best_given[key(row)] < tier(row) for row in pair_rows):
+            for row in pair_rows:
+                row.update(
+                    status=NOT_USED,
+                    status_reason=(
+                        "An auto-approved source of a better tier already gives this site, attribute and year, "
+                        "and so does one for every other value this source gives, so it isn't reviewed."
+                    ),
+                    _why=COVERED,
+                )
 
 
 def closures(rows: list[dict[str, Any]]) -> dict[str, list[str]]:

@@ -125,6 +125,44 @@ def test_a_tier_1_or_2_fill_is_auto_approved_and_a_tier_3_to_5_fill_goes_to_an_s
     assert {row["sme_decision"] for row in found.values()} == {""} and {row["loaded"] for row in found.values()} == {""}
 
 
+def test_a_source_whose_every_value_a_better_auto_approved_source_gives_is_not_reviewed(tmp_path):
+    """Tier comes first when one value is picked per site, attribute and year, so approving such a
+    source could load nothing; asking an SME about it would only cost their time."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://manitoba.example/permit", "Brady Road Landfill",
+               values=[value("operator", "City of Winnipeg"), value("facility_status", "Active", "2024")]),
+        # Everything it gives, the permit gives too: not reviewed, whether it agrees or not.
+        source("https://news.example/one", "Brady Road", source_type="News report",
+               values=[value("operator", "Waste Connections"), value("facility_status", "Active", "2024")]),
+        # One value nothing auto-approved gives, so the whole source is reviewed.
+        source("https://news.example/two", "Brady Road", source_type="News report",
+               values=[value("operator", "City of Winnipeg"), value("has_flare", "TRUE")]),
+        # Another year's status is another value, so it is reviewed.
+        source("https://news.example/three", "Brady Road", source_type="News report",
+               values=[value("facility_status", "Inactive", "2019")]),
+    ]})
+    found = {(row["source_url"], row["attribute_name"]): row for row in rows(run_dir) if row["review_id"]}
+    assert found[("https://news.example/one", "operator")]["status"] == NOT_USED
+    assert found[("https://news.example/one", "facility_status")]["status"] == NOT_USED
+    assert found[("https://news.example/one", "operator")]["status_reason"].startswith(
+        "An auto-approved source of a better tier already gives this site, attribute and year"
+    )
+    assert {found[("https://news.example/two", name)]["status"] for name in ("operator", "has_flare")} == {SME_REVIEW}
+    assert found[("https://news.example/three", "facility_status")]["status"] == SME_REVIEW
+    assert "an auto-approved source already gives it 2" in run_config(run_dir)["values_not_used"]
+
+
+def test_a_tier_1_source_sent_to_review_by_an_exception_is_reviewed_though_a_tier_2_one_gives_its_value(tmp_path):
+    # 6 km from our site, so for review; approved, its Tier 1 status would beat the Tier 2 one.
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://stats.example/table", "Brady Road", source_type="Government statistics",
+               values=[value("facility_status", "Active", "2024")]),
+        source("https://manitoba.example/notice", "Brady Road", "49.8120, -97.2004",
+               values=[value("facility_status", "Inactive", "2024")]),
+    ]})
+    found = {row["source_url"]: row for row in rows(run_dir) if row["review_id"]}
+    assert found["https://manitoba.example/notice"]["status"] == SME_REVIEW
+
 def test_an_undated_regulator_is_capped_at_tier_3_and_goes_to_an_sme(tmp_path):
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
         source("https://manitoba.example/permit", "Brady Road", values=[value("operator", "City of Winnipeg")], published=""),

@@ -419,7 +419,14 @@ Every value found is written to `found_values.csv` with one of three statuses:
 |---|---|
 | `auto-approved` | It fills an empty field, and its pair's source is Tier 1–2 with none of the exceptions below. It loads without review. |
 | `SME review` | It fills an empty field, and its pair's source is Tier 3–5, or Tier 1–2 with an exception. It loads once an SME approves the pair on Site_Review. |
-| `not used` | Anything else. `status_reason` says why: it confirms our value; it would change a value we hold; its link is dead or missing; it could not be converted or mapped; the agent itself marked it an excluded candidate; it says Not a Waste Facility of a site not offered that check; or it is one of the agent's unverified leads. |
+| `not used` | Anything else. `status_reason` says why: it confirms our value; it would change a value we hold; its link is dead or missing; it could not be converted or mapped; the agent itself marked it an excluded candidate; it says Not a Waste Facility of a site not offered that check; it is one of the agent's unverified leads; or an auto-approved source of a better tier already gives every value its source gives (see below). |
+
+**A source that adds nothing isn't reviewed.** One value loads per site, attribute and year, and
+the best tier wins. So where an auto-approved source of a better tier already gives every value a
+source would load, for the same site, attribute and year, approving that source could load
+nothing: it is marked not used instead of going to SMEs. In the 10-site tests that was 6 of
+gpt-5.4's 38 sources for review and 1 of mini's 22. A source that says the site is Not a Waste
+Facility is reviewed all the same.
 
 Tier 1 is a regulator, permit or operator; Tier 2 is government statistics, peer-reviewed or
 intergovernmental data (see [Source credibility](#source-credibility)). A pair takes the tier of

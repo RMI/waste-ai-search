@@ -158,8 +158,9 @@ def test_a_value_an_auto_approved_source_contradicts_is_flagged_with_which_loads
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
         source("https://manitoba.example/permit", "Brady Road Landfill", values=[value("operator", "City of Winnipeg"), value("opening_year", "1973")]),
         source("https://stats.example/table", "Brady Road", values=[value("facility_status", "Active", "2024")], source_type="Government statistics"),
-        # Tier 3, so for review: it loses the operator to the permit, and agrees on the opening year.
-        source("https://news.example/brady", "Brady Road", values=[value("operator", "Waste Connections"), value("opening_year", "1973")], source_type="News report"),
+        # Tier 3, so for review: it loses the operator to the permit, agrees on the opening year, and
+        # gives a flare nothing else does (without one, it would not be reviewed at all).
+        source("https://news.example/brady", "Brady Road", values=[value("operator", "Waste Connections"), value("opening_year", "1973"), value("has_flare", "TRUE")], source_type="News report"),
         # Tier 1 but 6 km off, so for review: approved, its status would replace the statistics'.
         source("https://manitoba.example/notice", "Brady Road", "49.8120, -97.2004", values=[value("facility_status", "Inactive", "2024")]),
     ]})
