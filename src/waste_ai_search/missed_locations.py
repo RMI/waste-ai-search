@@ -197,10 +197,15 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+# What evidence.csv states of where each source puts the facility: its address and coordinates, or
+# in evidence arbitrated before they were two fields, its one stated_location.
+STATED_COLUMNS = ("stated_address", "stated_coordinates", "stated_location")
+
+
 def measure(run_dir: Path) -> Measurement:
     """Measure one arbitrated run whose link check kept page text."""
     evidence = _read_csv(run_dir / "evidence.csv")
-    if evidence and "stated_location" not in evidence[0]:
+    if evidence and not any(column in evidence[0] for column in STATED_COLUMNS):
         raise SystemExit(
             f"{run_dir / 'evidence.csv'} predates stated locations: arbitrate the run again with this version first."
         )
@@ -233,7 +238,7 @@ def measure(run_dir: Path) -> Measurement:
         if not text:
             continue
         searched = sorted({row.get("searched_site_id") or row.get("site_id", "") for row in rows} - {""})
-        stated = [row for row in rows if normalize_scalar(row.get("stated_location"))]
+        stated = [row for row in rows if any(normalize_scalar(row.get(column)) for column in STATED_COLUMNS)]
         source = sources.get(source_id, {})
         measurement.reports.append(PageReport(
             source_id=source_id,

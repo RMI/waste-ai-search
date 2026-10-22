@@ -98,10 +98,11 @@ def old_response(coordinates, source=NEWS):
 
 
 def stated(*sources):
-    """A source-first response: each (source, stated location, kind), with no values."""
+    """A source-first response: each (source, the coordinates or grid reference it states), with
+    no values."""
     return {"sources": [
-        {**source, "stated_location": location, "stated_location_kind": kind, "values": []}
-        for source, location, kind in sources
+        {**source, "stated_address": "", "stated_coordinates": coordinates, "values": []}
+        for source, coordinates in sources
     ]}
 
 
@@ -118,7 +119,9 @@ def test_an_older_response_still_gives_one_location_row(tmp_path):
         (LOCATION_ATTRIBUTE, "32.5122, -116.2134", "Conflict - needs review")
     ]
     [evidence] = rows(run_dir, "evidence.csv")
-    assert (evidence["stated_location"], evidence["location_basis"]) == ("32.5122, -116.2134", "coordinates")
+    assert (evidence["stated_coordinates"], evidence["stated_address"], evidence["location_basis"]) == (
+        "32.5122, -116.2134", "", "coordinates",
+    )
 
     ws = load_workbook(run_dir / "run_review.xlsx")["Review_Queue"]
     header = [cell.value for cell in ws[1]]
@@ -129,7 +132,7 @@ def test_a_regulators_location_a_few_hundred_metres_from_ours_is_reviewed(tmp_pa
     # The permit's point is about 0.25 km from OSM's. The 1 km rule once settled it as the same
     # place, auto-validated; now it is a value like any other, and the SME decides.
     run_dir = arbitrate_el_hongo(
-        tmp_path, stated((REGULATOR, "32.5122, -116.2000", "coordinates")), latitude="32.51", longitude="-116.2",
+        tmp_path, stated((REGULATOR, "32.5122, -116.2000")), latitude="32.51", longitude="-116.2",
     )
     assert [(row["attribute_name"], row["resolved_value"], row["resolution"]) for row in rows(run_dir, "review_queue.csv")] == [
         (LOCATION_ATTRIBUTE, "32.5122, -116.2", "Overrides baseline")
@@ -141,9 +144,9 @@ def test_the_most_credible_source_wins_then_the_newest(tmp_path):
     newer_permit = {**REGULATOR, "publication_date": "2021-01-01", "url": "https://gob.example.mx/2021"}
     newest_news = {**NEWS, "publication_date": "2024-06-01"}
     run_dir = arbitrate_el_hongo(tmp_path, stated(
-        (older_permit, "32.5100, -116.2100", "coordinates"),
-        (newest_news, "32.6000, -116.3000", "coordinates"),
-        (newer_permit, "32.5200, -116.2200", "coordinates"),
+        (older_permit, "32.5100, -116.2100"),
+        (newest_news, "32.6000, -116.3000"),
+        (newer_permit, "32.5200, -116.2200"),
     ))
     [location] = rows(run_dir, "review_queue.csv")
     assert (location["resolved_value"], location["winning_source_url"]) == ("32.52, -116.22", newer_permit["url"])
@@ -182,7 +185,7 @@ def test_a_grid_reference_becomes_the_found_location(tmp_path):
     raw = run_dir / "raw_foundry_responses"
     raw.mkdir(parents=True)
     sepa = {**REGULATOR, "publisher": "SEPA", "url": "https://sepa.example/permit"}
-    (raw / "site_5.json").write_text(json.dumps({"site_id": "5", **stated((sepa, "NN 16667 71283", "grid reference"))}))
+    (raw / "site_5.json").write_text(json.dumps({"site_id": "5", **stated((sepa, "NN 16667 71283"))}))
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
     [location] = rows(run_dir, "review_queue.csv")
@@ -195,7 +198,7 @@ def test_a_grid_reference_becomes_the_found_location(tmp_path):
 
 def test_where_our_coordinates_are_trusted_source_locations_are_recorded_not_queued(tmp_path):
     run_dir = arbitrate_el_hongo(
-        tmp_path, stated((REGULATOR, "32.5122, -116.2000", "coordinates")), latitude="32.51", longitude="-116.2",
+        tmp_path, stated((REGULATOR, "32.5122, -116.2000")), latitude="32.51", longitude="-116.2",
         attribute_sources="found_latitude@mexico_inegi_2016; found_longitude@mexico_inegi_2016",
     )
     assert rows(run_dir, "review_queue.csv") == []
@@ -208,7 +211,7 @@ def test_where_our_coordinates_are_trusted_source_locations_are_recorded_not_que
 
 
 def test_a_source_with_only_a_location_is_a_source(tmp_path):
-    run_dir = arbitrate_el_hongo(tmp_path, stated((REGULATOR, "32.5122, -116.2000", "coordinates")))
+    run_dir = arbitrate_el_hongo(tmp_path, stated((REGULATOR, "32.5122, -116.2000")))
     [source] = rows(run_dir, "sources.csv")
     [evidence] = rows(run_dir, "evidence.csv")
     assert source["source_id"] == evidence["source_id"]
@@ -217,23 +220,29 @@ def test_a_source_with_only_a_location_is_a_source(tmp_path):
 def test_a_value_row_carries_its_sources_facility_and_location(tmp_path):
     source = {**REGULATOR, "facility_name_in_source": "Relleno Sanitario El Hongo",
               "facility_name_english": "El Hongo Sanitary Landfill",
-              "stated_location": "32.5122, -116.2000", "stated_location_kind": "coordinates",
+              "stated_address": "", "stated_coordinates": "32.5122, -116.2000",
               "values": [{"attribute_name": "operator", "value": "Ayuntamiento de Tecate", "unit": "",
                           "value_basis": "Direct", "confidence_score": "High", "value_date": "2023",
                           "evidence_summary": "The permit names the operator."}]}
+    source["stated_address"] = "Carretera Tecate-Ensenada km 10, Tecate"
     run_dir = arbitrate_el_hongo(tmp_path, {"sources": [source]})
     operator = next(row for row in rows(run_dir, "evidence.csv") if row["attribute_name"] == "operator")
     assert operator["facility_name_in_source"] == "Relleno Sanitario El Hongo"
     assert operator["facility_name_english"] == "El Hongo Sanitary Landfill"
+    # The address and coordinates it states, each as written; the coordinates win.
+    assert (operator["stated_address"], operator["stated_coordinates"]) == (
+        "Carretera Tecate-Ensenada km 10, Tecate", "32.5122, -116.2000",
+    )
     assert (operator["location_basis"], operator["located_latitude"], operator["located_longitude"]) == (
         "coordinates", "32.5122", "-116.2",
     )
 
 
 def test_a_coordinates_only_site_gets_its_found_location_from_a_source(tmp_path):
-    """Brazil's inexact SINIR sites are searched for sources that say where the dump is. The permit
-    places it 8 km from the municipality centre we hold, beyond the 2 km match but within the 25 km
-    an inexact location allows a source whose name matches."""
+    """Brazil's inexact SINIR sites were searched for sources that say where the dump is, and a
+    response cached then still arbitrates. The permit places it 8 km from the municipality centre we
+    hold, beyond the 2 km match but within the 25 km an inexact location allows a source whose name
+    matches."""
     from waste_ai_search.seed_source import seed_headers
 
     run_dir = tmp_path / "run"
@@ -247,7 +256,7 @@ def test_a_coordinates_only_site_gets_its_found_location_from_a_source(tmp_path)
     raw.mkdir(parents=True)
     permit = {**REGULATOR, "publisher": "NATURATINS", "url": "https://naturatins.example.br/licenca/123",
               "facility_name_in_source": "Lixão Municipal de Porto Nacional"}
-    (raw / "site_9.json").write_text(json.dumps({"site_id": "9", **stated((permit, "-10.2481, -48.3612", "coordinates"))}))
+    (raw / "site_9.json").write_text(json.dumps({"site_id": "9", **stated((permit, "-10.2481, -48.3612"))}))
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
     [location] = rows(run_dir, "review_queue.csv")

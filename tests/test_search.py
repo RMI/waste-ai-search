@@ -341,9 +341,11 @@ def test_us_and_brazil_sites_are_excluded_by_default(tmp_path):
     assert selected_ids(seed) == ["2"]
 
 
-def test_naming_brazil_still_searches_its_inexact_sites(tmp_path):
+def test_naming_brazil_finds_nothing_left_to_ask_of_its_inexact_sites(tmp_path):
+    """Changed on purpose for step 1 of the approve-sources plan: Brazil was searched only for where
+    an inexact site is, and a location is no longer asked for, so naming it searches nothing."""
     seed = seed_with_countries(tmp_path, "USA", "PHL", "USA", "BRA")
-    assert selected_ids(seed, iso3=["BRA"]) == ["4"]
+    assert selected_ids(seed, iso3=["BRA"]) == []
 
 
 def test_brazil_with_an_exact_location_drops_out_of_selection_entirely(tmp_path):
@@ -373,13 +375,14 @@ def test_an_unrelated_country_filter_still_excludes_the_us(tmp_path):
     assert selected_ids(seed, iso3=["PHL"]) == ["2"]
 
 
-def test_brazil_searches_coordinates_only_where_the_location_is_inexact():
+def test_brazil_asks_nothing_even_where_the_location_is_inexact():
     from waste_ai_search.prompt_builder import coordinates_only, requested_attributes
 
     bra = {"site_id": "1", "country_iso3": "BRA", "is_location_exact": "FALSE"}
     assert coordinates_only(bra)
-    # Changed on purpose for build step 4: a location is what its sources state, as found_location.
-    assert requested_attributes(bra) == ["found_location"]
+    # Changed on purpose for step 1 of the approve-sources plan: a location is no longer asked for,
+    # and it was all Brazil was searched for.
+    assert requested_attributes(bra) == []
 
 
 def test_brazil_with_an_exact_location_is_searched_for_nothing():
@@ -405,22 +408,14 @@ def test_unknown_location_accuracy_is_not_treated_as_inexact():
     assert requested_attributes(unknown) == []
 
 
-def test_brazilian_sites_are_scoped_to_coordinates_or_skipped():
-    """The COORDINATES_ONLY_ISO3 rule is live now; it used to match nothing.
-
-    This test previously asserted that NO Brazilian site was searched, because `is_location_exact`
-    was TRUE corpus-wide in the seed of the day. Regenerating the seed changed that: Brazil went
-    from 303 sites, all exact, to 4,225 of which 3,913 are flagged inexact. The rule those
-    facilities were written for now fires for every one of them.
-
-    What must hold either way is the shape of the rule: an inexact Brazilian site is searched for
-    coordinates and nothing else, and an exact one is not searched at all.
-    """
+def test_no_brazilian_site_is_searched():
+    """The COORDINATES_ONLY_ISO3 rule scoped Brazil to coordinates, for its 3,913 sites flagged
+    inexact. Since step 1 of the approve-sources plan a location is not asked for, so no Brazilian
+    site has anything to ask, inexact or not."""
     import csv
     from pathlib import Path as _Path
 
-    from waste_ai_search.prompt_builder import location_is_inexact, requested_attributes
-    from waste_ai_search.schema import LOCATION_ATTRIBUTE
+    from waste_ai_search.prompt_builder import requested_attributes
 
     seed = _Path(__file__).parents[1] / "inputs" / "consolidated_sites.csv"
     if not seed.exists():
@@ -430,15 +425,7 @@ def test_brazilian_sites_are_scoped_to_coordinates_or_skipped():
     assert bra, "expected Brazilian sites in the seed"
 
     for site in bra:
-        requested = requested_attributes(site)
-        if location_is_inexact(site):
-            assert requested == [LOCATION_ATTRIBUTE], (
-                f"BRA site {site['site_id']} should be scoped to coordinates alone, got {requested}"
-            )
-        else:
-            assert requested == [], (
-                f"BRA site {site['site_id']} has an exact location and should not be searched"
-            )
+        assert requested_attributes(site) == [], f"BRA site {site['site_id']} should not be searched"
 
 
 def test_sites_with_nothing_to_ask_are_dropped_from_selection(tmp_path):
@@ -451,7 +438,7 @@ def test_sites_with_nothing_to_ask_are_dropped_from_selection(tmp_path):
         "3,Philippine Site,PHL,TRUE,1.0,2.0\n",
         encoding="utf-8",
     )
-    assert selected_ids(seed, include_excluded_countries=True) == ["2", "3"]
+    assert selected_ids(seed, include_excluded_countries=True) == ["3"]
 
 
 def test_other_countries_are_unaffected_by_the_brazil_rule():

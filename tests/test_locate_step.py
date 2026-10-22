@@ -1,6 +1,7 @@
 """The locate step: it runs in the search phase after the link check, and only it uses the network.
 
-Every source's stated location is located once and the answer kept in source_locations.json,
+Where every source puts the facility - its stated coordinates and address - is located once and
+the answer kept in source_locations.json,
 which arbitration reads, so arbitration stays offline. `locate --run-id` backfills an older run,
 as `check-links` does, and `--no-locate` skips it. No test here reaches a real geocoder.
 """
@@ -29,12 +30,16 @@ def response(*sources):
     return {"site_id": "1", "sources": list(sources), "unverified_leads": [], "search_notes": "Searched."}
 
 
-def source(url, stated, kind, **extra):
-    return {**PERMIT, "url": url, "stated_location": stated, "stated_location_kind": kind, "values": [], **extra}
+def source(url, address="", coordinates="", **extra):
+    return {**PERMIT, "url": url, "stated_address": address, "stated_coordinates": coordinates, "values": [], **extra}
 
 
-ADDRESS = source("https://epa.example.ie/licence/W0123", "Ballynagran, Coolbeg, Co. Wicklow", "street address")
-GRID = source("https://epa.example.ie/licence/W0124", "T 285 935", "grid reference")
+ADDRESS = source("https://epa.example.ie/licence/W0123", address="Ballynagran, Coolbeg, Co. Wicklow")
+GRID = source("https://epa.example.ie/licence/W0124", coordinates="T 285 935")
+
+
+def stated(row):
+    return row["stated_address"] or row["stated_coordinates"]
 
 
 class FakeGeocoder:
@@ -89,8 +94,8 @@ def test_the_search_locates_each_stated_location_after_the_link_check(tmp_path, 
     geocoder.calls.clear()
     run_arbitration(config)
     assert geocoder.calls == []
-    bases = {row["stated_location"]: row["location_basis"] for row in csv.DictReader((config.run_dir / "evidence.csv").open())}
-    assert bases == {ADDRESS["stated_location"]: ROOFTOP, GRID["stated_location"]: "grid reference"}
+    bases = {stated(row): row["location_basis"] for row in csv.DictReader((config.run_dir / "evidence.csv").open())}
+    assert bases == {ADDRESS["stated_address"]: ROOFTOP, GRID["stated_coordinates"]: "grid reference"}
 
     run_config = {row[0]: row[1] for row in load_workbook(config.run_dir / "run_review.xlsx")["Run_Config"].iter_rows(values_only=True)}
     assert run_config["locations_stated"] == "2 (grid reference 1, rooftop 1)"
@@ -122,8 +127,8 @@ def test_no_locate_skips_the_step(tmp_path, monkeypatch):
     assert geocoder.calls == []
     # Arbitration still reads coordinates and grid references itself; an address waits for locate.
     run_arbitration(config)
-    reasons = {row["stated_location"]: row["location_reason"] for row in csv.DictReader((config.run_dir / "evidence.csv").open())}
-    assert reasons == {ADDRESS["stated_location"]: NOT_LOCATED, GRID["stated_location"]: ""}
+    reasons = {stated(row): row["location_reason"] for row in csv.DictReader((config.run_dir / "evidence.csv").open())}
+    assert reasons == {ADDRESS["stated_address"]: NOT_LOCATED, GRID["stated_coordinates"]: ""}
     run_config = {row[0]: row[1] for row in load_workbook(config.run_dir / "run_review.xlsx")["Run_Config"].iter_rows(values_only=True)}
     assert run_config["geocoder"] == "locate step not run"
 

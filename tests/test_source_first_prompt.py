@@ -1,9 +1,12 @@
-"""The prompt asks for sources first (build step 4 of the source-matching plan).
+"""The prompt asks for sources first (build step 4 of the source-matching plan), and only for
+sources about this site (step 1 of the approve-sources plan).
 
-Each source reports the facility it describes - its name and location as the source writes them -
-and the values it gives. The agent no longer decides whether a source is about this site: it
-reports what each source says, and code decides. Our coordinates go in rounded to about 1 km, so
-there is nothing worth copying.
+Each source reports the facility it describes - its name, address and coordinates as the source
+writes them - and the values it gives. Batch 1's rule is back: the agent decides whether a source
+is about this site, returns only those, and nothing where it can't confirm it. #31's "report
+sources about other facilities too, and our code decides" is reversed. The name and location a
+source gives are only used to check the match, so neither is asked for as a value. Our coordinates
+go in rounded to about 1 km, so there is nothing worth copying.
 """
 from __future__ import annotations
 
@@ -47,13 +50,13 @@ def test_the_contract_is_sources_first():
     (source,) = output["sources"]
     assert list(source) == [
         "url", "source_title", "publisher", "source_type", "publication_date", "language", "paywall_flag",
-        "facility_name_in_source", "facility_name_english", "stated_location", "stated_location_kind", "values",
+        "facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates", "values",
     ]
     assert list(source["values"][0]) == [
         "attribute_name", "value", "unit", "value_basis", "confidence_score", "value_date",
         "evidence_summary", "search_terms_used", "quoted_evidence_short",
     ]
-    assert source["stated_location_kind"] == "coordinates / grid reference / street address / place description / none"
+    assert "stated_location" not in prompt_for(THUNDER_BAY)
 
 
 def test_our_coordinates_are_rounded_to_about_a_kilometre_with_the_place_names():
@@ -66,52 +69,72 @@ def test_our_coordinates_are_rounded_to_about_a_kilometre_with_the_place_names()
     assert "1 Landfill Road" not in prompt
 
 
-def test_coordinates_are_no_longer_asked_for_as_values():
+def test_neither_the_name_nor_the_location_is_asked_for_as_a_value():
     prompt = prompt_for(THUNDER_BAY)
     assert "found_latitude" not in prompt and "found_longitude" not in prompt
-    targets = json.loads(section(prompt, "Target attributes"))
-    assert "found_location" not in {target["attribute_name"] for target in targets}
-    assert "found_facility_name" in {target["attribute_name"] for target in targets}
-    assert "Where this facility is matters too" in prompt
+    targets = {target["attribute_name"] for target in json.loads(section(prompt, "Target attributes"))}
+    assert not targets & {"found_location", "found_facility_name"}
+    assert "found_facility_name" not in prompt
+    assert "Where this facility is matters too" not in prompt
+    for provenance in ("", "found_facility_name@lmop_2024", "found_latitude@eprtr_2022; found_longitude@eprtr_2022"):
+        attributes = requested_attributes({**THUNDER_BAY, "attribute_sources": provenance})
+        assert not set(attributes) & {"found_location", "found_facility_name"}, provenance
 
 
-def test_the_agent_reports_what_each_source_says_and_code_decides():
+def test_the_agent_returns_only_sources_about_this_site_as_in_batch_1():
     prompt = " ".join(prompt_for(THUNDER_BAY).split())
-    assert "Identity first" not in prompt
-    assert "If you cannot confirm you found this specific facility" not in prompt
-    assert "Research only this site." in prompt
-    assert "Our code decides whether that facility is this site" in prompt
-    assert "still report it, with that facility's name and location, but do not research the other facility further" in prompt
-    assert "report only the entry you used" in prompt
-    assert "is still reported, with an empty values list" in prompt
+    assert "Identity first: - Return only sources about THIS facility." in prompt
+    assert "Use the names and approximate coordinates in the site context to check that each source describes it." in prompt
+    assert (
+        "If you cannot confirm you found this specific facility, return an empty sources list and explain why in "
+        "search_notes. Do not return data for a different site."
+    ) in prompt
+    assert "From a page listing many facilities, such as a registry, use only this facility's entry." in prompt
+    # #31's rule, reversed.
+    assert "Our code decides" not in prompt
+    assert "still report it" not in prompt
+    assert "with an empty values list" not in prompt
 
 
-def test_a_location_is_copied_never_worked_out():
+def test_each_source_states_the_facilitys_name_address_and_coordinates_as_written():
     prompt = " ".join(prompt_for(THUNDER_BAY).split())
-    assert "copied exactly as written" in prompt
+    assert (
+        "Report each source you use once, with the facility as that source describes it: facility_name_in_source "
+        "and facility_name_english, stated_address and stated_coordinates."
+    ) in prompt
+    assert "stated_address is the site's own address, copied exactly as written: never the operator's office." in prompt
+    assert "stated_coordinates is the site's coordinates or grid reference, copied exactly as written." in prompt
+    assert "Give both fields where the source gives both." in prompt
     assert "Never work a location out" in prompt
     assert "never use the coordinates in the site context" in prompt
-    assert "not the operator's office" in prompt
-    assert "Leave it blank if the source gives none" in prompt
-    assert 'stated_location_kind "coordinates | street address"' in prompt
+    assert "leave a field blank if the source gives none" in prompt
+    # Optional in the plan: on gpt-5.4, 5 of 51 pages gave an address the agent didn't copy.
+    assert "A page often gives it in a contact box or footer, so look there too." in prompt
 
 
-def test_the_found_name_keeps_its_specificity_rule():
-    prompt = prompt_for(THUNDER_BAY)
-    targets = {target["attribute_name"]: target for target in json.loads(section(prompt, "Target attributes"))}
-    assert "Bass Coast Shire Waste Management Facility" in targets["found_facility_name"]["guidance"]
+def test_a_trusted_name_or_location_is_called_confirmed_and_only_then():
+    trusted = "found_facility_name@lmop_2024; found_latitude@eprtr_2022; found_longitude@eprtr_2022"
+    cases = {
+        trusted: "The name and coordinates are already confirmed by an authoritative source.",
+        "found_facility_name@lmop_2024": "The name is already confirmed by an authoritative source.",
+        "found_latitude@eprtr_2022; found_longitude@eprtr_2022": "The coordinates are already confirmed by an authoritative source.",
+    }
+    for provenance, said in cases.items():
+        assert said in " ".join(prompt_for({**THUNDER_BAY, "attribute_sources": provenance}).split()), provenance
+    assert "already confirmed" not in prompt_for(THUNDER_BAY)
+    # Coordinates flagged inexact are never called confirmed, whoever supplied them.
+    inexact = {**THUNDER_BAY, "attribute_sources": trusted, "is_location_exact": "FALSE"}
+    assert "The name is already confirmed" in " ".join(prompt_for(inexact).split())
 
 
-def test_a_coordinates_only_site_is_searched_for_sources_that_say_where_it_is(tmp_path):
+def test_a_coordinates_only_site_has_nothing_to_ask_and_is_not_searched(tmp_path):
+    """Changed on purpose for step 1 of the approve-sources plan. Brazil was searched only for
+    sources stating where an inexact site is, and a location is no longer asked for, so a
+    coordinates-only search would load nothing."""
     bra = {"site_id": "7", "site_name": "Lixão de Exemplo", "country_iso3": "BRA", "is_location_exact": "FALSE",
            "latitude": "-10.123456", "longitude": "-48.654321", "municipality": "Palmas", "admin1": "TO"}
-    assert requested_attributes(bra) == ["found_location"]
-    prompt = prompt_for(bra)
-    assert json.loads(section(prompt, "Target attributes")) == []
-    assert "No attribute values are wanted for this site, only where it is" in prompt
-    assert "Only the attributes listed below are wanted" not in prompt
+    assert requested_attributes(bra) == []
 
-    # select_sites drops a site with nothing to ask, so this one must still be selected.
     seed = tmp_path / "seed.csv"
     seed.write_text(
         "site_id,site_name,country_iso3,is_location_exact,latitude,longitude\n"
@@ -122,7 +145,7 @@ def test_a_coordinates_only_site_is_searched_for_sources_that_say_where_it_is(tm
 
     sites, _headers = load_sites(seed)
     config = PipelineConfig(input_csv=seed, run_dir=tmp_path / "run", run_id="t", iso3=["BRA"])
-    assert [site["site_id"] for site in select_sites(sites, config)] == ["7"]
+    assert select_sites(sites, config) == []
 
 
 def test_the_search_cap_and_map_site_guidance_are_unchanged():
@@ -133,16 +156,12 @@ def test_the_search_cap_and_map_site_guidance_are_unchanged():
 
 
 def test_the_prompt_stays_compact():
-    """About 7% longer than the attribute-first prompt it replaced (16.5k characters for this site)."""
+    """About as long as the attribute-first prompt it replaced (16.5k characters for this site)."""
     assert len(prompt_for(THUNDER_BAY)) < 18_500
     assert not re.search(r"\n{4,}", prompt_for(THUNDER_BAY))
 
 
 def test_status_and_closure_is_asked_only_where_status_or_the_closing_year_is_wanted():
-    # Brazil asks only where the site is; its status is government data and left alone.
-    bra = {"site_id": "7", "site_name": "Lixão de Exemplo", "country_iso3": "BRA", "is_location_exact": "FALSE",
-           "latitude": "-10.123456", "longitude": "-48.654321"}
-    assert "Status and closure" not in prompt_for(bra)
     # The gas follow-up asks for the gas attributes alone.
     assert "Status and closure" not in prompt_for(THUNDER_BAY, ["has_flare", "flare_efficiency"])
     known = {**THUNDER_BAY, "facility_status": "Active", "closing_year": "2031"}
@@ -151,9 +170,16 @@ def test_status_and_closure_is_asked_only_where_status_or_the_closing_year_is_wa
         assert "return\n  facility_status = Inactive AND search for closing_year" in prompt_for(THUNDER_BAY, asked)
 
 
-def test_a_translated_name_is_one_facility_to_search_for_with_no_identity_to_confirm():
+def test_a_translated_name_is_one_facility_and_agreeing_on_it_alone_confirms_nothing():
+    """Batch 1's wording, back with its identity rule."""
     mex = {"site_id": "1", "site_name": "Municipal Landfill of Tijuana", "original_site_name": "Relleno Sanitario de Tijuana",
            "source_language": "es", "country_iso3": "MEX", "latitude": "32.5", "longitude": "-117.0"}
-    names = section(prompt_for(mex), "Names")
-    assert "Treat them as one facility with two names, never as two\n  candidates." in names
-    assert "identity" not in names
+    names = " ".join(section(prompt_for(mex), "Names").split())
+    assert (
+        "Treat them as one facility with two names, never as two candidates: agreeing on the translated name alone "
+        "is not identity confirmation."
+    ) in names
+    assert (
+        "Give each source's own name for the facility as facility_name_in_source, exactly as that source spells it, "
+        "in whatever script or language it uses. Do not translate it back."
+    ) in names

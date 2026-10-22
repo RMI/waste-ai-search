@@ -39,12 +39,12 @@ def seed(site_id, name, lat, lon, iso3="CAN", **extra):
     }
 
 
-def source(url, name="", location="", values=(), source_type="Regulator", published="2024-03-01"):
+def source(url, name="", location="", values=(), source_type="Regulator", published="2024-03-01", address=""):
+    """A source as the agent reports one; `location` is the coordinates it states."""
     return {
         "url": url, "source_title": "Page", "publisher": "Publisher", "source_type": source_type,
         "publication_date": published, "facility_name_in_source": name, "facility_name_english": "",
-        "stated_location": location, "stated_location_kind": "coordinates" if location else "",
-        "values": list(values),
+        "stated_address": address, "stated_coordinates": location, "values": list(values),
     }
 
 
@@ -116,15 +116,21 @@ def test_every_source_filed_under_a_site_is_decided_together(tmp_path):
 
 def test_source_coordinates_is_where_the_winning_source_places_the_facility(tmp_path):
     """Beside stated_location, the point read from it, to paste into Google Maps next to
-    baseline_coordinates. Blank where the source states no location that could be placed."""
+    baseline_coordinates. Blank where the source states no location that could be placed.
+    stated_location is the coordinates and address the source states, joined where it gives both."""
     permit = source("https://manitoba.example/permit/brady", "Brady Road Landfill", "49.7590, -97.2010",
                     values=[value("operator", "City of Winnipeg")])
     # Its address was never geocoded, so it places nothing.
-    news = source("https://news.example/brady", "Brady Road", "1777 Brady Road, Winnipeg",
+    news = source("https://news.example/brady", "Brady Road", address="1777 Brady Road, Winnipeg",
                   values=[value("opening_year", "1973")])
-    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [permit, news]})
+    both = source("https://manitoba.example/permit/brady-2", "Brady Road Landfill", "49.7590, -97.2010",
+                  values=[value("closing_year", "2045")], address="1777 Brady Road, Winnipeg")
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [permit, news, both]})
 
     by_attribute = {row["attribute_name"]: row for row in rows(run_dir, "review_queue.csv")}
+    assert (by_attribute["closing_year"]["stated_location"], by_attribute["closing_year"]["source_coordinates"]) == (
+        "49.7590, -97.2010 | 1777 Brady Road, Winnipeg", "49.759, -97.201",
+    )
     assert by_attribute["operator"]["source_coordinates"] == "49.759, -97.201"
     assert by_attribute[LOCATION_ATTRIBUTE]["source_coordinates"] == "49.759, -97.201"
     opening = by_attribute["opening_year"]

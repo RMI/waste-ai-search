@@ -68,27 +68,27 @@ def test_nothing_to_check_or_no_page_text():
 
 
 def test_stated_coordinates_count_where_the_page_gives_them_to_more_decimals():
-    assert location_on_page("-40.88365, 175.0277", "coordinates", PAGE) == FOUND
+    assert location_on_page("", "-40.88365, 175.0277", PAGE) == FOUND
     # Trailing zeros say nothing.
-    assert location_on_page("-40.88365, 175.02770", "coordinates", PAGE) == FOUND
+    assert location_on_page("", "-40.88365, 175.02770", PAGE) == FOUND
     # A sign or hemisphere is not compared, but the digits are.
-    assert location_on_page("40.8836512 S, 175.0277 E", "coordinates", PAGE) == FOUND
-    assert location_on_page("-40.88365, 176.1234", "coordinates", PAGE) == PARTLY
-    assert location_on_page("-41.2000, 174.7700", "coordinates", PAGE) == NOT_FOUND
+    assert location_on_page("", "40.8836512 S, 175.0277 E", PAGE) == FOUND
+    assert location_on_page("", "-40.88365, 176.1234", PAGE) == PARTLY
+    assert location_on_page("", "-41.2000, 174.7700", PAGE) == NOT_FOUND
     # 140.8836 is not 40.8836.
-    assert location_on_page("140.8836, 75.0277", "coordinates", PAGE) == NOT_FOUND
+    assert location_on_page("", "140.8836, 75.0277", PAGE) == NOT_FOUND
 
 
 def test_a_grid_reference_is_compared_without_its_spaces():
-    assert location_on_page("TQ 310 806", "grid reference", PAGE) == FOUND
-    assert location_on_page("TQ 311 806", "grid reference", PAGE) == NOT_FOUND
+    assert location_on_page("", "TQ 310 806", PAGE) == FOUND
+    assert location_on_page("", "TQ 311 806", PAGE) == NOT_FOUND
 
 
 def test_of_a_stated_pair_the_better_counts_and_an_address_is_a_phrase():
-    assert location_on_page("-40.88365, 175.0277 | 1 Otaihanga Road", "coordinates | street address", PAGE) == FOUND
-    assert location_on_page("Otaihanga Road, Paraparaumu", "street address", PAGE) == FOUND
+    assert location_on_page("1 Otaihanga Road", "-40.88365, 175.0277", PAGE) == FOUND
+    assert location_on_page("Otaihanga Road, Paraparaumu", "", PAGE) == FOUND
     assert location_on_page("", "", PAGE) == ""
-    assert location_on_page("Otaihanga Road", "street address", None) == NO_PAGE_TEXT
+    assert location_on_page("Otaihanga Road", "", None) == NO_PAGE_TEXT
 
 
 def test_numbers_and_units_count_however_they_are_spaced():
@@ -132,24 +132,32 @@ def test_a_quote_too_short_to_mean_anything_is_not_checked():
 
 def test_an_address_written_slightly_differently_still_counts():
     page = Page("Find us at 12 Foo Rd, Barton OX1 2AB.")
-    assert location_on_page("12 Foo Road, Barton", "street address", page) == FOUND
-    assert location_on_page("12 Foo Road, Barton, Oxon OX1 2AB, United Kingdom", "street address", page) == PARTLY
+    assert location_on_page("12 Foo Road, Barton", "", page) == FOUND
+    assert location_on_page("12 Foo Road, Barton, Oxon OX1 2AB, United Kingdom", "", page) == PARTLY
 
 
 def test_the_part_of_a_location_its_point_was_read_from_is_the_one_that_counts():
     """An address on the page says nothing of coordinates beside it that aren't."""
     page = Page("Otaihanga Landfill, 12 Otaihanga Road, Paraparaumu.")
-    stated, kinds = "-40.8870, 175.0290 | 12 Otaihanga Road, Paraparaumu", "coordinates | street address"
-    assert location_on_page(stated, kinds, page, basis="coordinates") == NOT_FOUND
-    assert location_on_page(stated, kinds, page, basis="rooftop") == FOUND
+    address, coordinates = "12 Otaihanga Road, Paraparaumu", "-40.8870, 175.0290"
+    assert location_on_page(address, coordinates, page, basis="coordinates") == NOT_FOUND
+    assert location_on_page(address, coordinates, page, basis="rooftop") == FOUND
     # With no usable point, the better of the two counts.
-    assert location_on_page(stated, kinds, page) == FOUND
+    assert location_on_page(address, coordinates, page) == FOUND
+
+
+def test_coordinates_given_as_the_address_are_checked_as_coordinates():
+    assert location_on_page("-40.88365, 175.02770", "", PAGE) == FOUND
+    assert location_on_page("-41.2000, 174.7700", "", PAGE) == NOT_FOUND
+    # Of a grid reference and coordinates, the one the point was read from counts.
+    assert location_on_page("", "TQ 310 806 | -41.2000, 174.7700", PAGE, basis="grid reference") == FOUND
+    assert location_on_page("", "TQ 310 806 | -41.2000, 174.7700", PAGE, basis="coordinates") == NOT_FOUND
 
 
 def test_a_point_the_page_gives_in_another_form_counts_within_250_m():
     page = Page("Site location: 40°53'01\"S 175°01'40\"E.")
-    assert location_on_page("-40.8836, 175.0277", "coordinates", page, "coordinates", (-40.8836, 175.0277)) == FOUND
-    assert location_on_page("-40.9000, 175.0277", "coordinates", page, "coordinates", (-40.9000, 175.0277)) == NOT_FOUND
+    assert location_on_page("", "-40.8836, 175.0277", page, "coordinates", (-40.8836, 175.0277)) == FOUND
+    assert location_on_page("", "-40.9000, 175.0277", page, "coordinates", (-40.9000, 175.0277)) == NOT_FOUND
 
 
 def test_a_page_built_by_javascript_is_no_text_and_one_read_in_part_isnt_flagged(tmp_path):
@@ -193,11 +201,11 @@ def value(attribute, found, quote, value_date="2024"):
             "quoted_evidence_short": quote}
 
 
-def source(url, values, name="Otaihanga Landfill", location="", kind=""):
+def source(url, values, name="Otaihanga Landfill", location=""):
     return {"url": url, "source_title": "Page", "publisher": "Kapiti Coast District Council",
             "source_type": "Municipal document", "publication_date": "2024-03-01",
-            "facility_name_in_source": name, "facility_name_english": "", "stated_location": location,
-            "stated_location_kind": kind, "values": values}
+            "facility_name_in_source": name, "facility_name_english": "", "stated_address": "",
+            "stated_coordinates": location, "values": values}
 
 
 def rows(run_dir, name):
@@ -213,10 +221,10 @@ def test_the_queue_flags_a_winning_source_its_own_page_doesnt_bear_out(tmp_path)
     (raw / "site_901.json").write_text(json.dumps({"site_id": "901", "sources": [
         # On its page, quote and location both.
         source(council, [value("operator", "Kapiti Coast District Council", "It is operated by the council")],
-               location="-40.88365, 175.02770", kind="coordinates"),
+               location="-40.88365, 175.02770"),
         # Its quote isn't on its page, and neither is the location it states, 0.7 km from ours.
         source(news, [value("closing_year", "2011", "The landfill finally closed in 2011")],
-               location="-40.8900, 175.0300", kind="coordinates"),
+               location="-40.8900, 175.0300"),
         # The link check kept no text of this one.
         source(blocked, [value("facility_status", "Inactive", "The site closed to all waste in 2007")]),
     ]}))
@@ -253,7 +261,7 @@ def test_a_found_location_row_flags_a_location_not_on_its_page(tmp_path):
     raw.mkdir(parents=True)
     # A location 0.6 km from ours, so a value to review; the page gives other coordinates.
     (raw / "site_902.json").write_text(json.dumps({"site_id": "902", "sources": [
-        source(page_url, [], location="-40.8890, 175.0300", kind="coordinates"),
+        source(page_url, [], location="-40.8890, 175.0300"),
     ]}))
     save_page_text(run_dir / PAGE_TEXT_DIR, page_url, "Otaihanga Landfill. Coordinates -40.8836, 175.0277.")
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))

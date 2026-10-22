@@ -282,9 +282,9 @@ def test_numeric_attribute_with_a_real_number_still_promotes():
     assert by_attr["waste_in_place_metric_tonnes"][0]["value"] == "1200000"
 
 
-def located_by(stated, source=GAZETTEER, kind="coordinates"):
-    """A source-first response with one source stating where the facility is, and no values."""
-    return {"site_id": "1", "sources": [{**source, "stated_location": stated, "stated_location_kind": kind, "values": []}]}
+def located_by(coordinates, source=GAZETTEER):
+    """A source-first response with one source stating the facility's coordinates, and no values."""
+    return {"site_id": "1", "sources": [{**source, "stated_address": "", "stated_coordinates": coordinates, "values": []}]}
 
 
 def test_a_gazetteer_location_is_tier_3_and_a_reviewable_conflict():

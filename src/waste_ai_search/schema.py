@@ -110,9 +110,10 @@ LOCATION_ATTRIBUTE = "found_location"
 # plan returned them as values.
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
 
-# Always requested, except where a Tier 1-2 source already supplied them. They are how we know
-# the agent found the *right* facility, so they are not gap-filled: the identity check rests on
-# them (Q34). The name is a value; the location comes from what each source states.
+# No longer requested (step 1 of the approve-sources plan): the agent returns only sources about
+# the site searched, and the name and location each source gives are only used to check that, never
+# to replace ours. Kept so older cached responses, the seed's provenance and refresh-seed still read
+# them. Arbitration still reads a found location from what each source states.
 IDENTITY_ATTRIBUTES = [
     "found_facility_name",
     LOCATION_ATTRIBUTE,
@@ -522,7 +523,7 @@ BOOLEAN_INPUT_MAP = {
 SITE_NAME_COLUMNS = ["site_name", "original_site_name", "source_language"]
 
 SOURCE_FACILITY_COLUMNS = [
-    "facility_name_in_source", "facility_name_english", "stated_location", "stated_location_kind",
+    "facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates",
     "location_basis", "located_latitude", "located_longitude", "location_reason",
 ]
 
@@ -533,9 +534,9 @@ EVIDENCE_HEADERS = [
     "agent_confidence", "source_id", "link_status", "source_tier", "agent_proposed_tier", "tier_rule_applied",
     "evidence_summary", "quoted_evidence_short", "search_terms_used", "promotion_eligible",
     "exclusion_reason", "record_created_date",
-    # The facility each source describes, as it writes it, and the point read from its location
-    # (locate.py): every row of a source carries them. location_reason says why a stated location
-    # is not a usable point.
+    # The facility each source describes, as it writes it - its name, address and coordinates - and
+    # the point read from them (locate.py): every row of a source carries them. location_reason says
+    # why what it states is not a usable point.
     *SOURCE_FACILITY_COLUMNS,
     # site_id is the site a source is filed under (match.py), blank for a likely new facility, and
     # searched_site_id the site whose search found it; match says which rule filed it there.
@@ -583,7 +584,8 @@ REVIEW_QUEUE_HEADERS = [
     "attribute_name", "resolution",
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
     "winning_source_tier", "winning_source_url", "winning_link_status",
-    # The facility the winning source describes, as it writes it. source_coordinates is where that
+    # The facility the winning source describes, as it writes it: stated_location is its
+    # coordinates and address, joined by " | " where it gives both. source_coordinates is where that
     # places it, "lat, lon" like baseline_coordinates, so an SME can paste both into Google Maps;
     # blank where its location placed nothing match could use. location_basis says how a
     # found_location was read: coordinates, a grid reference or a rooftop address.
@@ -785,14 +787,18 @@ def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
 
 
 
-def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
-    """What is malformed in a cached response, read through the one reader (payload.py).
+def validate_foundry_payload(payload: dict[str, Any], iso3: str = "") -> list[str]:
+    """What is malformed in a cached response, read through the one reader (payload.py). `iso3` is
+    the site's country, which says which grids a grid reference may be in.
 
     A response from before the source-first contract is reported in its own terms, attributes[i],
-    as it always was; a source-first one as sources[i].values[j].
+    as it always was; a source-first one as sources[i].values[j]. The facility a source describes
+    is checked too: each field is text, and stated_coordinates holds coordinates or a grid
+    reference the locate step can read, not an address. An older response's kinds are checked as
+    it is read (payload.read_payload).
     """
-    from .locate import LOCATION_KINDS, PART_SEPARATOR
-    from .payload import REQUIRED_VALUE_FIELDS, is_converted, read_payload
+    from .locate import NO_LOCATION_TEXT, parse_point
+    from .payload import FACILITY_FIELDS, PART_SEPARATOR, REQUIRED_VALUE_FIELDS, is_converted, read_payload
 
     read = read_payload(payload)
     warnings = list(read["problems"])
@@ -801,10 +807,17 @@ def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
             continue
         if not normalize_scalar(source.get("url")):
             warnings.append(f"sources[{index}] has no clickable source URL.")
-        kinds = [part.strip().lower() for part in normalize_scalar(source.get("stated_location_kind")).split(PART_SEPARATOR)]
-        unknown = [kind for kind in kinds if kind and kind not in LOCATION_KINDS]
-        if unknown:
-            warnings.append(f"sources[{index}] has unrecognised stated_location_kind {', '.join(unknown)!r}.")
+        for field in FACILITY_FIELDS:
+            if isinstance(source.get(field), (dict, list, tuple)):
+                warnings.append(f"sources[{index}] {field} must be text.")
+        unread = [
+            part for part in (part.strip() for part in normalize_scalar(source.get("stated_coordinates")).split(PART_SEPARATOR))
+            if part and part.lower() not in NO_LOCATION_TEXT and parse_point(part, iso3) is None
+        ]
+        if unread:
+            warnings.append(
+                f"sources[{index}] stated_coordinates {' | '.join(unread)!r} is not coordinates or a grid reference."
+            )
         for value_index, value in enumerate(source["values"], start=1):
             for field in REQUIRED_VALUE_FIELDS:
                 if field not in value:

@@ -9,7 +9,7 @@ from .credibility import (
     trusted_baseline_coordinates,
     trusted_baseline_name,
 )
-from .locate import LOCATION_KINDS, PART_SEPARATOR, prompt_point
+from .locate import prompt_point
 from .schema import (
     CONTRADICTION_CHECK_SOURCES,
     CORROBORATING_ATTRIBUTES,
@@ -22,8 +22,6 @@ from .schema import (
     normalize_scalar,
     parse_tristate_bool,
     GAP_FILL_ATTRIBUTES,
-    IDENTITY_ATTRIBUTES,
-    LOCATION_ATTRIBUTE,
     UNSEARCHED_ATTRIBUTES,
     is_blank,
 )
@@ -177,15 +175,6 @@ ATTRIBUTE_GUIDANCE = {
         "If no source says what waste the facility receives, or no one type makes up most of it, "
         "do not return bulk_waste_type."
     ),
-    "found_facility_name": (
-        "The most specific official name a source gives for this facility, in the source's own "
-        "spelling. Prefer a name that identifies this site on its own, such as 'Wonthaggi Transfer "
-        "Station' or 'Hartland Landfill', over a generic label such as 'Waste Management Facility', "
-        "'Landfill' or 'Transfer Station'. If the only name available is generic, add the "
-        "municipality, town or operator that the same source names - for example, a 'Waste "
-        "Management Facility' on the Bass Coast Shire website becomes 'Bass Coast Shire Waste "
-        "Management Facility'. Never add a place the source does not mention."
-    ),
 }
 
 
@@ -284,28 +273,20 @@ def needs_contradiction_check(site: dict[str, Any]) -> bool:
 
 
 def requested_attributes(site: dict[str, Any]) -> list[str]:
-    """Identity always; metadata only where the facility's baseline is empty (gap-fill, Q29).
+    """Metadata only where the facility's baseline is empty (gap-fill, Q29).
 
-    found_location is not a value the agent returns: every source states where the facility is,
-    and arbitration reads the found location from those. Asking for it means a found location is
-    reviewed, and the prompt stresses finding a source that states it. GCCS attributes are
-    requested only for facilities known to have a gas collection system. Some countries are scoped
-    to coordinates alone (COORDINATES_ONLY_ISO3).
+    The facility's name and location are not asked for (step 1 of the approve-sources plan). The
+    agent returns only sources about this facility, as batch 1 did, and each states the name,
+    address and coordinates it gives; those are used to check the match and never replace ours.
+    GCCS attributes are requested only for facilities known to have a gas collection system. A
+    country scoped to coordinates alone (COORDINATES_ONLY_ISO3) has nothing left to ask, so its
+    sites are not searched.
     """
     if coordinates_only(site):
-        # Coordinates are worth confirming only where the recorded location is flagged inexact;
-        # everything else for these facilities is government-sourced and left alone. Such a site
-        # is still searched, for sources that state where it is.
-        return [LOCATION_ATTRIBUTE] if location_is_inexact(site) else []
-
-    # Identity is always requested, except what a Tier 1-2 source already supplied: the name
-    # (WP-531) and the coordinates (F29). Coordinates flagged inexact are still searched.
-    known: set[str] = set()
-    if trusted_baseline_name(site):
-        known.add("found_facility_name")
-    if trusted_baseline_coordinates(site) and not location_is_inexact(site):
-        known.add(LOCATION_ATTRIBUTE)
-    requested = [name for name in IDENTITY_ATTRIBUTES if name not in known]
+        # Everything about these facilities is government-sourced and left alone. Their coordinates
+        # were the one thing worth confirming, and a location is no longer asked for.
+        return []
+    requested: list[str] = []
     gas_present = has_gas_collection(site)
     for field in GAP_FILL_ATTRIBUTES:
         if field in UNSEARCHED_ATTRIBUTES or not is_blank(site.get(field)):
@@ -314,15 +295,6 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
             continue
         requested.append(field)
     return requested
-
-
-def asks_location(site: dict[str, Any]) -> bool:
-    """Whether this site's found location is reviewed: where its coordinates are asked for.
-
-    Every source states a location, but where our coordinates come from a Tier 1-2 source (F29),
-    the sources' locations are recorded and not queued.
-    """
-    return LOCATION_ATTRIBUTE in requested_attributes(site)
 
 
 def search_budget(max_web_searches: int) -> str:
@@ -345,8 +317,6 @@ def build_site_prompt(
     site: dict[str, Any], attributes: list[str] | None = None, max_web_searches: int = 0
 ) -> str:
     attributes = attributes if attributes is not None else requested_attributes(site)
-    asks_location = LOCATION_ATTRIBUTE in attributes
-    values = [name for name in attributes if name != LOCATION_ATTRIBUTE]
 
     site_context = {
         key: site.get(key)
@@ -397,7 +367,7 @@ def build_site_prompt(
             "unit": ATTRIBUTE_UNITS.get(name, ""),
             "guidance": guidance_for(name),
         }
-        for name in values
+        for name in attributes
     ]
 
     # Three cases, because "came through translation" and "has a second spelling" are separate
@@ -417,9 +387,9 @@ Names:
   source_language. Search THIS name in the local language first - permits,
   municipal records and local news will use it, not the translation.
 - Search both. Treat them as one facility with two names, never as two
-  candidates.
-- Return found_facility_name exactly as your source spells it, in whatever script or
-  language that source uses. Do not translate it back.
+  candidates: agreeing on the translated name alone is not identity confirmation.
+- Give each source's own name for the facility as facility_name_in_source, exactly as
+  that source spells it, in whatever script or language it uses. Do not translate it back.
 """
     elif translated_source:
         # The name survived translation unchanged - usually a proper noun - so there is no second
@@ -434,52 +404,34 @@ Names:
 - Search it in that language as well as in English. Local permits, municipal
   records and news coverage are written in it, and are where this site is
   documented.
-- Return found_facility_name exactly as your source spells it, in whatever script or
-  language that source uses. Do not translate it back.
+- Give each source's own name for the facility as facility_name_in_source, exactly as
+  that source spells it, in whatever script or language it uses. Do not translate it back.
 """
     else:
         names_guidance = """
 Names:
 - site_name is the name the source dataset recorded for this facility; it has not
   been translated. Search it as given, and in the local language too.
-- Return found_facility_name exactly as your source spells it, in whatever script or
-  language that source uses. Do not translate it back.
+- Give each source's own name for the facility as facility_name_in_source, exactly as
+  that source spells it, in whatever script or language it uses. Do not translate it back.
 """
 
-    asks_name = "found_facility_name" in attributes
-    if not asks_name:
-        # Asking the agent to return a name anyway would contradict "only the attributes listed
-        # below are wanted". Not asked is not the same as trusted: the gas-capture follow-up asks
-        # for GCCS alone, so only a Tier 1-2 provenance lets the prompt call the name confirmed.
-        names_guidance = names_guidance.replace(
-            "- Return found_facility_name exactly as your source spells it, in whatever script or\n"
-            "  language that source uses. Do not translate it back.\n",
-            "- site_name is already confirmed by an authoritative source. Use it to search; do not\n"
-            "  return found_facility_name as a value.\n"
-            if trusted_baseline_name(site)
-            else "- Use site_name to search; do not return found_facility_name as a value.\n",
-        )
+    # Batch 1's identity rule. Not asked is not the same as trusted: nothing about identity is asked
+    # now, so only a Tier 1-2 provenance lets the prompt call our name or coordinates confirmed.
+    confirmed = {
+        (True, True): "The name and coordinates are",
+        (True, False): "The name is",
+        (False, True): "The coordinates are",
+    }.get((
+        trusted_baseline_name(site),
+        trusted_baseline_coordinates(site) and not location_is_inexact(site),
+    ))
+    confirmation = f"\n  {confirmed} already confirmed by an authoritative source." if confirmed else ""
 
-    if values:
-        wanted = (
-            "Only the attributes listed below are wanted. Everything else about this facility is\n"
-            "already known and must not be researched or returned."
-        )
-        if asks_location:
-            wanted += (
-                "\nWhere this facility is matters too: look for a source that states its coordinates,\n"
-                "grid reference or street address."
-            )
-    else:
-        wanted = (
-            "No attribute values are wanted for this site, only where it is: find sources that\n"
-            "state this facility's location, and report each with an empty values list."
-        )
-
-    # Only where status or the closing year is asked for: a location-only prompt (Brazil) or the gas
-    # follow-up wants neither, and arbitration resolves whatever comes back, asked or not.
+    # Only where status or the closing year is asked for: the gas follow-up wants neither, and
+    # arbitration resolves whatever comes back, asked or not.
     status_and_closure = ""
-    if {"facility_status", "closing_year"} & set(values):
+    if {"facility_status", "closing_year"} & set(attributes):
         status_and_closure = (
             "Status and closure:\n"
             "- If your sources show the facility is closed, inactive, or no longer accepting waste, return\n"
@@ -509,8 +461,8 @@ Names:
                 "paywall_flag": False,
                 "facility_name_in_source": "The facility's name exactly as this source writes it, or blank",
                 "facility_name_english": "That name in English (the same if already English), or blank",
-                "stated_location": "The facility's location exactly as this source writes it, or blank",
-                "stated_location_kind": " / ".join(LOCATION_KINDS),
+                "stated_address": "The site's address exactly as this source writes it, or blank",
+                "stated_coordinates": "The site's coordinates or grid reference exactly as this source writes them, or blank",
                 "values": [
                     {
                         "attribute_name": "One attribute_name from the Target attributes list",
@@ -531,7 +483,7 @@ Names:
     }
 
     definitions = {
-        "attribute_name": values,
+        "attribute_name": attributes,
         "source_type": SOURCE_TYPES,
         "source_tier_rubric": TIER_DEFINITIONS,
         "facility_status": DEFINITION_VALUES["facility_status"],
@@ -558,7 +510,8 @@ Find source-backed data for this site, recorded as a waste disposal facility. Se
 in English and in the local language, using the site name, approximate coordinates,
 municipality, and admin names.
 {search_budget(max_web_searches)}{names_guidance}
-{wanted}
+Only the attributes listed below are wanted. Everything else about this facility is
+already known and must not be researched or returned.
 
 Target attributes:
 {json.dumps(targets, indent=2, ensure_ascii=False)}
@@ -570,25 +523,23 @@ Definitions:
 {json.dumps(definitions, indent=2, ensure_ascii=False)}
 
 {closure_focus}
-{status_and_closure}Sources and the facility each describes:
-- Research only this site. Report each source you use once, with the facility it describes
-  as the source writes it: facility_name_in_source, facility_name_english, stated_location
-  and stated_location_kind. Our code decides whether that facility is this site, so report
-  what each source says even where its name or location differs from the site context.
-- If a source you used turns out to describe a different facility, still report it, with
-  that facility's name and location, but do not research the other facility further.
-- From a page listing many facilities, such as a registry, report only the entry you used.
-- A source that names or locates this facility but gives no target attribute is still
-  reported, with an empty values list.
+{status_and_closure}Identity first:
+- Return only sources about THIS facility. Use the names and approximate coordinates in
+  the site context to check that each source describes it.{confirmation}
+- If you cannot confirm you found this specific facility, return an empty sources list
+  and explain why in search_notes. Do not return data for a different site.
+- From a page listing many facilities, such as a registry, use only this facility's entry.
 
-Location:
-- stated_location is where the source puts the facility, copied exactly as written: its
-  coordinates, its grid reference, or the site's street address. Never work a location out,
-  never use the coordinates in the site context (rounded to about 1 km, for searching only),
-  and give the site's own address, not the operator's office. Leave it blank if the source
-  gives none.
-- If a source gives both coordinates and the site's street address, copy both, coordinates
-  first, separated by "{PART_SEPARATOR}", with stated_location_kind "coordinates {PART_SEPARATOR} street address".
+What each source says about the facility:
+- Report each source you use once, with the facility as that source describes it:
+  facility_name_in_source and facility_name_english, stated_address and
+  stated_coordinates. They are used to check that the source is about this facility.
+- stated_address is the site's own address, copied exactly as written: never the
+  operator's office. A page often gives it in a contact box or footer, so look there too.
+- stated_coordinates is the site's coordinates or grid reference, copied exactly as
+  written. Give both fields where the source gives both.
+- Never work a location out, never use the coordinates in the site context (rounded to
+  about 1 km, for searching only), and leave a field blank if the source gives none.
 
 Source requirements:
 - Every source needs a clickable URL.

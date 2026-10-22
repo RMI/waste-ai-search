@@ -18,6 +18,7 @@ from .credibility import (
     dropped_source_site,
     is_promotable,
     tier_label,
+    trusted_baseline_coordinates,
     trusted_baseline_name,
 )
 from .input_loader import describe_seed, resolve_sites, write_csv_records
@@ -34,6 +35,9 @@ from .locate import (
     format_coordinate,
     load_locations,
     locate_source,
+    stated_address,
+    stated_coordinates,
+    stated_location_text,
     states_location,
 )
 from .match import (
@@ -74,7 +78,7 @@ from .payload import (
     read_payload,
     source_id_for,
 )
-from .prompt_builder import asks_location, needs_contradiction_check, requested_attributes
+from .prompt_builder import coordinates_only, location_is_inexact, needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
 from .searchable_names import SKIPPED_NAME_CLASSES, describe_counts, recorded_skips, site_name_class
 from .snapshot import recorded_run
@@ -334,7 +338,7 @@ def extract_evidence(
         tier, rule = assign_source_tier(source, LOCATION_ATTRIBUTE)
         value = place.value() if place.basis in VALUE_BASES else ""
         published = normalize_scalar(source.get("publication_date"))
-        summary = f"Read as {place.basis} from the location the source states: {normalize_scalar(source.get('stated_location'))}"
+        summary = f"Read as {place.basis} from the location the source states: {stated_location_text(source)}"
         order += 1
         if url and not dead_link and value:
             by_attribute.setdefault(LOCATION_ATTRIBUTE, []).append(
@@ -372,8 +376,8 @@ def extract_evidence(
                 "site_id": site_id,
                 "internal_facility_id": normalize_scalar(site.get("internal_facility_id") or site_id),
                 "attribute_name": LOCATION_ATTRIBUTE,
-                "claimed_value": normalize_scalar(source.get("stated_location")),
-                "claimed_unit": normalize_scalar(source.get("stated_location_kind")),
+                "claimed_value": stated_location_text(source),
+                "claimed_unit": "",
                 "normalized_value": place.value(),
                 "normalized_unit": "decimal degrees" if place.point else "",
                 "unit_conversion_note": "",
@@ -421,13 +425,14 @@ def extract_evidence(
 
 
 def location_columns(source: dict[str, Any], place: Located) -> dict[str, str]:
-    """The facility a source describes, as it writes it, and the point read from its location."""
+    """The facility a source describes, as it writes it - its name, address and coordinates - and the
+    point read from them."""
     stated = states_location(source)
     return {
         "facility_name_in_source": normalize_scalar(source.get("facility_name_in_source")),
         "facility_name_english": normalize_scalar(source.get("facility_name_english")),
-        "stated_location": normalize_scalar(source.get("stated_location")) if stated else "",
-        "stated_location_kind": normalize_scalar(source.get("stated_location_kind")) if stated else "",
+        "stated_address": stated_address(source),
+        "stated_coordinates": stated_coordinates(source),
         "location_basis": place.basis if stated else "",
         "located_latitude": format_coordinate(place.latitude) if stated else "",
         "located_longitude": format_coordinate(place.longitude) if stated else "",
@@ -647,7 +652,7 @@ def citations_for(found: dict[str, tuple[dict[str, list[dict[str, Any]]], list[d
                     url=normalize_scalar(row.get("url")),
                     name_in_source=normalize_scalar(row.get("facility_name_in_source")),
                     name_english=normalize_scalar(row.get("facility_name_english")),
-                    stated_location=normalize_scalar(row.get("stated_location")),
+                    stated_location=stated_location_text(row),
                     basis=normalize_scalar(row.get("location_basis")),
                     point=(latitude, longitude) if latitude is not None and longitude is not None else None,
                     location_reason=normalize_scalar(row.get("location_reason")),
@@ -663,6 +668,20 @@ def citations_for(found: dict[str, tuple[dict[str, list[dict[str, Any]]], list[d
 # the lists for ingestion (new_facility_candidates.csv or outside_run_matches.csv), or nowhere but
 # evidence.csv, where a Tier 1-2 name or location of ours is not reviewed.
 POOL, LEAD, LISTED, RECORDED = "pool", "lead", "listed", "recorded"
+
+
+def location_reviewed(site: dict[str, Any]) -> bool:
+    """Whether the locations sources give for a site are reviewed as its found location: where our
+    coordinates don't come from a Tier 1-2 source (F29), or are flagged inexact. In a country scoped
+    to coordinates alone, only where they are flagged inexact.
+
+    The prompt used to ask for the location of exactly these sites. It no longer asks for one at
+    all; each source states where it puts the facility, and this decides what arbitration does with
+    it.
+    """
+    if coordinates_only(site):
+        return location_is_inexact(site)
+    return location_is_inexact(site) or not trusted_baseline_coordinates(site)
 
 
 def route(
@@ -696,7 +715,7 @@ def route(
         return LISTED, (
             f"Filed under site {filing.site_id}, outside this run's selection: listed in {OUTSIDE_RUN_FILE}."
         )
-    if attribute == LOCATION_ATTRIBUTE and filed is not None and not asks_location(filed):
+    if attribute == LOCATION_ATTRIBUTE and filed is not None and not location_reviewed(filed):
         return RECORDED, "Recorded only: our location comes from a Tier 1-2 source, so it is not reviewed."
     if attribute == "found_facility_name" and filed is not None and trusted_baseline_name(filed):
         return RECORDED, "Recorded only: our name comes from a Tier 1-2 source, so it is not reviewed."
@@ -809,7 +828,7 @@ def describe_winner(row: dict[str, Any], evidence_by_id: dict[str, dict[str, Any
     row["searched_site_id"] = winner["searched_site_id"]
     row["match"] = winner["match"]
     row["facility_name_in_source"] = winner.get("facility_name_in_source", "")
-    row["stated_location"] = winner.get("stated_location", "")
+    row["stated_location"] = stated_location_text(winner)
     # Only a point matching could use: never a town's, nor one the guards set aside.
     placed = winner.get("location_basis", "") in MATCHING_BASES
     row["source_coordinates"] = (
@@ -1003,7 +1022,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                 }
             )
 
-        for warning in validate_foundry_payload(payload):
+        for warning in validate_foundry_payload(payload, normalize_scalar(site.get("country_iso3"))):
             parse_warnings.append(
                 {
                     "run_id": config.run_id,

@@ -1,17 +1,23 @@
-"""Turn the location each source states into a point (build step 3 of the source-matching plan).
+"""Turn where each source puts the facility into a point (build step 3 of the source-matching plan).
 
-The agent copies where each source puts the facility, as the source writes it: coordinates, a grid
-reference or the site's street address. This module turns that text into a latitude and longitude,
-and says how far the point can be trusted, as its `basis`:
+The agent copies where each source puts the facility, as the source writes it, in two fields:
+stated_coordinates, its coordinates or grid reference, and stated_address, the site's address
+(step 1 of the approve-sources plan; older responses are split into the two by payload.py). This
+module turns them into a latitude and longitude, and says how far the point can be trusted, as its
+`basis`, and where it came from, as `coordinates_from`:
 
-| Basis | From | Used for |
-|---|---|---|
-| coordinates | Coordinates with 3 or more decimals (or seconds) | Matching, and a location value |
-| grid reference | A UK or Irish grid reference, 100 m or finer | Matching, and a location value |
-| rooftop | An address geocoded to the building or address point | Matching, and a location value |
-| street | An address geocoded only to its street | Matching only |
-| hint | Coordinates with fewer decimals, or a coarser grid reference | Nothing yet: approximate |
-| none | Anything else, or a location a guard throws out | - |
+| Basis | From | coordinates_from | Used for |
+|---|---|---|---|
+| coordinates | Coordinates with 3 or more decimals (or seconds) | stated | Matching, and a location value |
+| grid reference | A UK or Irish grid reference, 100 m or finer | grid reference | Matching, and a location value |
+| rooftop | An address geocoded to the building or address point | address (building) | Matching, and a location value |
+| street | An address geocoded only to its street | address (street) | Matching only |
+| hint | Coordinates with fewer decimals, or a coarser grid reference | - | Nothing yet: approximate |
+| none | Anything else, or a location a guard throws out | - | - |
+
+Stated coordinates win over the address, unless the address puts the facility more than 2 km from
+them, when the source has no location. A source's name and location are only ever used to check
+that it is about the site searched: they never replace ours.
 
 Coordinates and grid references are parsed here, with no network, so arbitration can do it too.
 Addresses go to a geocoder, which only the locate step calls: it runs in the search phase, beside
@@ -20,10 +26,10 @@ geocoded points from that file and stays offline. No geocoder is configured by d
 an address stays unlocated.
 
 A facility name is never geocoded: geocoders find landfills by name from OpenStreetMap, which is
-where most of our sites came from, so it would hand us our own point back. Only text the agent
-labelled a street address is sent, with any leading facility name taken off, and never text that
-has no civic number and a part ending in a word for a waste site ("Mapleward Road Landfill, Thunder
-Bay, ON"), which is a name too.
+where most of our sites came from, so it would hand us our own point back. Only the stated address
+is sent, with any leading facility name taken off, and never text that has no civic number and a
+part ending in a word for a waste site ("Mapleward Road Landfill, Thunder Bay, ON"), which is a
+name too.
 """
 from __future__ import annotations
 
@@ -39,7 +45,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from .payload import is_converted
+from .payload import PART_SEPARATOR, is_converted
 from .schema import normalize_scalar
 
 
@@ -57,12 +63,14 @@ VALUE_BASES = (COORDINATES, GRID_REFERENCE, ROOFTOP)
 MATCHING_BASES = (*VALUE_BASES, STREET)
 BASES = (*MATCHING_BASES, HINT, NONE)
 
-# The kinds of location the agent is asked to label each stated location with.
-STREET_ADDRESS = "street address"
-LOCATION_KINDS = [COORDINATES, GRID_REFERENCE, STREET_ADDRESS, "place description", "none"]
-# A source that gives both coordinates and an address writes them as two parts, "a | b", with the
-# kinds written the same way.
-PART_SEPARATOR = "|"
+# Where a source's point came from, by its basis, as the outputs say it. A point on its street can
+# be a kilometre or more from the address. A hint and none have no point to use.
+COORDINATES_FROM = {
+    COORDINATES: "stated",
+    GRID_REFERENCE: "grid reference",
+    ROOFTOP: "address (building)",
+    STREET: "address (street)",
+}
 
 # 0.001 degrees is about 110 m. Two decimals (about 1 km) is what the prompt itself gives, so it
 # can only ever be a hint.
@@ -150,9 +158,39 @@ def format_coordinate(number: float | None) -> str:
     return "0" if text in {"-0", ""} else text
 
 
+def _stated(source: dict[str, Any], field: str) -> str:
+    text = normalize_scalar(source.get(field))
+    return "" if text.lower() in NO_LOCATION_TEXT else text
+
+
+def stated_address(source: dict[str, Any]) -> str:
+    """The address a source gives for the facility, as written; "" where it gives none."""
+    return _stated(source, "stated_address")
+
+
+def stated_coordinates(source: dict[str, Any]) -> str:
+    """The coordinates or grid reference a source gives for the facility, as written; "" where it
+    gives none."""
+    return _stated(source, "stated_coordinates")
+
+
 def states_location(source: dict[str, Any]) -> bool:
-    """Whether a source states a location at all."""
-    return normalize_scalar(source.get("stated_location")).lower() not in NO_LOCATION_TEXT
+    """Whether a source states a location at all: an address, coordinates or both."""
+    return bool(stated_address(source) or stated_coordinates(source))
+
+
+def stated_location_text(source: dict[str, Any]) -> str:
+    """Everything a source states about where the facility is, as one text: its coordinates, then
+    its address, joined by " | " where it gives both. For notes and the review queue, which show
+    them together; the locate step reads the two apart. `source` may be a source or an evidence
+    row, which carries both fields."""
+    return f" {PART_SEPARATOR} ".join(text for text in (stated_coordinates(source), stated_address(source)) if text)
+
+
+def coordinates_from(basis: str) -> str:
+    """Where a point with this basis came from (COORDINATES_FROM): "stated", "grid reference",
+    "address (building)" or "address (street)"; "" for a hint or none, which have no point to use."""
+    return COORDINATES_FROM.get(normalize_scalar(basis), "")
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -1064,14 +1102,11 @@ def names_a_facility(text: str) -> bool:
     return any(_ENDS_IN_FACILITY_WORD.search(part) for part in parts) and not _CIVIC_NUMBER.search(text)
 
 
-def _parts(text: str, kind: str) -> list[tuple[str, str]]:
-    texts = [part.strip() for part in text.split(PART_SEPARATOR)]
-    kinds = [part.strip().lower() for part in kind.split(PART_SEPARATOR)]
-    out = []
-    for index, part in enumerate(texts):
-        if part:
-            out.append((part, kinds[index] if index < len(kinds) else ""))
-    return out
+def _parts(text: str) -> list[str]:
+    """The parts of a stated field: usually one, several where an older response gave several of a
+    kind (payload.split_stated_location)."""
+    parts = [part.strip() for part in text.split(PART_SEPARATOR)]
+    return [part for part in parts if part and part.lower() not in NO_LOCATION_TEXT]
 
 
 def locate_source(
@@ -1083,12 +1118,11 @@ def locate_source(
 ) -> Located:
     """Where one source puts the facility, after the guards. `site` is the site searched.
 
-    Coordinates and grid references are read here. An address is looked up in `cache`, and only a
-    `live` call (the locate step) asks `geocoder` for one that isn't there, and records every part
-    it reads in `cache`.
+    The source's stated coordinates or grid reference are read here, and so is an address that is
+    nothing but coordinates: the agent does not always fill the right field. Any other address is
+    looked up in `cache`, and only a `live` call (the locate step) asks `geocoder` for one that
+    isn't there, and records every part it reads in `cache`.
     """
-    text = normalize_scalar(source.get("stated_location"))
-    kind = normalize_scalar(source.get("stated_location_kind"))
     if not states_location(source):
         return Located(reason="no location stated")
     iso3 = normalize_scalar(site.get("country_iso3")).upper()
@@ -1106,25 +1140,20 @@ def locate_source(
 
     point: Located | None = None
     address: Located | None = None
-    unread: list[str] = []
-    for part, part_kind in _parts(text, kind):
-        if part_kind in {COORDINATES, GRID_REFERENCE}:
-            found = parse_point(part, iso3) or Located(reason=f"could not read the {part_kind}")
-        else:
-            # The agent's labels are unreliable, so coordinates labelled anything else still count.
-            found = parse_point(part, iso3, strict=True)
-        if found is not None:
-            if live and cache is not None:
-                _record(cache, part, iso3, found)
-            if point is None or (point.point is None and found.point is not None):
-                point = found
-            continue
-        if part_kind != STREET_ADDRESS:
-            unread.append(
-                "no location stated" if part_kind == "none"
-                else f"a {part_kind} is not located" if part_kind
-                else "not coordinates, a grid reference or a street address"
-            )
+
+    def take_point(part: str, found: Located) -> None:
+        nonlocal point
+        if live and cache is not None:
+            _record(cache, part, iso3, found)
+        if point is None or (point.point is None and found.point is not None):
+            point = found
+
+    for part in _parts(stated_coordinates(source)):
+        take_point(part, parse_point(part, iso3) or Located(reason="could not read the stated coordinates"))
+    for part in _parts(stated_address(source)):
+        written_as_point = parse_point(part, iso3, strict=True)
+        if written_as_point is not None:
+            take_point(part, written_as_point)
             continue
         if address is not None and address.point is not None:
             continue
@@ -1171,7 +1200,7 @@ def locate_source(
         return address
     if point is not None:
         return point
-    return Located(reason="; ".join(dict.fromkeys(unread)) or "no location stated")
+    return Located(reason="no location stated")
 
 
 def describe_bases(located: list[Located]) -> str:

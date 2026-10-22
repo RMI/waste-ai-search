@@ -35,7 +35,7 @@ from .locate import (
 )
 from .payload import found_attributes, merge_payloads, read_payload
 from .pilot_selector import select_mixed_pilot
-from .prompt_builder import build_site_prompt, coordinates_only, requested_attributes
+from .prompt_builder import build_site_prompt, requested_attributes
 from .run_context import (
     SEARCH_TOOL_RETRY_DELAY_SECONDS,
     PipelineConfig,
@@ -49,7 +49,6 @@ from .run_context import (
     agent_identity,
 )
 from .schema import (
-    COORDINATES_ONLY_ISO3,
     DEFAULT_EXCLUDED_ISO3,
     DEFAULT_EXCLUSION_REASONS,
     FOUNDRY_RUN_LOG_HEADERS,
@@ -114,7 +113,8 @@ def choose_sites(
                 "pass --include-excluded-countries to search them)."
             )
     # A site with no requestable attributes has nothing to ask; querying it would spend a
-    # request and a prompt to receive nothing. Country scope can empty a site entirely.
+    # request and a prompt to receive nothing. Country scope empties a site entirely: Brazil,
+    # scoped to coordinates alone, has nothing to ask now that a location is not asked for.
     before = len(selected)
     selected = [site for site in selected if requested_attributes(site)]
     nothing_to_ask = before - len(selected)
@@ -316,13 +316,6 @@ def run_search(
     # not after it.
     geocoder = make_geocoder(config.geocoder) if config.locate else None
     agent = agent_identity(get_client(config))
-
-    coordinate_only_sites = sum(1 for site in selected if coordinates_only(site))
-    if coordinate_only_sites:
-        print(
-            f"Coordinates-only scope for {coordinate_only_sites:,} site(s) in "
-            f"{', '.join(sorted(COORDINATES_ONLY_ISO3))}."
-        )
 
     work: list[tuple[dict[str, Any], list[str]]] = []
     for site in selected:

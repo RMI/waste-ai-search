@@ -1,10 +1,10 @@
 """Whether a source's quote, and the location it states, are really on its page.
 
 The agent quotes each source (quoted_evidence_short) and copies where it puts the facility
-(stated_location), but both are its own report. The link check keeps the text of the page itself
-(page_text.py), so arbitration can check them, offline. One that isn't on the page is flagged for the
-SME, who decides: nothing is dropped or downgraded for it, since a page can say something in a way
-this check can't follow, in an image or a map, say.
+(stated_address and stated_coordinates), but both are its own report. The link check keeps the
+text of the page itself (page_text.py), so arbitration can check them, offline. One that isn't on
+the page is flagged for the SME, who decides: nothing is dropped or downgraded for it, since a page
+can say something in a way this check can't follow, in an image or a map, say.
 
 Both sides are compared in plain form: lower case, accents and invisible formatting characters
 taken off, and every run of anything but letters and digits one space. A word a PDF hyphenated
@@ -32,8 +32,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .locate import COORDINATES, GRID_REFERENCE, PART_SEPARATOR, ROOFTOP, STREET, haversine_km, parse_coordinates
+from .locate import COORDINATES, GRID_REFERENCE, ROOFTOP, STREET, haversine_km, parse_coordinates
 from .page_text import PAGE_TEXT_DIR, little_text, read_in_part, read_page_text
+from .payload import PART_SEPARATOR
 
 
 FOUND = "found"
@@ -193,38 +194,37 @@ def grid_reference_on_page(text: str, page: Page) -> str:
     return FOUND if all(reference in page.compact for reference in references) else NOT_FOUND
 
 
-def _part_kind(part: str, kind: str) -> str:
-    if kind in (COORDINATES, GRID_REFERENCE):
-        return kind
-    if not kind and _COORDINATE.search(part):
-        return COORDINATES
-    return "address"
+def _parts(text: Any) -> list[str]:
+    return [part.strip() for part in str(text or "").split(PART_SEPARATOR) if part.strip()]
 
 
 def location_on_page(
-    stated: Any, kind: Any, page: Page | None, basis: str = "", point: tuple[float, float] | None = None
+    address: Any, coordinates: Any, page: Page | None, basis: str = "", point: tuple[float, float] | None = None
 ) -> str:
-    """Whether a stated location is on the page. "" where nothing is stated.
+    """Whether the location a source states is on the page: its address, its coordinates or grid
+    reference, or both. "" where it states nothing.
 
-    Where a source gives two, coordinates and an address, the one its point was read from counts
-    (`basis`): an address on the page says nothing of coordinates beside it that aren't. With no
-    usable point, the better of the two counts."""
-    text = str(stated or "").strip()
-    if not text:
+    Where a source gives both, the one its point was read from counts (`basis`): an address on the
+    page says nothing of coordinates beside it that aren't. With no usable point, the better of the
+    two counts."""
+    addresses, points = _parts(address), _parts(coordinates)
+    if not addresses and not points:
         return ""
     if page is None:
         return NO_PAGE_TEXT
-    parts = [part.strip() for part in text.split(PART_SEPARATOR)]
-    kinds = [part.strip() for part in str(kind or "").split(PART_SEPARATOR)]
     checked = []
-    for index, part in enumerate(parts):
-        if not part:
-            continue
-        part_kind = _part_kind(part, kinds[index] if index < len(kinds) else "")
-        if part_kind == COORDINATES:
-            checked.append((COORDINATES, coordinates_on_page(part, page, point if basis == COORDINATES else None)))
-        elif part_kind == GRID_REFERENCE:
+    near = point if basis == COORDINATES else None
+    for part in points:
+        # Coordinates have decimals or degrees; anything else stated as coordinates is a grid
+        # reference, or an easting and northing.
+        if parse_coordinates(part) is not None:
+            checked.append((COORDINATES, coordinates_on_page(part, page, near)))
+        else:
             checked.append((GRID_REFERENCE, grid_reference_on_page(part, page)))
+    for part in addresses:
+        # An address that is nothing but coordinates, which the locate step reads as them.
+        if parse_coordinates(part, strict=True) is not None:
+            checked.append((COORDINATES, coordinates_on_page(part, page, near)))
         else:
             checked.append(("address", phrase_on_page(part, page)))
     used = {COORDINATES: COORDINATES, GRID_REFERENCE: GRID_REFERENCE, ROOFTOP: "address", STREET: "address"}.get(basis)
@@ -267,7 +267,7 @@ class PageChecker:
         page = self.load(source_id)
         quote = quote_on_page(row.get("quoted_evidence_short"), page)
         location = location_on_page(
-            row.get("stated_location"), row.get("stated_location_kind"), page, row.get("location_basis", ""), _point(row)
+            row.get("stated_address"), row.get("stated_coordinates"), page, row.get("location_basis", ""), _point(row)
         )
         if read_in_part(self.notes.get(f"{source_id}.txt.gz", "")):
             quote = NOT_IN_PART_READ if quote in (NOT_FOUND, PARTLY) else quote
