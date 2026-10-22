@@ -452,8 +452,10 @@ found for it fills an empty field.
 
 **One value per site, attribute and year is loaded.** Where approved values disagree,
 `accept-reviews` picks one: the best tier, then the newest `value_date`, then the value the most
-sources give (a page cited twice counts once), then the agent's order. For an attribute that isn't
-yearly, it is one value per site and attribute.
+sources give (a page cited twice counts once), then the agent's order. Tier always comes first,
+however the values are dated. For an attribute that isn't yearly, it is one value per site and
+attribute, as ingestion keys it, and `accepted_values.csv`'s `year` is then the winning value's own
+year, for the record, not part of the key.
 
 Run_Config counts `site_source_pairs`, `pairs_auto_approved` and `pairs_sme_review`, each with its
 values. Pairs for review are split into Tier 3–5 and the Tier 1–2 pairs each exception sent.
@@ -485,15 +487,17 @@ Arbitrated again from the cached `test10-gpt54` and `test10-mini` responses:
 | | gpt-5.4 | mini |
 |---|---|---|
 | Site–source pairs | 61 | 41 |
-| Auto-approved | 23 pairs, 51 values | 20 pairs, 52 values |
-| To SMEs | 38 pairs, all Tier 3–5 | 21 pairs: 14 Tier 3–5, 4 for the same page and name, 3 more than 5 km away |
+| Auto-approved | 23 pairs, 51 values | 19 pairs, 51 values |
+| To SMEs | 38 pairs, all Tier 3–5 | 22 pairs: 14 Tier 3–5, and 8 Tier 1 by exception: 6 for the same page and name, 3 more than 5 km away (one pair both) |
 | Not used | 72 values, 63 of them the agent's unverified leads | 17 values, 14 of them unverified leads |
 | Review_Queue rows before this plan | 102 | 90 |
 
-In mini, Guelph's search cited five pages about Brandon's Eastview Landfill, all Tier 1–2. Two were
-cited for Brandon as well, and two have addresses that put the facility 1,645 km away, so all four
-go to SMEs. The fifth gets through: a Manitoba news release whose only location is "Brandon", cited
-only for Guelph. It is auto-approved under Guelph.
+In mini, Guelph's search cited five pages about Brandon's Eastview Landfill, all Tier 1–2. Three
+were cited for Brandon as well (one as "The Eastview Landfill" there and "Eastview Landfill" under
+Guelph), and two have addresses that put the facility 1,645 km away (one of them also cited for
+Brandon), so four go to SMEs, and the three shared pages go to SMEs under Brandon too. The fifth gets
+through: a Manitoba news release whose only location is "Brandon", cited only for Guelph. It is
+auto-approved under Guelph.
 
 **Accepted risks:**
 
@@ -504,7 +508,19 @@ only for Guelph. It is auto-approved under Guelph.
   figures read as actual.
 - **The agent can claim the wrong facility.** The duplicate rule and the 5 km check catch most of
   what batch 1 showed. A Tier 1–2 page cited for only one site and giving no usable location gets
-  through, like the Manitoba news release above.
+  through, like the Manitoba news release above. Its only location, "Brandon", is geocoded and
+  cached at the town's point, 1,652 km from Guelph, but a town-level point isn't used for any check.
+- **Values the agent itself doubts are auto-approved** (a decision for Hugh). Only a value it marks
+  an excluded candidate is set aside. Of the 51 auto-approved values in each test, gpt-5.4 has 10
+  the agent marked Inferred with Low confidence (9) or whose quote isn't on the cited page (1), and
+  mini 10 (quote not found 7, Inferred/Low 2, Conflicting 2), all of which load: Guelph's
+  `facility_status = Active` that the agent itself said conflicts with a decommissioned landfill,
+  and a forecast `closing_year = 2028` at Moose Jaw, among them.
+- **A pair takes its best citation's tier,** so a value only a weaker citation of the same page
+  gives is approved at the better tier: in mini, the gas follow-up's undated citation of Cowpen
+  Bewley's register (Tier 3) gives values approved at the first pass's Tier 1.
+- **A tier comes from the agent's `source_type`.** A personal blog the agent called an operator
+  disclosure is Tier 1 in gpt-5.4, and auto-approves.
 
 ## Storage and sharing
 

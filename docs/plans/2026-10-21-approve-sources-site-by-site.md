@@ -169,7 +169,7 @@ Guelph. It would be auto-approved under Guelph.
 |---|---|
 | #21, #22, #23 (seed, name yield) | Keep |
 | #24 (found location as one value) | Close: it's in #30, and SME corrections go away |
-| #25 (handoff doc), #26 (batch 1 re-key), #33 (Terraform) | Keep. #26 feeds the batch 1 conversion; the handoff doc needs updating later |
+| #25 (handoff doc), #26 (batch 1 re-key), #33 (Terraform) | Keep. #26 feeds the batch 1 conversion; the handoff doc needs updating later. #26's `relabel.py` imports batch 1's `RESOLVED_HEADERS` and `REVIEW_QUEUE_HEADERS`, which the stack keeps for it; its tests also build batch 1 workbooks with the old `write_review_workbook(review_queue=, leads=)`, which needs replacing with openpyxl when #26 is rebased. Git merges the two without a conflict |
 | #27 (the matching plan) | Close: this plan replaces it |
 | #28 (mirrors dropped), #29 (unsearchable names skipped) | Keep |
 | #30 (nothing approved automatically) | Keep in the stack. Step 2 below brings auto-approval back; its description says so |
@@ -225,8 +225,9 @@ Each branch is cut from the one before. The first is cut from `approve-sources-s
 
 - **Pair counts.** A pair takes the tier of its best-rated citation, and a page cited under two
   spellings of one name is two pairs. So gpt-5.4 has 61 pairs (23 auto-approved, 51 values; 38 to
-  SMEs) and mini 41 (20 auto-approved, 52 values; 21 to SMEs: 14 Tier 3–5, 4 same page and name,
-  3 more than 5 km away), against the table above. In gpt-5.4, gmf-fmv.ca is cited as both
+  SMEs, all Tier 3–5) and mini 41 (19 auto-approved, 51 values; 22 to SMEs: 14 Tier 3–5, and 8 Tier 1
+  by exception, 6 for the same page and name and 3 more than 5 km away, one pair both), against the
+  table above. In gpt-5.4, gmf-fmv.ca is cited as both
   "Merrick Landfill" and "Merrick Landfill site". The same-page check across sites compares names by
   their distinctive words, though, so "The Eastview Landfill" and "Eastview Landfill" under two of
   our sites are caught. In mini, Cowpen Bewley's register entry is Tier 1
@@ -274,3 +275,31 @@ Each branch is cut from the one before. The first is cut from `approve-sources-s
   beside it.
 - A New site decision changed later doesn't remove the candidate already listed.
 - No live search has run against the new prompt.
+- **For Hugh: values the agent itself doubts are auto-approved.** Only an excluded candidate is set
+  aside. Of the 51 auto-approved values in each test, gpt-5.4 has 10 (8 pairs) that the agent marked
+  Inferred with Low confidence (9) or whose quote isn't on the cited page (1), and mini 10 (8 pairs):
+  quote not found 7, Inferred/Low 2, Conflicting 2. All 20 load. Among them: Guelph's
+  `facility_status = Active` that the agent called conflicting with a decommissioned landfill, a
+  forecast `closing_year = 2028` at Moose Jaw, and an operator the agent said the page doesn't name.
+  A fourth exception (Conflicting, Inferred with Low confidence, or a quote not found on a page whose
+  text we hold) would send these pairs to SMEs instead. Not built: it adds to decision 4.
+- **A pair takes its best citation's tier,** so a value only a weaker citation of the same page gives
+  is approved at the better tier. In mini, Cowpen Bewley's register is Tier 1 in pass 1 and Tier 3
+  undated in the gas follow-up, and the follow-up's `has_flare` and `gccs_energy_project_type`, whose
+  quotes aren't on the page, auto-approve as Tier 1.
+- **A tier comes from the agent's `source_type`.** A personal blog the agent called "Operator
+  disclosure" (gpt-5.4, Silverstream) is Tier 1 and auto-approves. This predates the stack, but
+  before it nothing loaded without review.
+- **A town-level geocode isn't used for any check.** `source_locations.json` already holds Brandon's
+  town point; a wider check (say 50 km) on such points would catch the Manitoba news release under
+  Guelph, 1,652 km away, and nothing else in either test. Such a check needs to tell a town from a
+  province: the cache records Nominatim's place rank in `match`, but a located point doesn't carry it
+  yet.
+- **Re-arbitrating batch 1's attribute-first responses**, which name no facility, makes every page
+  cited for two sites the same page and name: 2,130 values go to SMEs that way, 1,544 of them on a
+  blank name. The plan converts batch 1 from its `resolved.csv` instead (build step 5), so this only
+  matters if batch 1 is arbitrated again.
+- **For an attribute that isn't yearly, one value loads per site and attribute,** not per year, as
+  ingestion keys it; `accepted_values.csv`'s `year` is then the winning value's own year (its
+  `value_date`'s, else the run's), for the record. Ingestion (#261) should not key such an attribute
+  by it.
