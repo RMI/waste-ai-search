@@ -59,7 +59,9 @@ def test_the_columns_go_from_our_site_to_the_source_to_the_smes_decision():
     assert SITE_REVIEW_HEADERS[1:7] == ["site_id", "site_name", "original_site_name", "source_language", "country_iso3", "our_coordinates"]
     for group in (
         ["source_url", "source_title", "publisher", "source_tier", "link_status"],
-        ["facility_name_in_source", "facility_name_english", "source_address", "source_coordinates", "coordinates_from", "distance_km"],
+        # As the source writes them, then what we read from them, and why not where we couldn't.
+        ["facility_name_in_source", "facility_name_english", "source_address", "stated_coordinates",
+         "source_coordinates", "coordinates_from", "distance_km", "location_note"],
         ["flags", "would_load"],
     ):
         start = SITE_REVIEW_HEADERS.index(group[0])

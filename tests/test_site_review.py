@@ -9,11 +9,10 @@ where they can, on hand-built source-first responses.
 """
 from __future__ import annotations
 
-import pytest
-
 import csv
 import json
 
+import pytest
 from openpyxl import load_workbook
 
 from waste_ai_search.arbitrate import run_arbitration
@@ -131,9 +130,25 @@ def test_a_row_shows_our_site_the_source_and_where_the_source_places_the_facilit
     assert row["our_coordinates"] == "49.7583, -97.2004"
     assert (row["source_title"], row["publisher"], row["source_tier"]) == ("Page", "Publisher", "Tier 3")
     assert (row["facility_name_in_source"], row["source_address"]) == ("Brady Road Landfill", "1777 Brady Road, Winnipeg")
-    assert (row["source_coordinates"], row["coordinates_from"], row["distance_km"]) == ("49.759, -97.201", "stated", "0.09")
+    assert (row["stated_coordinates"], row["source_coordinates"], row["coordinates_from"], row["distance_km"]) == (
+        "49.7590, -97.2010", "49.759, -97.201", "stated", "0.09",
+    )
+    assert row["location_note"] == ""
     assert row["flags"] == ""
     assert row["would_load"] == "facility_status = Active (2023)\nclosing_year = 2045"
+
+
+def test_a_location_too_coarse_to_place_is_shown_as_written_with_why(tmp_path):
+    """An SME sees the coordinates the source gives even where we couldn't place them, and why, rather
+    than blank columns that read as no location given."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://news.example/brady", "Brady Road Landfill", "50.66, -97.20",
+               values=[value("closing_year", "2045")], source_type="News report"),
+    ]})
+    [row] = site_review(run_dir)
+    assert (row["stated_coordinates"], row["source_coordinates"], row["distance_km"]) == ("50.66, -97.20", "", "100.26")
+    assert row["location_note"] == "coordinates with fewer than 3 decimals are approximate"
+    assert row["flags"] == "more than 5 km from our site"
 
 
 def test_would_load_gives_the_year_only_for_a_yearly_attribute():

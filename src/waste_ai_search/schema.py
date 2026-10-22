@@ -563,9 +563,10 @@ SITE_REVIEW_HEADERS = [
     # The source.
     "source_url", "source_title", "publisher", "source_tier", "link_status",
     # What the source says of the facility it describes, and where it places it, as found_values.csv
-    # gives them.
-    "facility_name_in_source", "facility_name_english", "source_address", "source_coordinates",
-    "coordinates_from", "distance_km",
+    # gives them: its address and coordinates as written, the point read from them, and why there is
+    # none where a source states a location we couldn't place.
+    "facility_name_in_source", "facility_name_english", "source_address", "stated_coordinates",
+    "source_coordinates", "coordinates_from", "distance_km", "location_note",
     # Why the pair needs a second look, and what approving it would load: "attribute = value (year)".
     "flags", "would_load",
     # The SME's.
