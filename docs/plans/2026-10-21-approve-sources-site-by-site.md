@@ -1,7 +1,9 @@
 # AI search: SMEs approve sources site by site, and Tier 1–2 values are approved automatically
 
-**Status:** proposal, 21 October 2026. Nothing is built. This replaces the matching and review parts
-of [2026-10-20-match-sources-by-location.md](2026-10-20-match-sources-by-location.md) (PR #27).
+**Status:** built, 21 October 2026: build steps 1–4 and 7, on stacked local branches, not yet
+merged. Steps 5 (batch 1 conversion) and 6 (ingestion #261 rework) are not built. See
+[As built](#as-built). This replaces the matching and review parts of
+[2026-10-20-match-sources-by-location.md](2026-10-20-match-sources-by-location.md) (PR #27).
 **Date:** 21 October 2026
 
 ## Why
@@ -190,8 +192,8 @@ New PRs, stacked on `source-coordinates`:
 4. **`accept-reviews`** and `accepted_values.csv`.
 5. **Batch 1 conversion.**
 6. **Ingestion #261 rework.**
-7. **Docs:** the README; a design doc decision (F39) reversing F36 (nothing automatic) and F38
-   (matching); and this plan's status.
+7. **Docs:** the README; a design doc decision (F41, since F39 and F40 were taken by #34 and #35)
+   reversing F36 (nothing automatic) and F38 (matching); and this plan's status.
 
 ## Accepted risks
 
@@ -204,3 +206,48 @@ New PRs, stacked on `source-coordinates`:
   sites. #29's skipped names, the duplicate rule and the 5 km check cover most of what batch 1
   showed. A Tier 1–2 page cited for only one site and giving no usable location gets through, like
   the Manitoba news release under Guelph in the mini test.
+
+## As built
+
+| Build step | Branch |
+|---|---|
+| 1. Prompt and contract | `agent-decides-match` |
+| 2. Sorting: `found_values.csv`, auto-approval, years; matcher removed | `sort-found-values` |
+| 3. The `Site_Review` tab | `site-review-tab` |
+| 4. `accept-reviews` and `accepted_values.csv` | `accept-reviews` |
+| 5. Batch 1 conversion | Not built |
+| 6. Ingestion #261 rework | Not built (ingestion's repository) |
+| 7. Docs: README, design doc F41, this status | `source-review-docs` |
+
+Each branch is cut from the one before. The first is cut from `approve-sources-site-by-site` (this plan, PR #36), which sits on `source-coordinates`.
+
+**Where it differs from the plan:**
+
+- **Pair counts.** A pair takes the tier of its best-rated citation, and a page cited under two
+  spellings of one name is two pairs. So gpt-5.4 has 61 pairs (23 auto-approved, 51 values; 38 to
+  SMEs) and mini 41 (20 auto-approved, 52 values; 21 to SMEs: 14 Tier 3–5, 4 same page and name,
+  3 more than 5 km away), against the table above. In gpt-5.4, gmf-fmv.ca is cited as both
+  "Merrick Landfill" and "Merrick Landfill site". In mini, Cowpen Bewley's register entry is Tier 1
+  in pass 1 and Tier 3 (undated) in the gas follow-up, and counts as Tier 1.
+- **Brazil is not searched at all.** A coordinates-only site has nothing to ask now, so it is
+  dropped from selection, even when Brazil is asked for.
+- **Not used also covers** a value the agent itself marked an excluded candidate, and the agent's
+  unverified leads, which `found_values.csv` lists with a blank `review_id`.
+- **The 5 km flag shows on any listed pair** more than 5 km away, Tier 3–5 included.
+- **A Different site needs an `other_site_id`.** Without one, `accept-reviews` stops and names the
+  row; an SME who can't tell which site leaves the decision blank and says so in `notes`. A
+  Different site also weighs again, at the other site, values set aside only because they confirm
+  or would change ours at the site searched.
+- **An SME's decision applies whatever the pair's status:** a pair marked Junk loads nothing even
+  if a later arbitration auto-approves it.
+- **Arbitrating again removes `accepted_values.csv`,** since it sorts the values again. `review_id`
+  is stable, so running `accept-reviews` again restores it.
+- **`collect-new-facilities` is removed,** not kept as an alias, and `refresh-seed
+  --merge-identity` with it.
+
+**Still open:**
+
+- Nothing carries decisions from an SME-edited workbook to the one a later arbitration publishes
+  beside it.
+- A New site decision changed later doesn't remove the candidate already listed.
+- No live search has run against the new prompt.
