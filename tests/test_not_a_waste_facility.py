@@ -292,7 +292,7 @@ def test_the_verdict_is_reviewed_on_its_own_facility_type_row():
 def test_the_workbook_has_no_contradictions_tab(tmp_path):
     from waste_ai_search.workbook_io import write_review_workbook
 
-    path = write_review_workbook(tmp_path / "r.xlsx", run_config=[], found_values=[], parse_warnings=[])
+    path = write_review_workbook(tmp_path / "r.xlsx", run_config=[], site_review=[], parse_warnings=[])
     assert "Contradictions" not in load_workbook(path).sheetnames
 
 

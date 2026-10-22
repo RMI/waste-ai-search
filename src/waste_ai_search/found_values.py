@@ -353,20 +353,27 @@ def collapse(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def flag_closures(rows: list[dict[str, Any]]) -> None:
-    """Say on a "Not a Waste Facility" verdict for review when the run also found the site closed.
-
-    The likeliest false verdict is a closed landfill misread as "not a landfill" - "it's a park
-    now" - and a site given the verdict AND reported closed is exactly that shape.
-    """
+def closures(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """What the run found of each site having closed: "facility_status = Inactive", or its
+    closing_year, from any source."""
     closure: dict[str, list[str]] = {}
     for row in rows:
         if row["attribute_name"] == "facility_status" and row["value"] == "Inactive":
             closure.setdefault(row["site_id"], []).append("facility_status = Inactive")
         elif row["attribute_name"] == "closing_year" and row["value"]:
             closure.setdefault(row["site_id"], []).append(f"closing_year = {row['value']}")
+    return {site_id: list(dict.fromkeys(reported)) for site_id, reported in closure.items()}
+
+
+def flag_closures(rows: list[dict[str, Any]]) -> None:
+    """Say on a "Not a Waste Facility" verdict for review when the run also found the site closed.
+
+    The likeliest false verdict is a closed landfill misread as "not a landfill" - "it's a park
+    now" - and a site given the verdict AND reported closed is exactly that shape.
+    """
+    closure = closures(rows)
     for row in rows:
-        reported = list(dict.fromkeys(closure.get(row["site_id"], [])))
+        reported = closure.get(row["site_id"], [])
         if row["attribute_name"] == "facility_type" and row["value"] == NOT_A_WASTE_FACILITY and row["status"] == SME_REVIEW and reported:
             row["status_reason"] += (
                 f" CHECK: this run also found {'; '.join(reported)} - is this a closed landfill misread as "

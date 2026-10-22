@@ -86,6 +86,7 @@ from .schema import (
     parse_tristate_bool,
     validate_foundry_payload,
 )
+from .site_review import site_review_rows
 from .unit_converter import convert_attribute_value
 from .workbook_io import write_review_workbook
 
@@ -440,14 +441,6 @@ def attach_site_names(rows: list[dict[str, Any]], sites_by_id: dict[str, dict[st
         row["source_language"] = normalize_scalar(site.get("source_language"))
 
 
-def baseline_coordinates(site: dict[str, Any]) -> str:
-    """The seed location as "lat, lon", which Google Maps finds when pasted into its search box."""
-    lat, lon = parse_float(site.get("latitude")), parse_float(site.get("longitude"))
-    if lat is None or lon is None:
-        return ""
-    return f"{lat:.6f}, {lon:.6f}"
-
-
 def cover_consistency_warnings(found: list[dict[str, Any]]) -> list[str]:
     """Flag a has_biocover answer that contradicts the cover types found alongside it.
 
@@ -751,7 +744,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "quotes_on_page", "value": describe_results([row.get("quote_on_page", "") for row in found])},
             {"setting": "locations_on_page", "value": describe_results(stated_on_page(evidence_rows))},
         ],
-        found_values=found,
+        site_review=site_review_rows(found, sorting.pairs, sites_by_id),
         parse_warnings=parse_warnings,
     )
 

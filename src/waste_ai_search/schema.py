@@ -544,6 +544,25 @@ FOUND_VALUES_HEADERS = [
     "review_id", "status", "status_reason", "sme_decision", "loaded",
 ]
 
+# The Site_Review tab: one row per site-source pair whose values wait on an SME (site_review.py).
+SITE_REVIEW_HEADERS = [
+    "review_id",
+    # Our site, as our database holds it; our_coordinates is "lat, lon" to paste into Google Maps.
+    "site_id", *SITE_NAME_COLUMNS, "country_iso3", "our_coordinates",
+    # The source.
+    "source_url", "source_title", "publisher", "source_tier", "link_status",
+    # What the source says of the facility it describes, and where it places it, as found_values.csv
+    # gives them.
+    "facility_name_in_source", "facility_name_english", "source_address", "source_coordinates",
+    "coordinates_from", "distance_km",
+    # Why the pair needs a second look, and what approving it would load: "attribute = value (year)".
+    "flags", "would_load",
+    # The SME's.
+    "decision", "other_site_id", "reviewer", "reviewed_date", "notes",
+]
+# What an SME fills in on Site_Review; everything else there is set by the pipeline.
+SITE_REVIEW_EDITABLE = ["decision", "other_site_id", "reviewer", "reviewed_date", "notes"]
+
 # The validation_status resolve gives a decision that leaves our database as it is: a source
 # confirmed our value, or nothing was found.
 NOTHING_TO_REVIEW = "Nothing to review"
@@ -603,8 +622,18 @@ RESOLUTION_VALUES = [
 # Resolutions whose rows belong in the leads sheet and must NOT appear in the review queue.
 LEAD_ROUTED_RESOLUTIONS = {"Conflict - lower credibility"}
 
-WRONG_FACILITY_OURS = "Wrong facility - another site in our database"
+# How a reviewed Review_Queue, before Site_Review replaced it, rejected a value whose source is about
+# a landfill not in our database. collect-new-facilities still reads those workbooks.
 NEW_FACILITY_REASON = "New facility - not in our database"
+
+# What an SME decides of each site-source pair on the Site_Review tab (site_review.py): the source
+# is about this site of ours, about another site of ours (other_site_id says which), about a
+# landfill not in our database, or of no use.
+CORRECT_SITE = "Correct site"
+DIFFERENT_SITE = "Different site"
+NEW_SITE = "New site"
+JUNK = "Junk"
+SITE_REVIEW_DECISIONS = [CORRECT_SITE, DIFFERENT_SITE, NEW_SITE, JUNK]
 
 DEFINITION_VALUES = {
     "attribute_name": REQUESTABLE_ATTRIBUTES,
@@ -618,29 +647,17 @@ DEFINITION_VALUES = {
     "boolean_unknown": ["Yes", "No", "Unknown"],
     "value_basis": ["Direct", "Inferred", "Conflicting", "Not found"],
     "confidence_score": ["High", "Medium", "Low", "Excluded candidate"],
-    "resolution": RESOLUTION_VALUES,
     "source_tier": ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Tier 5"],
-    "validation_status": ["Needs review", "Validated", "Rejected", NOTHING_TO_REVIEW, "Routed to leads"],
-    # What a reviewer may choose. The other statuses are set by the pipeline, not by hand.
-    "review_decision": ["Validated", "Rejected"],
-    # Why a reviewer rejected a value. A fixed list, so rejections can be counted by cause to find
-    # where the AI goes wrong; detail goes in researcher_notes. The two kinds of wrong facility
-    # say whether the site is one of ours (re-file it with corrected_site_id) or new to us
-    # (collect-new-facilities lists it). Plain "Wrong facility" stays for batch 1's workbook, and
-    # the hyphens are plain ones, since ingestion matches the text as typed.
-    "rejection_reason": [
-        WRONG_FACILITY_OURS, NEW_FACILITY_REASON, "Wrong facility", "Not in source", "Wrong value",
-        "Outdated", "Other",
-    ],
-    # Booleans as resolved_value shows them, so a correction reads like the value it replaces.
+    # What an SME decides of a site-source pair on the Site_Review tab.
+    "decision": SITE_REVIEW_DECISIONS,
+    # Booleans as found values show them.
     "true_false": ["TRUE", "FALSE"],
 }
 
 # Columns a reviewer may edit, and the vocabulary each offers. Anything absent here is
 # read-only in the workbook, so a dropdown never invites editing a pipeline-set field.
 FIELD_TO_DEFINITION = {
-    "validation_status": "review_decision",
-    "rejection_reason": "rejection_reason",
+    "decision": "decision",
 }
 
 # --- scalar helpers ----------------------------------------------------------------------------

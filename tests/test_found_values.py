@@ -475,8 +475,7 @@ def test_found_values_csv_replaces_the_evidence_the_decisions_the_queue_and_the_
     with (run_dir / "found_values.csv").open(encoding="utf-8-sig") as handle:
         assert next(csv.reader(handle)) == FOUND_VALUES_HEADERS
     workbook = load_workbook(run_dir / "run_review.xlsx")
-    assert workbook.sheetnames == ["ReadMe", "Run_Config", "Found_Values", "Parse_Warnings", "Definitions"]
-    assert [cell.value for cell in workbook["Found_Values"][1]] == FOUND_VALUES_HEADERS
+    assert workbook.sheetnames == ["ReadMe", "Run_Config", "Site_Review", "Parse_Warnings", "Definitions"]
 
 
 def test_run_config_counts_the_pairs_and_values_by_status(tmp_path):

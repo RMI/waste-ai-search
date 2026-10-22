@@ -145,7 +145,7 @@ def test_a_workbook_with_no_review_queue_has_nothing_to_collect(tmp_path, capsys
     and stops, rather than failing."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    workbook = write_review_workbook(tmp_path / "new.xlsx", run_config=[], found_values=[], parse_warnings=[])
+    workbook = write_review_workbook(tmp_path / "new.xlsx", run_config=[], site_review=[], parse_warnings=[])
     assert main(["collect-new-facilities", "--run-id", "run", "--run-dir", str(run_dir), "--workbook", str(workbook), "--local"]) == 1
     assert "has no Review_Queue tab" in capsys.readouterr().err
     assert not (run_dir / "new_facility_candidates.csv").exists()

@@ -200,9 +200,9 @@ def value(attribute, found, quote, value_date="2024"):
             "quoted_evidence_short": quote}
 
 
-def source(url, values, name="Otaihanga Landfill", location=""):
+def source(url, values, name="Otaihanga Landfill", location="", source_type="Municipal document"):
     return {"url": url, "source_title": "Page", "publisher": "Kapiti Coast District Council",
-            "source_type": "Municipal document", "publication_date": "2024-03-01",
+            "source_type": source_type, "publication_date": "2024-03-01",
             "facility_name_in_source": name, "facility_name_english": "", "stated_address": "",
             "stated_coordinates": location, "values": values}
 
@@ -212,8 +212,8 @@ def rows(run_dir, name):
 
 
 def test_found_values_says_whether_each_quote_and_location_is_on_its_page(tmp_path):
-    """The flags the Site_Review tab will show (step 3 of the approve-sources plan); the review queue's
-    CHECK notes went with it."""
+    """And the Site_Review tab flags a source for review whose page doesn't bear them out, in place of
+    the review queue's CHECK notes."""
     run_dir = tmp_path / "run"
     write_csv_records(run_dir / "seed.csv", [seed("901", "Otaihanga Landfill", -40.8836, 175.0277)], seed_headers())
     council, news, blocked = "https://kapiticoast.example/otaihanga", "https://news.example/otaihanga", "https://blocked.example/x"
@@ -223,9 +223,10 @@ def test_found_values_says_whether_each_quote_and_location_is_on_its_page(tmp_pa
         # On its page, quote and location both.
         source(council, [value("operator", "Kapiti Coast District Council", "It is operated by the council")],
                location="-40.88365, 175.02770"),
-        # Its quote isn't on its page, and neither is the location it states, 0.7 km from ours.
+        # Its quote isn't on its page, and neither is the location it states, 0.7 km from ours. A
+        # Tier 3 source, so it goes to an SME.
         source(news, [value("closing_year", "2011", "The landfill finally closed in 2011")],
-               location="-40.8900, 175.0300"),
+               location="-40.8900, 175.0300", source_type="News report"),
         # The link check kept no text of this one.
         source(blocked, [value("facility_status", "Inactive", "The site closed to all waste in 2007")]),
     ]}))
@@ -241,5 +242,8 @@ def test_found_values_says_whether_each_quote_and_location_is_on_its_page(tmp_pa
     config = {row[0]: row[1] for row in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].values}
     assert config["quotes_on_page"].startswith("found ") and "not found 1" in config["quotes_on_page"]
     assert "not found 1" in config["locations_on_page"]
-    sheet = load_workbook(run_dir / "run_review.xlsx")["Found_Values"]
-    assert any(NOT_FOUND in str(rule.formula) for ranges in sheet.conditional_formatting for rule in ranges.rules)
+    sheet = load_workbook(run_dir / "run_review.xlsx")["Site_Review"]
+    header = [cell.value for cell in sheet[1]]
+    [review] = [dict(zip(header, row)) for row in sheet.iter_rows(min_row=2, values_only=True)]
+    assert review["source_url"] == news
+    assert review["flags"] == "quote not found on the page (closing_year)\naddress or coordinates not found on the page"

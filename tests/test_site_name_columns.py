@@ -1,8 +1,8 @@
 """WP-531 item 1: every SME-facing output shows the translated and original site names together.
 
-So a reviewer can check results against the source's own spelling. The review queue's editable
-`translation_note` went with the queue (step 2 of the approve-sources plan): found_values.csv is
-read-only.
+So a reviewer can check results against our database's name before translation. The review
+queue's editable `translation_note` went with the queue (step 2 of the approve-sources plan):
+found_values.csv is read-only, and the Site_Review tab that replaced the queue shows both names.
 
 The end-to-end test builds a run directory - a pinned seed and one cached agent response - and runs
 the real arbitration over it. It is offline: the seed snapshot means no database is touched.
@@ -103,7 +103,7 @@ def test_a_real_arbitration_writes_both_names_everywhere(tmp_path):
     row = next(csv.DictReader((run_dir / "found_values.csv").open()))
     assert (row["site_name"], row["original_site_name"], row["source_language"]) == ("THE FUNGUS", "EL HONGO", "es")
 
-    ws = load_workbook(run_dir / "run_review.xlsx")["Found_Values"]
+    ws = load_workbook(run_dir / "run_review.xlsx")["Site_Review"]
     header = [c.value for c in ws[1]]
     first = {h: ws.cell(2, i + 1).value for i, h in enumerate(header)}
     assert (first["site_name"], first["original_site_name"], first["source_language"]) == ("THE FUNGUS", "EL HONGO", "es")
