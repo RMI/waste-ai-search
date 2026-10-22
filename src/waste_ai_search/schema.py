@@ -284,7 +284,7 @@ NUMERIC_TARGET_ATTRIBUTES = {
     "flare_efficiency",
 }
 
-# Ranges the spec states. Checked after conversion; out-of-range values are not promotable.
+# Ranges the spec states. Checked after conversion; out-of-range values are not used.
 ATTRIBUTE_RANGES = {
     "area_square_meters": (0.0, None),
     "annual_incoming_waste_metric_tonnes": (0.0, None),

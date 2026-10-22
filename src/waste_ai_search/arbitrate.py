@@ -224,13 +224,13 @@ def extract_evidence(
         elif name in NUMERIC_TARGET_ATTRIBUTES and not is_blank(value):
             parsed = parse_float(value)
             if parsed is None:
-                numeric_note = f"{name} value {value!r} is not numeric; not promotable."
+                numeric_note = f"{name} value {value!r} is not numeric; not used."
             else:
                 low, high = ATTRIBUTE_RANGES.get(name, (None, None))
                 if (low is not None and parsed < low) or (high is not None and parsed > high):
                     bounds = f"{low if low is not None else '-inf'} to {high if high is not None else 'inf'}"
                     numeric_note = (
-                        f"{name} value {parsed:g} is outside the spec range {bounds}; not promotable."
+                        f"{name} value {parsed:g} is outside the spec range {bounds}; not used."
                     )
             if numeric_note:
                 warnings.append(numeric_note)
