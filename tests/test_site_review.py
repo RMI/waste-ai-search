@@ -151,6 +151,25 @@ def test_a_location_too_coarse_to_place_is_shown_as_written_with_why(tmp_path):
     assert row["flags"] == "more than 5 km from our site"
 
 
+def test_a_value_an_auto_approved_source_contradicts_is_flagged_with_which_loads(tmp_path):
+    """One value loads per site, attribute and year, by tier first, and auto-approved pairs aren't on
+    the tab. Without the flag, an SME approving Hutt City Council as the operator would never learn a
+    Tier 1 page they never saw loads WM New Zealand instead."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://manitoba.example/permit", "Brady Road Landfill", values=[value("operator", "City of Winnipeg"), value("opening_year", "1973")]),
+        source("https://stats.example/table", "Brady Road", values=[value("facility_status", "Active", "2024")], source_type="Government statistics"),
+        # Tier 3, so for review: it loses the operator to the permit, and agrees on the opening year.
+        source("https://news.example/brady", "Brady Road", values=[value("operator", "Waste Connections"), value("opening_year", "1973")], source_type="News report"),
+        # Tier 1 but 6 km off, so for review: approved, its status would replace the statistics'.
+        source("https://manitoba.example/notice", "Brady Road", "49.8120, -97.2004", values=[value("facility_status", "Inactive", "2024")]),
+    ]})
+    flags = {row["source_url"]: row["flags"] for row in site_review(run_dir)}
+    assert flags["https://news.example/brady"] == "an auto-approved Tier 1 source gives operator = City of Winnipeg, which loads instead"
+    assert flags["https://manitoba.example/notice"] == (
+        "more than 5 km from our site\napproving replaces an auto-approved Tier 2 source's facility_status = Active (2024)"
+    )
+
+
 def test_would_load_gives_the_year_only_for_a_yearly_attribute():
     """One value loads per site, attribute and year for a yearly attribute, and per site and attribute
     otherwise; lines come in the order the attributes are searched, the newest year first."""

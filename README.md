@@ -1148,7 +1148,7 @@ approving it would do.
 | `facility_name_in_source`, `facility_name_english`, `source_address`, `stated_coordinates` | The facility the source describes, as the source writes it: its name, address, and coordinates or grid reference; `facility_name_english` is the name in English. |
 | `source_coordinates`, `coordinates_from`, `distance_km`, `location_note` | Where the source places the facility, as `lat, lon`: paste it into Google Maps beside `our_coordinates`. `coordinates_from` says what it came from: coordinates the source states, a grid reference, or its address placed on the building or only on the street. A street point can be a kilometre or more off. `distance_km` is how far it is from our site. Where the source states a location but `source_coordinates` is blank, `location_note` says why (too coarse, its address and coordinates disagree, copied from the prompt, a postcode centroid), and `distance_km`, if filled, is roughly how far it is. |
 | `flags` | Why the row needs a second look, shaded where there are any (see below). |
-| `would_load` | What approving loads for this site of ours, one line per value: `attribute = value`, with the year for a yearly attribute, such as `facility_status = Active (2024)`. |
+| `would_load` | What approving loads for this site of ours, one line per value: `attribute = value`, with the year for a yearly attribute, such as `facility_status = Active (2024)`. One value loads per site, attribute and year, so a line can lose to a better-tier value for the same field: the flags say where an auto-approved source's would. |
 | `review_id` | The pair's id, by which your decision is read back. Don't edit it. |
 
 | Flag | What to do |
@@ -1158,6 +1158,8 @@ approving it would do.
 | same page and name also cited for site(s) X | Searches for other sites of ours cited this page under the same facility name. It is about one of them at most, unless they are one facility recorded twice. The row is listed under each of those sites too, and the pair of sites is on `possible_duplicates.csv`. |
 | more than 5 km from our site | Compare `source_coordinates`, or where it is blank `stated_coordinates`, with `our_coordinates`. |
 | says Not a Waste Facility | Approving loads that verdict. Check the source says the site was never a waste site: a closed landfill still is one. Where the run also found the site closed, the flag says so. |
+| an auto-approved Tier N source gives `attribute = value`, which loads instead | A source approved automatically, so not on this tab, gives a different value for the same field and year, and its better tier wins the pick: approving this row won't load that line. If you think this row's value is the right one, say so in `notes`. |
+| approving replaces an auto-approved Tier N source's `attribute = value` | The other way round: this row's tier wins, so approving it loads its value in place of one that would otherwise load automatically. |
 
 **Source links.** `source_url` is clickable, and shows the URL exactly as the source gave it. The
 link behind it is made safe (spaces and accented characters encoded), so it opens even when the
@@ -1170,14 +1172,16 @@ Pick `decision` from its dropdown:
 
 | `decision` | When | What happens |
 |---|---|---|
-| **Correct site** | The source is about this site of ours. | Its values load here: everything in `would_load`. |
+| **Correct site** | The source is about this site of ours. | Its values load here: everything in `would_load`, unless a flag says a better-tier value for the same field loads instead. |
 | **Different site** | It is about another site of ours. Put that site's id in `other_site_id`. | Its values load at that site, where that site's fields are empty. |
 | **New site** | It is about a landfill that isn't in our database. | Nothing loads. The source is listed in `new_facility_candidates.csv` for ingestion. |
 | **Junk** | The source is no use: it isn't about one facility, or you can't tell which. | Nothing loads. |
 | *(blank)* | Not decided yet. | Nothing loads yet. |
 
-- **A decision covers the whole row.** Correct site loads every line of `would_load`, and the other
-  decisions load none.
+- **A decision covers the whole row.** Correct site loads every line of `would_load` that wins its
+  field (best tier, then newest, then most sources, among every value approved for that site,
+  attribute and year), and the other decisions load none. Where an auto-approved source you don't
+  see here would win, a flag says so.
 - **If it is about another of our sites but you can't tell which,** leave `decision` blank and say so
   in `notes`. A Different site with no `other_site_id` can't be read back.
 - **A renamed site is fine.** The question is whether it is the same facility, not the same name.

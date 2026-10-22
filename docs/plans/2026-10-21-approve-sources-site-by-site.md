@@ -234,6 +234,11 @@ Each branch is cut from the one before. The first is cut from `approve-sources-s
 - **Not used also covers** a value the agent itself marked an excluded candidate, and the agent's
   unverified leads, which `found_values.csv` lists with a blank `review_id`.
 - **The 5 km flag shows on any listed pair** more than 5 km away, Tier 3–5 included.
+- **A flag says where an auto-approved value disagrees.** One value loads per site, attribute and
+  year, by tier first, and auto-approved pairs aren't on Site_Review, so an SME's approval could lose
+  to a value they never saw. Where an auto-approved source gives a different value for a field a
+  listed pair would fill, the row says which would load: "an auto-approved Tier 1 source gives
+  operator = WM New Zealand, which loads instead", or "approving replaces ...".
 - **Rough points are measured too.** Coordinates too coarse to show (fewer than 3 decimals, or a
   grid reference coarser than 100 m) and a doubtful source's coordinates and address (more than 2 km
   apart) give no `source_coordinates`, but the 5 km check still measures them, allowing for their
