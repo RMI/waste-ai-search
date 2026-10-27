@@ -1,4 +1,4 @@
-# AI search: SMEs check seven key values, as well as which site a source is about
+# AI search: SMEs check eight key values, as well as which site a source is about
 
 **Status:** proposal, 26 October 2026. Builds on
 [2026-10-21-approve-sources-site-by-site.md](2026-10-21-approve-sources-site-by-site.md) (PR #36),
@@ -10,11 +10,13 @@ whose stack is built but not merged.
 - **Where the stack is now.** SMEs check one thing: whether a source is about our site (the
   identity check, on `Site_Review`). Once a pair is approved, automatically or by an SME, every
   value it gives loads unseen. We trust the agent to read values off a page.
-- **What changes.** Seven values matter too much to load unseen. A person checks each one against
+- **What changes.** Eight values matter too much to load unseen. A person checks each one against
   its source, whatever the source's tier:
   - **site type:** `facility_type`;
   - **closure year:** `closing_year`;
   - **incoming waste:** `annual_incoming_waste_metric_tonnes`;
+  - **area:** `area_square_meters`. Pages often give a permitted or whole-property area rather
+    than the area filled, and in hectares or acres, so it is easy to misread;
   - **whether the site captures gas:** `has_landfill_gas_collection`, the most important of the gas
     values;
   - **whether the gas project still runs:** `gccs_current_project_status`. A project that has
@@ -31,7 +33,7 @@ whose stack is built but not merged.
 
 | # | Decision |
 |---|---|
-| 1 | **The seven checked attributes never load without an SME's OK on the value,** whatever the tier. They are one list in `schema.py`, so adding one later is a one-line change. |
+| 1 | **The eight checked attributes never load without an SME's OK on the value,** whatever the tier. They are one list in `schema.py`, so adding one later is a one-line change. |
 | 2 | **The identity check stays as it is.** A pair is still approved automatically (Tier 1–2, no exception) or on `Site_Review`. |
 | 3 | **A checked value loads only when both checks pass:** its pair is approved (auto, Correct site or Different site) and its value is marked Correct. |
 | 4 | **The value check is a separate tab, `Value_Review`,** one row per value, grouped by site and attribute so rival values for one field sit together. It asks a different question from `Site_Review`, and may be done by a different person. |
@@ -111,9 +113,9 @@ Every other attribute keeps the actual-figures-only rule.
 |  | Today | With this plan |
 |---|---|---|
 | Values auto-approved, loading unseen | 51 | 32 |
-| Values on `Value_Review` | 0 | 54, across all 10 sites |
+| Values on `Value_Review` | 0 | 55, across all 10 sites |
 | …of which from auto-approved pairs | | 19 (8 site type, 4 incoming waste, 3 gas project status, 2 closure year, 1 gas collection, 1 gas use) |
-| …of which from pairs on `Site_Review` | | 35 |
+| …of which from pairs on `Site_Review` | | 36 (1 of them an area) |
 
 So about five value checks per site, on top of the site checks. Most are quick: the quote is
 next to the value. No collection efficiency was found: the agent offered six, all as unverified
@@ -143,7 +145,7 @@ Tests go with each step.
    *Proposed: not now. An SME marks it Wrong and writes the right value in notes.*
 3. **Should `accepted_values.csv` say who checked a value?** A `value_reviewer` column would need
    one small change in ingestion #261. *Proposed: not now.*
-4. **Batch 1:** its 2,686 auto-approved values include these seven attributes, loaded unseen. Should
+4. **Batch 1:** its 2,686 auto-approved values include these eight attributes, loaded unseen. Should
    the batch 1 conversion (step 5 of the approve-sources plan, not built) send them to
    `Value_Review` too? *Proposed: count them first, then decide.*
 
