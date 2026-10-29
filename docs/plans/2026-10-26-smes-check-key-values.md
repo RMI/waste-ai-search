@@ -36,9 +36,10 @@ whose stack is built but not merged, and changes two of its decisions (see
 |---|---|
 | 1 | **An SME checks the match of every site–source pair,** Tier 1–2 included. Nothing is approved automatically. |
 | 2 | **For a Tier 3–5 source, an SME also checks each of the seven key values** it would load. Its other values load with the match. |
-| 3 | **A Tier 1–2 source's values all load with the match,** key values included. |
+| 3 | **A Tier 1–2 source's values all load with the match,** key values and planned closure years included. We trust Tier 1–2 values to have been read off the page correctly. |
 | 4 | **A source that doesn't match loads nothing:** Junk and New site load none of its values, whatever its value checks say. |
 | 5 | **A key value loads only when both pass:** the pair is Correct site (or Different site) and the value is marked Correct. A blank value check doesn't load. |
+| 5a | **An SME may give the right value** when the source is right but the agent misread it: they mark the value Wrong and type the right one in `corrected_value`. It loads in place of the agent's. The column is optional: Wrong with it blank loads nothing. |
 | 6 | **One tab.** The value checks sit under their pair on `Site_Review`, so an SME reads a page once and decides the match and its values together. |
 | 7 | **Only values that would load are listed:** fills of empty fields, as now. |
 | 8 | **The seven attributes are one list in `schema.py`,** so changing it later is a one-line change. |
@@ -62,7 +63,12 @@ per key value it would load:
 | Row | Shows | SME picks |
 |---|---|---|
 | Pair | Our site; the source's link, title, tier; its name, address, coordinates and distance; flags; what approving would load | Correct site / Different site / New site / Junk |
-| Key value (Tier 3–5 only) | Attribute, value, unit, year, value as written, the quote, whether the quote is on the page, the agent's note | Correct / Wrong |
+| Key value (Tier 3–5 only) | Attribute, value, unit, year, value as written, the quote, whether the quote is on the page, the agent's note | Correct / Wrong, and optionally `corrected_value` |
+
+**`corrected_value`** is typed in the unit the row shows (tonnes a year, square metres, a year,
+a fraction for collection efficiency, or for site type, gas collection and gas use one of the
+listed choices, which the cell offers as a dropdown). An SME who only
+knows the figure in hectares writes it in notes instead.
 
 ### Making it easier in Excel
 
@@ -84,18 +90,24 @@ of that:
 
 ## `accept-reviews`
 
-- Reads the pair rows and the value rows, applies decisions 3–5, then picks one value per site,
+- Reads the pair rows and the value rows, applies decisions 3–5a, then picks one value per site,
   attribute and year (best tier, newest, most sources).
+- **Loads a `corrected_value`** under a value marked Wrong, after the same checks the agent's values
+  get (allowed site types, ranges, a whole year). One that fails stops `accept-reviews`, naming the
+  row, as a Different site without a site id does now.
 - **Warns, naming the row,** where a value is marked Correct under a pair that is Junk, New site
-  or blank, and where two different values for one field are both marked Correct.
-- **`accepted_values.csv` keeps its columns,** so ingestion #261 needs no change.
+  or blank; where a value is marked Correct but has a `corrected_value` (the correction is not
+  used); and where two different values for one field are both marked Correct.
+- **`accepted_values.csv` keeps its columns,** so ingestion #261 needs no change. It doesn't say
+  which values an SME checked or corrected; `found_values.csv` does, in its `value_decision` and
+  `corrected_value` columns.
 
 ## The prompt: planned closure years come back
 
 On 22 October Hugh asked to keep expected closure years such as Moose Jaw's 2028, which 95c7c4a's
 "no future values" rule drops. The prompt lets `closing_year` be a planned year, with `value_basis`
 saying so; the row shows "planned". From a Tier 3–5 source an SME checks it; from a Tier 1–2 source
-it loads, as a regulator's or operator's planned closure date. *(See open question 1.)*
+it loads, as a regulator's or operator's planned closure date (decision 3).
 
 ## On the 10-site test (gpt-5.4, `test10-gpt54`)
 
@@ -112,33 +124,32 @@ incoming waste or collection efficiency came from a Tier 3–5 source in this te
 
 Stacked on `source-review-docs`, each a branch:
 
-1. **Sorting:** auto-approval removed; `KEY_ATTRIBUTES` in `schema.py`; `value_check` in
-   `found_values.csv`; 719337d's rule removed.
+1. **Sorting:** auto-approval removed; `KEY_ATTRIBUTES` in `schema.py`; `value_check`,
+   `value_decision` and `corrected_value` in `found_values.csv`; 719337d's rule removed.
 2. **`Site_Review`:** every pair listed, value rows under Tier 3–5 pairs, and the Excel helps above.
-3. **`accept-reviews`** reads value rows and applies decisions 3–5.
+3. **`accept-reviews`** reads value rows and applies decisions 3–5a.
 4. **Prompt:** planned closure years allowed, marked as planned.
 5. **Docs:** README, a design-doc decision (F42, reversing F41's auto-approval), the approve-sources
    plan's status. Re-run `test10-gpt54` from its cached responses and update the figures above.
 
 Tests go with each step.
 
-## Open questions for Hugh
+## Settled, 29 October
 
-1. **A Tier 1–2 planned closure year** loads with its match, unchecked. Fine, or should a planned
-   year always get a value check?
-2. **Can an SME type the right value** when the agent misread it (say 12,000 t, not 120,000 t)?
-   *Proposed: not now. Mark it Wrong and put the right value in notes.*
-3. **Should `accepted_values.csv` say who checked a value?** *Proposed: not now;* it needs a change
-   in ingestion #261.
-4. **Batch 1:** its 2,686 values were auto-approved Tier 1–2 fills, which this plan would also have
-   loaded once an SME approved the match. Should the batch 1 conversion send its matches to SMEs?
-   *Proposed: count them per site first, then decide.*
+1. **Tier 1–2 values are trusted as read,** for every attribute, planned closure years included
+   (decision 3).
+2. **SMEs can give a corrected value,** optionally (decision 5a).
+3. **`accepted_values.csv` doesn't record who checked a value.**
+4. **Batch 1 is out of scope.** Its 2,686 auto-approved Tier 1–2 values were loaded without a match
+   check; whether to send them to SMEs is for later.
 
 ## Accepted risks
 
 - **A Tier 1–2 source's values load once its match is approved,** key values included. The 8%
   error rate of the 10-site test (planned or permitted figures read as actual) still applies to
   them.
+- **A corrected value has no source of its own.** It loads under the source the SME corrected,
+  with that source's URL and tier, though the figure is the SME's.
 - **An SME checks a value against the quote,** unless they open the page. The quote-not-on-page
   flag stays.
 - **More SME work on matches:** every pair is now a row. Most Tier 1–2 pairs are quick, as the
