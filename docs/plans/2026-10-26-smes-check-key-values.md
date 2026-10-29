@@ -1,157 +1,145 @@
-# AI search: SMEs check eight key values, as well as which site a source is about
+# AI search: SMEs check every site match, and seven key values from Tier 3–5 sources
 
-**Status:** proposal, 26 October 2026. Builds on
+**Status:** proposal, revised 29 October 2026. Builds on
 [2026-10-21-approve-sources-site-by-site.md](2026-10-21-approve-sources-site-by-site.md) (PR #36),
-whose stack is built but not merged.
-**Date:** 26 October 2026
+whose stack is built but not merged, and changes two of its decisions (see
+[What this changes](#what-this-changes)).
+**Date:** 26 October 2026; revised 29 October 2026
 
 ## Why
 
-- **Where the stack is now.** SMEs check one thing: whether a source is about our site (the
-  identity check, on `Site_Review`). Once a pair is approved, automatically or by an SME, every
-  value it gives loads unseen. We trust the agent to read values off a page.
-- **What changes.** Eight values matter too much to load unseen. A person checks each one against
-  its source, whatever the source's tier:
+- **Where the stack is now.** A Tier 1–2 source's match to our site is approved automatically,
+  unless it hits an exception (same page under two sites, more than 5 km away, "Not a Waste
+  Facility"). SMEs check the match of every other source. Once a match is approved, every value
+  the source gives loads unseen.
+- **What is wanted now.** Every site's matches are checked by a person, whatever the tier. And
+  some values matter too much to load unseen from a weaker source, so for Tier 3–5 sources an SME
+  checks those values against the page too:
   - **site type:** `facility_type`;
   - **closure year:** `closing_year`;
   - **incoming waste:** `annual_incoming_waste_metric_tonnes`;
   - **area:** `area_square_meters`. Pages often give a permitted or whole-property area rather
-    than the area filled, and in hectares or acres, so it is easy to misread;
-  - **whether the site captures gas:** `has_landfill_gas_collection`, the most important of the gas
-    values;
-  - **whether the gas project still runs:** `gccs_current_project_status`. A project that has
-    stopped captures nothing, so it matters almost as much as gas collection itself;
+    than the area filled, and in hectares or acres;
+  - **whether the site captures gas:** `has_landfill_gas_collection`;
   - **what the captured gas is used for:** `gccs_energy_project_type` (flared, electricity, RNG
     and so on);
-  - **how much gas is captured:** `gccs_collection_efficiency`. The search rarely finds it (none
-    in the 10-site test), but when it does it moves the model's output a lot.
-- **What we know of the error rate.** In the 10-site tests, 8–11% of the values that would have
-  loaded were wrong even from the right facility, mostly planned or permitted figures read as
-  actual. Closure years and tonnages are exactly those.
+  - **how much gas is captured:** `gccs_collection_efficiency`. Rarely found, but it moves the
+    model's output a lot.
+
+  The list Hugh was sent (names and coordinates; site type, area, incoming waste, closure year and
+  gas use) is the same, with gas collection and collection efficiency added at Hugh's request. Names and coordinates are
+  what the match check already shows.
 
 ## Decisions
 
 | # | Decision |
 |---|---|
-| 1 | **The eight checked attributes never load without an SME's OK on the value,** whatever the tier. They are one list in `schema.py`, so adding one later is a one-line change. |
-| 2 | **The identity check stays as it is.** A pair is still approved automatically (Tier 1–2, no exception) or on `Site_Review`. |
-| 3 | **A checked value loads only when both checks pass:** its pair is approved (auto, Correct site or Different site) and its value is marked Correct. |
-| 4 | **The value check is a separate tab, `Value_Review`,** one row per value, grouped by site and attribute so rival values for one field sit together. It asks a different question from `Site_Review`, and may be done by a different person. |
-| 5 | **Only values that would load are listed:** fills of empty fields, as now (decision 8 of the approve-sources plan). A value that confirms or would change ours stays "not used". |
-| 6 | **The other attributes are unchanged:** they load with their pair, unseen. |
+| 1 | **An SME checks the match of every site–source pair,** Tier 1–2 included. Nothing is approved automatically. |
+| 2 | **For a Tier 3–5 source, an SME also checks each of the seven key values** it would load. Its other values load with the match. |
+| 3 | **A Tier 1–2 source's values all load with the match,** key values included. |
+| 4 | **A source that doesn't match loads nothing:** Junk and New site load none of its values, whatever its value checks say. |
+| 5 | **A key value loads only when both pass:** the pair is Correct site (or Different site) and the value is marked Correct. A blank value check doesn't load. |
+| 6 | **One tab.** The value checks sit under their pair on `Site_Review`, so an SME reads a page once and decides the match and its values together. |
+| 7 | **Only values that would load are listed:** fills of empty fields, as now. |
+| 8 | **The seven attributes are one list in `schema.py`,** so changing it later is a one-line change. |
 
-## How it works
+## What this changes
 
-### `found_values.csv`
+- **Decision 3 of the approve-sources plan (Tier 1–2 auto-approval) is reversed.** Tier 1–2 pairs
+  go on `Site_Review` like the rest. Their exceptions (same page under two sites, more than 5 km,
+  Not a Waste Facility) become flags on the row rather than the reason it is listed.
+- **`found_values.csv`'s statuses:** "auto-approved" goes. A loadable value is "SME review", and a
+  new column, `value_check`, is "required" for a Tier 3–5 key value.
+- **719337d's rule goes:** a Tier 3–5 source whose values a better auto-approved source already
+  gives was set aside as not used. With nothing auto-approved, it is listed. Where a better-tier
+  source on the sheet gives a different value, the row says so, as the rival-value flags do now.
 
-- **`status` keeps meaning the pair's route:** auto-approved, SME review or not used.
-- **A new column, `value_check`:** "required" for a loadable value of a checked attribute, blank
-  otherwise.
-- **After review:** `value_decision` beside `sme_decision`; `loaded` is yes only when both pass.
+## The `Site_Review` tab
 
-This keeps the two checks apart. An auto-approved pair still auto-approves its operator and
-opening year, while its closing year waits on `Value_Review`.
+One row per site–source pair, grouped by our site, as now. Under a Tier 3–5 pair, one indented row
+per key value it would load:
 
-**The gas follow-up search is unchanged.** The other gas values are asked only of a site with gas
-collection. `refresh-seed` already carries a pass 1 "yes" forward, reviewed or not, so the second
-pass asks for the rest. Only loading waits on the SME, so a wrong "yes" costs one extra search,
-and its gas values still get checked before they load.
+| Row | Shows | SME picks |
+|---|---|---|
+| Pair | Our site; the source's link, title, tier; its name, address, coordinates and distance; flags; what approving would load | Correct site / Different site / New site / Junk |
+| Key value (Tier 3–5 only) | Attribute, value, unit, year, value as written, the quote, whether the quote is on the page, the agent's note | Correct / Wrong |
 
-### The `Value_Review` tab
+### Making it easier in Excel
 
-| Group | Columns |
-|---|---|
-| Our site | site_id, site_name, country |
-| The value | attribute, value, unit, year, value as written, value date, how the agent read it (`value_basis`, confidence, note) |
-| The evidence | quote, quote found on the page?, link, title, tier |
-| The pair | review_id, and its site check: "auto-approved" or "on Site_Review" |
-| SME | value_decision, reviewer, reviewed_date, notes |
+The sheet already has dropdowns, clickable links, a frozen header and a rule between sites. On top
+of that:
 
-| value_decision | What happens |
-|---|---|
-| Correct | Loads, if its pair is approved too. |
-| Wrong | Doesn't load. |
-| Can't tell | Doesn't load. |
-| Blank | Nothing yet. |
+- **The value rows can be folded away** (Excel's row grouping), so an SME checking matches sees
+  one row per source, and opens the values when they get to them.
+- **The link jumps to the quote.** The source link adds a text fragment (`#:~:text=...`), so
+  Chrome and Edge open the page scrolled to the quote, highlighted. It doesn't work on PDFs, where
+  the plain link still opens the file.
+- **Both points open in Google Maps.** Our coordinates and the source's become map links, instead
+  of text to paste.
+- **A rejected pair greys out its value rows,** once an SME picks Junk or New site, so nobody
+  checks values that won't load.
+- **A Tier 1–2 pair with no flags is marked as such,** so an SME can move through those quickly:
+  the ReadMe says to confirm the name and location, and move on.
+- **The ReadMe's steps are rewritten** for the one-tab check.
 
-- **Rows are ordered** by site, then attribute, then year, then tier, so an SME sees every
-  candidate for one field together.
-- **Two different values marked Correct for one field:** `accept-reviews` loads one by the usual
-  rule (best tier, newest, most sources) and prints a warning naming both rows.
-- **"Not a Waste Facility" stays on `Site_Review`.** It is a verdict on the pair, not a value.
-  Every other `facility_type` value goes to `Value_Review`.
+## `accept-reviews`
 
-### `Site_Review`
+- Reads the pair rows and the value rows, applies decisions 3–5, then picks one value per site,
+  attribute and year (best tier, newest, most sources).
+- **Warns, naming the row,** where a value is marked Correct under a pair that is Junk, New site
+  or blank, and where two different values for one field are both marked Correct.
+- **`accepted_values.csv` keeps its columns,** so ingestion #261 needs no change.
 
-- **An auto-approved pair still isn't listed,** even when some of its values wait on
-  `Value_Review`: its site is settled, only those values wait.
-- **`would_load` marks a checked value** with "(value checked on Value_Review)", so an SME approving
-  the site knows those values still need a second OK.
-- **The rival-value flags** stop treating a checked attribute's auto-approved value as certain to
-  load: it now says "waits on Value_Review" instead of "loads instead".
-
-### `accept-reviews`
-
-- Reads both tabs. Applies decision 3, then picks one value per site, attribute and year.
-- **Warns, naming the row,** where a value is marked Correct but its pair is Junk or New site (the
-  value check is then moot), and where its pair is still undecided (it loads once the pair is).
-- **`accepted_values.csv` keeps its columns,** so ingestion #261 needs no change. *(See open
-  question 3.)*
-
-### The prompt: planned closure years come back
+## The prompt: planned closure years come back
 
 On 22 October Hugh asked to keep expected closure years such as Moose Jaw's 2028, which 95c7c4a's
-"no future values" rule now drops. With every closure year checked by an SME, that is safe:
-
-- the prompt lets `closing_year` be a planned year, with `value_basis` saying it is planned;
-- `Value_Review` shows "planned" in the value's row, so the SME decides whether to keep it.
-
-Every other attribute keeps the actual-figures-only rule.
+"no future values" rule drops. The prompt lets `closing_year` be a planned year, with `value_basis`
+saying so; the row shows "planned". From a Tier 3–5 source an SME checks it; from a Tier 1–2 source
+it loads, as a regulator's or operator's planned closure date. *(See open question 1.)*
 
 ## On the 10-site test (gpt-5.4, `test10-gpt54`)
 
 |  | Today | With this plan |
 |---|---|---|
-| Values auto-approved, loading unseen | 51 | 32 |
-| Values on `Value_Review` | 0 | 55, across all 10 sites |
-| …of which from auto-approved pairs | | 19 (8 site type, 4 incoming waste, 3 gas project status, 2 closure year, 1 gas collection, 1 gas use) |
-| …of which from pairs on `Site_Review` | | 36 (1 of them an area) |
+| Pair rows on `Site_Review` | 32 | up to 61: every pair, Tier 1–2's 23 included |
+| Value rows under them | 0 | 27, under 21 Tier 3–5 pairs |
+| Values loading with no one looking at the source | 51 | 0 |
 
-So about five value checks per site, on top of the site checks. Most are quick: the quote is
-next to the value. No collection efficiency was found: the agent offered six, all as unverified
-leads, which don't load.
+The 27 value rows: 8 site type, 8 gas collection, 7 gas use, 3 closure year, 1 area. No
+incoming waste or collection efficiency came from a Tier 3–5 source in this test.
 
 ## Build order
 
 Stacked on `source-review-docs`, each a branch:
 
-1. **Sorting:** `CHECKED_ATTRIBUTES` in `schema.py`; `found_values.py` writes `value_check`.
-2. **The `Value_Review` tab,** and the `Site_Review` changes (`would_load`, rival flags, pairs left
-   off). The workbook's ReadMe gets a step for it.
-3. **`accept-reviews`** reads `Value_Review` and applies decision 3.
+1. **Sorting:** auto-approval removed; `KEY_ATTRIBUTES` in `schema.py`; `value_check` in
+   `found_values.csv`; 719337d's rule removed.
+2. **`Site_Review`:** every pair listed, value rows under Tier 3–5 pairs, and the Excel helps above.
+3. **`accept-reviews`** reads value rows and applies decisions 3–5.
 4. **Prompt:** planned closure years allowed, marked as planned.
-5. **Docs:** README, a design-doc decision (F42), this plan's status. Re-run `test10-gpt54` from
-   its cached responses and update the figures above.
+5. **Docs:** README, a design-doc decision (F42, reversing F41's auto-approval), the approve-sources
+   plan's status. Re-run `test10-gpt54` from its cached responses and update the figures above.
 
 Tests go with each step.
 
 ## Open questions for Hugh
 
-1. **Decided, 26 October: the other gas values are left out.** Methane flared a year
-   (`gccs_ch4_flared_metric_tonnes`) and the flare values (`has_flare`, `flare_efficiency`) load
-   with their pair, as now.
+1. **A Tier 1–2 planned closure year** loads with its match, unchecked. Fine, or should a planned
+   year always get a value check?
 2. **Can an SME type the right value** when the agent misread it (say 12,000 t, not 120,000 t)?
-   That needs a `corrected_value` column and a way to record that the loaded value is the SME's.
-   *Proposed: not now. An SME marks it Wrong and writes the right value in notes.*
-3. **Should `accepted_values.csv` say who checked a value?** A `value_reviewer` column would need
-   one small change in ingestion #261. *Proposed: not now.*
-4. **Batch 1:** its 2,686 auto-approved values include these eight attributes, loaded unseen. Should
-   the batch 1 conversion (step 5 of the approve-sources plan, not built) send them to
-   `Value_Review` too? *Proposed: count them first, then decide.*
+   *Proposed: not now. Mark it Wrong and put the right value in notes.*
+3. **Should `accepted_values.csv` say who checked a value?** *Proposed: not now;* it needs a change
+   in ingestion #261.
+4. **Batch 1:** its 2,686 values were auto-approved Tier 1–2 fills, which this plan would also have
+   loaded once an SME approved the match. Should the batch 1 conversion send its matches to SMEs?
+   *Proposed: count them per site first, then decide.*
 
 ## Accepted risks
 
-- **Values of the other attributes still load unseen,** including operator, opening year, waste in
-  place, methane flared and the flare values.
-- **An SME checks the value against the quote, not the whole page,** unless they open the link. A
-  quote not found on the page is flagged, as now.
+- **A Tier 1–2 source's values load once its match is approved,** key values included. The 8%
+  error rate of the 10-site test (planned or permitted figures read as actual) still applies to
+  them.
+- **An SME checks a value against the quote,** unless they open the page. The quote-not-on-page
+  flag stays.
+- **More SME work on matches:** every pair is now a row. Most Tier 1–2 pairs are quick, as the
+  regulator or operator names the site.
