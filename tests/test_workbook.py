@@ -258,6 +258,16 @@ def test_a_value_row_is_shaded_folds_under_its_source_and_links_to_the_quote(tmp
     assert ws[f"{column['source_url']}2"].hyperlink.target == "https://news.example/landfill"
 
 
+def test_every_link_sits_at_the_top_of_its_cell_beside_the_rows_other_text(tmp_path):
+    """Excel's Hyperlink style aligns to the bottom, which lined a page's link up with the ↳ row
+    below it (Hugh, 30 October)."""
+    ws = build(tmp_path, rows=VALUE_ROWS)[0]["Site_Review"]
+    links = [cell for row in ws.iter_rows(min_row=2) for cell in row if cell.hyperlink]
+    assert {ws.cell(1, cell.column).value for cell in links} == {"source_url"}
+    assert {cell.alignment.vertical for cell in links} == {"top"}
+    assert all(cell.alignment.wrap_text for cell in links)
+
+
 def test_a_quote_link_marks_the_quote_and_falls_back_to_the_page():
     assert quote_link("https://a.example/p", "A short - quote, & more") == "https://a.example/p#:~:text=A%20short%20%2D%20quote%2C%20%26%20more"
     assert quote_link("https://a.example/p#top", "Closed 2008") == "https://a.example/p#top:~:text=Closed%202008"

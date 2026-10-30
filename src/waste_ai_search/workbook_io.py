@@ -135,6 +135,15 @@ def map_link(point: Any) -> str | None:
     return f"https://www.google.com/maps/search/?api=1&query={quote(text, safe=',.-')}"
 
 
+def make_link(cell, target: str) -> None:
+    """Link a cell. Excel's Hyperlink style sets its own alignment, at the bottom of the cell, so the
+    link is put back at the top beside the row's other text: left at the bottom, a page's link
+    lined up with the row below it."""
+    cell.hyperlink = target
+    cell.style = "Hyperlink"
+    cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+
 def style_sheet(ws) -> None:
     header_fill = PatternFill("solid", fgColor="1F4E78")
     for cell in ws[1]:
@@ -152,8 +161,7 @@ def style_sheet(ws) -> None:
             if header and "url" in str(header).lower() and cell.value:
                 target = hyperlink_target(cell.value)
                 if target:
-                    cell.hyperlink = target
-                    cell.style = "Hyperlink"
+                    make_link(cell, target)
     for idx, col in enumerate(ws.columns, start=1):
         header = ws.cell(1, idx).value or ""
         max_len = len(str(header))
@@ -471,8 +479,7 @@ def lay_out_site_review(ws, records: list[dict[str, Any]]) -> None:
             cell = ws.cell(row, headers[header])
             target = map_link(cell.value)
             if target:
-                cell.hyperlink = target
-                cell.style = "Hyperlink"
+                make_link(cell, target)
         if record.get(KIND) != VALUE_ROW:
             continue
         ws.row_dimensions[row].outlineLevel = 1
@@ -484,8 +491,7 @@ def lay_out_site_review(ws, records: list[dict[str, Any]]) -> None:
         target = quote_link(record.get("source_url"), record.get("quote"))
         link.value = QUOTE_LINK_TEXT if target else link.value
         if target:
-            link.hyperlink = target
-            link.style = "Hyperlink"
+            make_link(link, target)
             link.fill = fill
 
 
