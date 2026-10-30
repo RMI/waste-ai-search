@@ -910,12 +910,11 @@ year rather than losing to a newer one.
 |---|---|---|---|
 | `facility_status` | enum | — | `facility_status` |
 | `facility_type` | enum | — | `facility_type` |
-| `bulk_waste_type` ‡ | enum: `municipal solid waste`, `inert waste`, `others` | — | *none yet — review layer only* |
 | `operator` ‡ | text | — | *none yet — review layer only* |
 | `opening_year` | integer year | `year` | `opening_year` |
 | `closing_year` | integer year | `year` | `closing_year` |
 | `has_landfill_gas_collection` | boolean | — | `has_landfill_gas_collection` |
-| `annual_incoming_waste_metric_tonnes` | numeric | `metric tonnes/year` | `annual_incoming_waste_metric_tonnes` |
+| `annual_incoming_waste_metric_tonnes` | numeric, municipal waste only (see below) | `metric tonnes/year` | `annual_incoming_waste_metric_tonnes` |
 | `waste_in_place_metric_tonnes` | numeric | `metric tonnes` | `waste_in_place_metric_tonnes` |
 | `area_square_meters` | numeric | `square meters` | `area_square_meters` |
 | `waste_depth` | enum (derived) | `meters` in, category out | `waste_depth` |
@@ -923,21 +922,30 @@ year rather than losing to a newer one.
 | `cover_types` | enum array | — | `cover_types` |
 | `has_biocover` | boolean | — | `has_biocover` |
 
-‡ **Review-layer only: `operator`, `bulk_waste_type`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
+‡ **Review-layer only: `operator`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
 
-`bulk_waste_type` is the waste that makes up **most** of an incoming waste amount
-(`annual_incoming_waste_metric_tonnes`). It separates municipal solid waste (household and similar
-waste, which decomposes and generates methane) from inert waste (construction and demolition
-rubble, soil, stones); `others` is mainly industrial, hazardous or mining waste or sludge. An
-amount that is mostly municipal waste plus some rubble is municipal solid waste. There is no
-`unknown`: with no source on what the amount is made of, or no one main type, the value stays
-NULL, so the site is asked again on a later pass.
+**Incoming waste counts municipal waste only,** as the standardized spec's "Municipal waste only"
+rule asks of every source: household and similar waste, which decomposes and generates methane.
 
-Since 30 October 2026 it describes an amount, not the whole site: what kind of site a facility
-is belongs to `facility_type`. So it is asked only of a site whose incoming waste is asked too,
-and a waste type is used only where the same source gives an incoming waste amount; given alone
-it is listed as not used ("no incoming waste amount"). Before that it was asked of every site,
-and most sources gave it alone ("municipal solid waste" for a town's dump).
+- Where the source doesn't say what an amount is made of, it is taken as municipal and loads as
+  written. This is the usual case.
+- Where the source splits it ("120,000 t, of which 20,000 t construction debris"), the agent
+  returns the municipal part (100,000 t).
+- Where the source says the amount is mainly other waste (construction and demolition rubble,
+  soil, quarry or mining waste, industrial or hazardous waste, or sludge), the agent returns it
+  with `not_municipal = true`. It is listed in `found_values.csv` as not used ("not municipal
+  waste") and never loads.
+- On Site_Review, an SME marks an amount of rubble, soil or tailings Wrong, so it loads nothing,
+  or types just the municipal part in `corrected_value`.
+
+Unlike the US GHGRP transform in `waste_data_ingestion_pipeline` #244, nothing estimates a
+municipal share where the source gives none. A site taking mainly other waste is typed
+`Non-Municipal Waste Landfill` (see [Landfills for other waste](#landfills-for-other-waste)).
+
+`bulk_waste_type`, the waste that made up most of what a site receives, was retired on 30 October
+2026 (`UNSEARCHED_ATTRIBUTES`): it is no longer asked, and a value from a response cached before is
+listed as not used ("no longer asked"). The loader in `waste_data_ingestion_pipeline` #261 typed a
+site Non-Municipal from it; with no waste type in new runs, that rule no longer fires.
 
 `waste_depth` is the only **derived** categorical. The agent still reports a number and its
 unit; the pipeline converts to metres, then bins on the spec's 5 m boundary. The metre value is
@@ -1062,7 +1070,8 @@ leaves out (`waste_data_ingestion_pipeline` #238). What a site takes decides it,
 engineering: an engineered hazardous-waste landfill is a Non-Municipal Waste Landfill, not a
 Sanitary Landfill. "Inert landfill", "C&D landfill", "industrial landfill" and "hazardous waste
 landfill" map to it. Since 30 October 2026 it is the only place a page saying a site is, say, an
-inert-waste landfill is recorded: `bulk_waste_type` describes an incoming waste amount.
+inert-waste landfill is recorded: `bulk_waste_type` is retired, and an amount of other waste is
+marked on the amount itself.
 
 > **Pending upstream** like `Transfer Station`: it is in `consolidated_facility`'s
 > `chk_facility_type` on `main`, but stays on `PENDING_UPSTREAM_FACILITY_TYPES` until

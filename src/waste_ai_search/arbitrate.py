@@ -235,6 +235,11 @@ def extract_evidence(
                 "quoted_evidence_short": normalize_scalar(attribute.get("quoted_evidence_short")),
                 # A closing_year the source gives as planned or expected, not actual.
                 "planned": "TRUE" if name == "closing_year" and parse_tristate_bool(attribute.get("planned"))[0] else "",
+                # An incoming waste amount the source says is mainly other waste than municipal.
+                "not_municipal": (
+                    "TRUE" if name == "annual_incoming_waste_metric_tonnes"
+                    and parse_tristate_bool(attribute.get("not_municipal"))[0] else ""
+                ),
                 "search_terms_used": normalize_scalar(attribute.get("search_terms_used")),
                 # Whether the value can be used at all: its status is decided in found_values.py.
                 "promotion_eligible": "FALSE" if exclusion else "TRUE",

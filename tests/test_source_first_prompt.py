@@ -55,7 +55,7 @@ def test_the_contract_is_sources_first():
     ]
     assert list(source["values"][0]) == [
         "attribute_name", "value", "unit", "value_basis", "confidence_score", "value_date",
-        "evidence_summary", "search_terms_used", "quoted_evidence_short", "planned",
+        "evidence_summary", "search_terms_used", "quoted_evidence_short", "planned", "not_municipal",
     ]
     assert "stated_location" not in prompt_for(THUNDER_BAY)
 
@@ -181,9 +181,8 @@ def test_a_planned_closing_year_is_asked_for_and_marked():
     assert "Not a planned or expected closure" not in prompt
 
 def test_the_prompt_stays_compact():
-    """About as long as the attribute-first prompt it replaced (16.5k characters for this site). Raised
-    from 18,500 for the Non-Municipal Waste Landfill definition (about 50 tokens a site)."""
-    assert len(prompt_for(THUNDER_BAY)) < 18_700
+    """About as long as the attribute-first prompt it replaced (16.5k characters for this site)."""
+    assert len(prompt_for(THUNDER_BAY)) < 18_500
     assert not re.search(r"\n{4,}", prompt_for(THUNDER_BAY))
 
 

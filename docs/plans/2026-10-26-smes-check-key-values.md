@@ -34,7 +34,7 @@ replacing parts of [2026-10-21-approve-sources-site-by-site.md](2026-10-21-appro
 |---|---|
 | `facility_type` (site type) | Decides how the model treats the site. |
 | `closing_year` | Decides whether the site still receives waste. |
-| `annual_incoming_waste_metric_tonnes` | Pages often give a permitted limit or design capacity instead. |
+| `annual_incoming_waste_metric_tonnes` | Pages often give a permitted limit or design capacity instead. Counts municipal waste only (see the 30 October municipal-incoming-waste plan): an SME marks rubble, soil or tailings Wrong, or types the municipal part. |
 | `area_square_meters` | Pages often give the whole property, or a permitted area, often in hectares or acres. |
 | `has_landfill_gas_collection` | Whether the site captures gas: the gas value that matters most. |
 | `gccs_collection_efficiency` | Rarely found, but it moves the model's output a lot. |

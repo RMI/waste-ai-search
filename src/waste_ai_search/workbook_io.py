@@ -209,16 +209,16 @@ REVIEW_INSTRUCTIONS = [
             "2. Click source_url to open the page. Is it about our site? Compare the name the page "
             "uses (facility_name_in_source) with ours (site_name), and the town and state it gives "
             "(source_place) with ours (our_place).\n"
-            "3. If the page says where the site is, click source_coordinates to see it on the map. "
-            "distance_km is how far that is from ours. coordinates_from says where the point came "
-            "from: a point from a street address can be a kilometre or more off.\n"
+            "3. If the page says where the site is, source_coordinates shows it on the map and "
+            "distance_km how far it is from ours. A point from a street address (coordinates_from) "
+            "can be a kilometre or more off.\n"
             "4. Read flags, shaded orange: possible problems our automatic checks spotted, such as a "
             "quote we couldn't find on the page, a site more than 5 km from ours or in a different "
             "state, or another page giving a different value. The checks can't read images or maps, so "
             "look for yourself.\n"
             "5. would_load lists every value the page gives. Approving the page adds them all except "
-            f"those marked {CHECK_INDEPENDENTLY}: each has its own ↳ row underneath, and is added "
-            "only once you mark that row Correct.\n"
+            f"those marked {CHECK_INDEPENDENTLY}: each has its own ↳ row underneath and is added "
+            "only once that row is Correct.\n"
             "6. Pick a decision:\n"
             "- Correct site: it's about our site.\n"
             "- Different site: it's about another of our sites. Put that site's ID in other_site_id. "
@@ -228,11 +228,12 @@ REVIEW_INSTRUCTIONS = [
             "Only Correct site and Different site add anything. If a high-tier page has a value wrong, "
             "say so in notes.\n"
             "FOR EACH ↳ ROW (skip it if the page is New site or Junk: it turns grey):\n"
-            "7. Click source_url: the page opens at the quote, highlighted (in Chrome or Edge, not in "
-            "PDFs). evidence shows the quote. A closure year flagged as planned is one the page "
-            "expects in the future: Correct keeps it.\n"
-            "8. Pick Correct or Wrong. If it's wrong and you know the right value, you can type it in "
-            "corrected_value, in the same unit as would_load.\n"
+            "7. Click source_url: the page opens at the quote, highlighted (Chrome or Edge, not "
+            "PDFs). evidence shows the quote. A closure year flagged planned is one the page "
+            "expects: Correct keeps it.\n"
+            "8. Pick Correct or Wrong. If it's wrong and you know the right value, type it in "
+            "corrected_value, in would_load's unit. Incoming waste is municipal waste only: mark "
+            "rubble, soil or tailings Wrong, or type just the municipal part in corrected_value.\n"
             "9. Put your name in reviewer, the date in reviewed_date, and anything worth saying in "
             "notes.\n"
             "A blank decision adds nothing, so leave it blank if you're unsure. Don't change any other "
@@ -326,7 +327,6 @@ def add_definitions(ws) -> None:
         "facility_type",
         "cover_type",
         "confidence_score",
-        "bulk_waste_type",
         "waste_depth",
         "true_false",
         "gccs_energy_project_type",

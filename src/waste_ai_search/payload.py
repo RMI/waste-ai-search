@@ -70,6 +70,9 @@ VALUE_FIELDS = [
     "evidence_summary", "search_terms_used", "quoted_evidence_short",
     # Only a closing_year can be planned; responses before the key-values plan don't give it.
     "planned",
+    # Only an incoming waste amount can be not municipal; responses before 30 October 2026 don't
+    # give it.
+    "not_municipal",
 ]
 REQUIRED_VALUE_FIELDS = ["attribute_name", "value", "value_basis", "confidence_score"]
 # An attribute-first response's required fields, as validation reported them.

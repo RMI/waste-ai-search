@@ -185,6 +185,8 @@ def test_the_readme_walks_an_sme_through_a_row_in_plain_words(tmp_path):
     # accept-reviews stops on a Different site with no other_site_id, so an SME who can't tell which
     # of our sites leaves the decision blank.
     assert "If you can't tell which, leave decision blank" in steps
+    # Incoming waste counts municipal waste only, as the standardized spec asks (30 October).
+    assert "Incoming waste is municipal waste only: mark rubble, soil or tailings Wrong, or type just the municipal part in corrected_value." in " ".join(steps.split())
     # Short enough to be read.
     assert len(purpose.split()) + len(steps.split()) < 500
 

@@ -145,23 +145,50 @@ def test_gas_use_is_not_a_key_value_but_gas_collection_is(tmp_path):
     assert found["gccs_energy_project_type"]["value_check"] == ""
 
 
-def test_a_waste_type_is_used_only_beside_an_incoming_waste_amount_from_the_same_source(tmp_path):
-    """bulk_waste_type says what an amount of incoming waste is made of (Hugh, 30 October). Given on
-    its own it describes the whole site, which is facility_type's job, so it isn't used."""
+def test_incoming_waste_the_source_says_is_not_municipal_is_not_used(tmp_path):
+    """Incoming waste counts municipal waste only, as the standardized spec asks of every source
+    (Hugh, 30 October). An amount the source says is mainly rubble, soil or tailings is listed, not
+    loaded; one it says nothing about is taken as municipal."""
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
-        source("https://news.example/fire", "Brady Road", source_type="News report",
-               values=[value("bulk_waste_type", "municipal solid waste")]),
+        source("https://news.example/rubble", "Brady Road", source_type="News report", values=[
+            value("annual_incoming_waste_metric_tonnes", "20000", unit="t", value_date="2023", not_municipal=True),
+        ]),
+        source("https://manitoba.example/report", "Brady Road Landfill", values=[
+            value("annual_incoming_waste_metric_tonnes", "400000", unit="t", value_date="2024", not_municipal=False),
+        ]),
+    ]})
+    amounts = {row["source_url"]: row for row in rows(run_dir) if row["attribute_name"] == "annual_incoming_waste_metric_tonnes"}
+    rubble = amounts["https://news.example/rubble"]
+    assert (rubble["status"], rubble["not_municipal"]) == (NOT_USED, "TRUE")
+    assert rubble["status_reason"].startswith("Not municipal waste: the source says this amount is mainly other waste")
+    assert rubble["value_check"] == ""  # nothing for an SME to check
+    municipal = amounts["https://manitoba.example/report"]
+    assert (municipal["status"], municipal["not_municipal"]) == (SME_REVIEW, "")
+    assert "not municipal waste 1" in run_config(run_dir)["values_not_used"]
+
+
+def test_only_an_incoming_waste_amount_can_be_not_municipal(tmp_path):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://manitoba.example/report", "Brady Road Landfill", values=[
+            value("area_square_meters", "12", unit="ha", not_municipal=True),
+        ]),
+    ]})
+    [area] = rows(run_dir)
+    assert (area["status"], area["not_municipal"]) == (SME_REVIEW, "")
+
+
+def test_a_waste_type_from_an_older_response_is_no_longer_used(tmp_path):
+    """bulk_waste_type was retired on 30 October 2026; a response cached before still gives it."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
         source("https://manitoba.example/report", "Brady Road Landfill", values=[
             value("annual_incoming_waste_metric_tonnes", "400000", unit="t"),
             value("bulk_waste_type", "municipal solid waste"),
         ]),
     ]})
-    waste_types = {row["source_url"]: row for row in rows(run_dir) if row["attribute_name"] == "bulk_waste_type"}
-    alone = waste_types["https://news.example/fire"]
-    assert alone["status"] == NOT_USED
-    assert alone["status_reason"].startswith("Says what waste the site takes, but the source gives no incoming waste amount")
-    assert waste_types["https://manitoba.example/report"]["status"] == SME_REVIEW
-    assert "no incoming waste amount 1" in run_config(run_dir)["values_not_used"]
+    [waste_type] = [row for row in rows(run_dir) if row["attribute_name"] == "bulk_waste_type"]
+    assert waste_type["status"] == NOT_USED
+    assert waste_type["status_reason"].startswith("No longer asked: whether incoming waste is municipal is marked on the amount itself")
+    assert "no longer asked 1" in run_config(run_dir)["values_not_used"]
 
 
 def test_a_source_whose_values_a_better_source_gives_is_still_listed(tmp_path):

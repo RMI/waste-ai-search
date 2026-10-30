@@ -110,6 +110,10 @@ UNSEARCHED_ATTRIBUTES = {
     "gccs_ch4_generated_metric_tonnes",
     "gccs_ch4_collected_metric_tonnes",
     "gccs_ch4_flow_to_project_metric_tonnes",
+    # Retired 30 October 2026: whether incoming waste is municipal is marked on the amount itself
+    # (not_municipal), and a site taking mainly other waste is a Non-Municipal Waste Landfill.
+    # An older response's value is listed as not used (found_values.py).
+    "bulk_waste_type",
 }
 
 # A location is one fact, valued "lat, lon". Arbitration once read a found location from where
@@ -569,8 +573,9 @@ FOUND_VALUES_HEADERS = [
     # The agent's quote, and whether it, and the location the source states, are on the source's page
     # as the link check kept its text (on_page.py).
     "quote", "quote_on_page", "location_on_page", "agent_note", "value_basis", "agent_confidence",
-    # planned is TRUE for a closing_year the source gives as planned or expected.
-    "planned",
+    # planned is TRUE for a closing_year the source gives as planned or expected; not_municipal is
+    # TRUE for an incoming waste amount the source says is mainly other waste, which isn't used.
+    "planned", "not_municipal",
     # review_id is the site-source pair whose status this is. value_check is "required" for a key
     # value from a Tier 3-5 pair, which an SME checks on its own row; accept-reviews fills the rest:
     # the pair's decision, the value's (Correct or Wrong) and any value the SME typed instead, and

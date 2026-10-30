@@ -120,7 +120,13 @@ ATTRIBUTE_GUIDANCE = {
         "Waste actually accepted per year - not a permitted or licensed limit or a design "
         "capacity. Report the source's original unit; the pipeline converts. "
         "Distinguish metric tonnes from US short tons. If the source just says 'tons', keep the "
-        "number in value and set unit to 'ambiguous tons'. Never put words in value."
+        "number in value and set unit to 'ambiguous tons'. Never put words in value. "
+        # The standardized spec's rule (Hugh, 30 October): municipal waste only, as far as the
+        # source allows; where it doesn't say, the amount is taken as municipal.
+        "Municipal solid waste only. Where the source splits the amount by kind of waste, return "
+        "the municipal part. Where it says the amount is mainly other waste - construction and "
+        "demolition rubble, soil, quarry or mining waste, industrial or hazardous waste, or "
+        "sludge - return it with not_municipal = true. Where it doesn't say, return it as written."
     ),
     "waste_in_place_metric_tonnes": (
         "Total waste mass actually in place (a stock, not a rate) - not a permitted or design "
@@ -173,19 +179,6 @@ ATTRIBUTE_GUIDANCE = {
         "destroyed, as measured or reported - not a design or required minimum - as a value "
         "between 0 and 1. If the source gives a percentage, report the "
         "number and set unit to '%'."
-    ),
-    "bulk_waste_type": (
-        "The type of waste making up MOST of the annual_incoming_waste_metric_tonnes amount you "
-        "return from the same source. Never return it on its own: what kind of site this is "
-        "belongs in facility_type. Allowed values only. "
-        "municipal solid waste - waste from households, and similar waste from shops, offices, "
-        "markets and institutions, collected by or for a municipality; it decomposes. Some rubble "
-        "or soil mixed in is still municipal solid waste. "
-        "inert waste - waste that does not decompose or react: construction and demolition "
-        "rubble, concrete, bricks, soil, stones and excavation material. "
-        "others - mainly industrial, hazardous or mining waste, or sewage sludge. "
-        "If the source doesn't say what the amount is made of, or no one type makes up most of "
-        "it, do not return bulk_waste_type."
     ),
 }
 
@@ -306,9 +299,6 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
         if field in GCCS_ATTRIBUTES and not gas_present:
             continue
         requested.append(field)
-    # bulk_waste_type says what an incoming waste amount is made of, so it is asked only with one.
-    if "annual_incoming_waste_metric_tonnes" not in requested and "bulk_waste_type" in requested:
-        requested.remove("bulk_waste_type")
     return requested
 
 
@@ -492,6 +482,7 @@ Names:
                         "search_terms_used": "Search terms and languages used",
                         "quoted_evidence_short": "A short passage copied word for word from the source, in its own language",
                         "planned": "true only for a closing_year the source gives as planned or expected; otherwise false",
+                        "not_municipal": "true only for an incoming waste amount the source says is mainly other waste; otherwise false",
                     }
                 ],
             }
@@ -509,7 +500,6 @@ Names:
         "cover_type": DEFINITION_VALUES["cover_type"],
         "gccs_energy_project_type": DEFINITION_VALUES["gccs_energy_project_type"],
         "gccs_current_project_status": DEFINITION_VALUES["gccs_current_project_status"],
-        "bulk_waste_type": DEFINITION_VALUES["bulk_waste_type"],
         "boolean_unknown": DEFINITION_VALUES["boolean_unknown"],
         "value_basis": DEFINITION_VALUES["value_basis"],
         "confidence_score": DEFINITION_VALUES["confidence_score"],
