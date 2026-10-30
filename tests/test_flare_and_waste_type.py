@@ -72,3 +72,14 @@ def test_new_values_are_typed_and_checked():
 def test_an_older_response_with_a_dropped_attribute_still_reads():
     """Re-arbitrating a run cached before F31 keeps its methane volumes."""
     assert _mapped(_claim("gccs_ch4_collected_metric_tonnes", "1200", "metric tonnes CH4")) == ["1200"]
+
+
+def test_a_landfill_for_other_waste_is_a_non_municipal_waste_landfill():
+    """The standardized spec's type for a site taking mainly waste other than municipal solid
+    waste (waste_data_ingestion_pipeline #238). With bulk_waste_type now describing an amount of
+    incoming waste, it is the one place a page saying "inert waste landfill" is recorded."""
+    prompt = build_site_prompt({"site_id": "1", "site_name": "Deponie"}, ["facility_type"])
+    assert "Non-Municipal Waste Landfill - a disposal site taking mainly waste other than municipal solid waste" in " ".join(prompt.split())
+    assert "What it takes decides this, whatever its engineering." in prompt
+    for claimed in ("Non-Municipal Waste Landfill", "inert landfill", "C&D landfill", "hazardous waste landfill"):
+        assert _mapped(_claim("facility_type", claimed)) == ["Non-Municipal Waste Landfill"], claimed

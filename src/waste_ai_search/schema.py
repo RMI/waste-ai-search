@@ -219,7 +219,13 @@ RECYCLING_CENTER = "Recycling Center"
 # and in chk_facility_type on every transformed.* table, but NOT yet in the `facility_type` enum type
 # or consolidation.consolidated_facility's chk_facility_type, so it is pending too.
 TRANSFER_STATION = "Transfer Station"
-PENDING_UPSTREAM_FACILITY_TYPES = [TRANSFER_STATION, RECYCLING_CENTER, NOT_A_WASTE_FACILITY]
+# A disposal site that takes mainly waste other than municipal solid waste: construction and
+# demolition rubble, soil, or industrial, hazardous or mining waste. The standardized spec's type
+# for a site a model of municipal waste leaves out (waste_data_ingestion_pipeline #238, merged
+# 20 October 2026, in consolidated_facility's chk_facility_type). Pending here until
+# check_db_schema.py reports the enum type accepts it too.
+NON_MUNICIPAL_LANDFILL = "Non-Municipal Waste Landfill"
+PENDING_UPSTREAM_FACILITY_TYPES = [TRANSFER_STATION, RECYCLING_CENTER, NON_MUNICIPAL_LANDFILL, NOT_A_WASTE_FACILITY]
 FACILITY_TYPE_ALLOWED = [*FACILITY_TYPE_VALUES, *PENDING_UPSTREAM_FACILITY_TYPES]
 # What every prompt offers. "Not a Waste Facility" is offered only to unconfirmed sites (WP-525).
 FACILITY_TYPE_OFFERED = [value for value in FACILITY_TYPE_ALLOWED if value != NOT_A_WASTE_FACILITY]
@@ -365,6 +371,15 @@ FACILITY_TYPE_MAP = {
     "recycling centre": RECYCLING_CENTER,
     "recycling depot": RECYCLING_CENTER,
     "materials recovery facility": RECYCLING_CENTER,
+    "non-municipal waste landfill": NON_MUNICIPAL_LANDFILL,
+    "non municipal waste landfill": NON_MUNICIPAL_LANDFILL,
+    "inert landfill": NON_MUNICIPAL_LANDFILL,
+    "inert waste landfill": NON_MUNICIPAL_LANDFILL,
+    "construction and demolition landfill": NON_MUNICIPAL_LANDFILL,
+    "c&d landfill": NON_MUNICIPAL_LANDFILL,
+    "industrial landfill": NON_MUNICIPAL_LANDFILL,
+    "industrial waste landfill": NON_MUNICIPAL_LANDFILL,
+    "hazardous waste landfill": NON_MUNICIPAL_LANDFILL,
     "not a waste facility": NOT_A_WASTE_FACILITY,
     "not a waste site": NOT_A_WASTE_FACILITY,
     "not waste": NOT_A_WASTE_FACILITY,

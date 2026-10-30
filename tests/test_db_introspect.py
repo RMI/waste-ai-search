@@ -196,7 +196,11 @@ def test_the_pending_upstream_facility_types_are_pinned():
     from waste_ai_search.db_enums import FACILITY_TYPE_VALUES
     from waste_ai_search.schema import PENDING_UPSTREAM_FACILITY_TYPES
 
-    assert PENDING_UPSTREAM_FACILITY_TYPES == ["Transfer Station", "Recycling Center", "Not a Waste Facility"]
+    # Non-Municipal Waste Landfill: the standardized spec's type for a site taking mainly other waste
+    # (waste_data_ingestion_pipeline #238), offered from 30 October 2026.
+    assert PENDING_UPSTREAM_FACILITY_TYPES == [
+        "Transfer Station", "Recycling Center", "Non-Municipal Waste Landfill", "Not a Waste Facility",
+    ]
     # The enum alone is not the gate: consolidated_facility's chk_facility_type is separate and can
     # lag. When this fails, run check_db_schema.py and remove the value from the pending list only
     # once it reports the value accepted by both.

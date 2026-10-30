@@ -59,6 +59,10 @@ FACILITY_TYPE_DEFINITIONS = (
     "equipment installed. "
     "Sanitary Landfill - a fully engineered facility with liners, leachate and groundwater "
     "management, and often but not necessarily a landfill gas management system. "
+    # The standardized spec's type for a site a model of municipal waste leaves out (Hugh, 30 Oct).
+    "Non-Municipal Waste Landfill - a disposal site taking mainly waste other than municipal "
+    "solid waste: construction and demolition rubble, soil, or industrial, hazardous or mining "
+    "waste. What it takes decides this, whatever its engineering. "
     # Added after the live check on Manresa (18133): the agent found compaction, read it against the
     # Controlled Dumpsite definition, and downgraded an engineered landfill.
     "Compaction, soil cover and restricted access occur at BOTH controlled dumpsites and sanitary "
@@ -78,8 +82,8 @@ FACILITY_TYPE_DEFINITIONS = (
     "takes mixed (unsorted) waste, and a Recycling Center only if it takes nothing but separated "
     "recyclables. "
     "If waste was ever landfilled or dumped on the site - for example a transfer station or "
-    "recycling centre built on a closed landfill - classify the disposal site (Sanitary Landfill, "
-    "Controlled Dumpsite or Dumpsite), not the facility now on it: the buried waste still emits."
+    "recycling centre built on a closed landfill - classify the disposal site, not the facility "
+    "now on it: the buried waste still emits."
 )
 
 ATTRIBUTE_GUIDANCE = {

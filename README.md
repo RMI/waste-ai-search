@@ -1053,6 +1053,21 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 > it accepted by **both** the enum and `consolidated_facility`'s `chk_facility_type`, which roll out
 > separately. Then regenerate `db_enums.py`; `generate_enums.py` does not edit the pending list.
 
+### Landfills for other waste
+
+`facility_type` also offers **`Non-Municipal Waste Landfill`**: a disposal site taking mainly waste
+other than municipal solid waste, such as construction and demolition rubble, soil, or industrial,
+hazardous or mining waste. It is the standardized spec's type for a site a model of municipal waste
+leaves out (`waste_data_ingestion_pipeline` #238). What a site takes decides it, whatever its
+engineering: an engineered hazardous-waste landfill is a Non-Municipal Waste Landfill, not a
+Sanitary Landfill. "Inert landfill", "C&D landfill", "industrial landfill" and "hazardous waste
+landfill" map to it. Since 30 October 2026 it is the only place a page saying a site is, say, an
+inert-waste landfill is recorded: `bulk_waste_type` describes an incoming waste amount.
+
+> **Pending upstream** like `Transfer Station`: it is in `consolidated_facility`'s
+> `chk_facility_type` on `main`, but stays on `PENDING_UPSTREAM_FACILITY_TYPES` until
+> `check_db_schema.py` reports the `facility_type` enum type accepts it too.
+
 ### Outputs
 
 | File | Purpose |
