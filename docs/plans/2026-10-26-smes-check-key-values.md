@@ -1,4 +1,4 @@
-# AI search: SMEs check every site match, and seven key values from weaker sources
+# AI search: SMEs check every site match, and six key values from weaker sources
 
 **Status:** built on local branch `sme-value-checks` (30 October 2026), not merged; docs (build
 step 5) not yet updated. See [As built](#as-built). It changes how the AI search's results are reviewed,
@@ -10,7 +10,7 @@ replacing parts of [2026-10-21-approve-sources-site-by-site.md](2026-10-21-appro
 
 - A person checks **every source** the search found: is it about our site?
 - For a **weaker source** (news, trade press, NGO reports, directories, blogs), a person also checks
-  **seven key values** it gives against the page, and can type the right value if the search misread
+  **six key values** it gives against the page, and can type the right value if the search misread
   it.
 - A **strong source** (a regulator, permit, operator or government statistics) is trusted to have
   been read correctly: once its match is approved, all its values load.
@@ -26,9 +26,9 @@ replacing parts of [2026-10-21-approve-sources-site-by-site.md](2026-10-21-appro
 | **Tier** | How much we trust the kind of source. **Tier 1:** regulator, permit or registry, court decision, municipal document, environmental impact assessment, operator disclosure. **Tier 2:** government statistics, peer-reviewed or intergovernmental data. **Tier 3:** news, trade press, NGO report. **Tier 4:** directory, map site, wiki, aggregator, blog, or an undated page. **Tier 5:** the agent couldn't say what kind of source it is. "Strong" here means Tier 1–2, "weaker" Tier 3–5. |
 | **A pair's tier** | The best tier the search gave that page. A page cited twice (once undated, so Tier 3, and once dated, so Tier 1) counts as Tier 1. |
 | **Fill** | A value for a field that is empty in our database for that site (and year, for a yearly field such as incoming waste). Only fills load. A value that matches ours, or would change ours, is recorded but never loaded. |
-| **Key values** | The seven attributes below. |
+| **Key values** | The six attributes below. |
 
-## The seven key values
+## The six key values
 
 | Attribute | Why |
 |---|---|
@@ -37,12 +37,14 @@ replacing parts of [2026-10-21-approve-sources-site-by-site.md](2026-10-21-appro
 | `annual_incoming_waste_metric_tonnes` | Pages often give a permitted limit or design capacity instead. |
 | `area_square_meters` | Pages often give the whole property, or a permitted area, often in hectares or acres. |
 | `has_landfill_gas_collection` | Whether the site captures gas: the gas value that matters most. |
-| `gccs_energy_project_type` | What the captured gas is used for (flared, electricity, RNG and so on). |
 | `gccs_collection_efficiency` | Rarely found, but it moves the model's output a lot. |
 
 The reviewers' own list of what they want to check had names and coordinates (which the match check
 covers), then site type, area, incoming waste, closure year and gas use; Hugh added gas collection and collection
 efficiency. Gas project status, methane flared and the flare values were considered and left out.
+Hugh dropped gas use on 30 October, after the Mexico test: it was 4 of the 9 value rows there, and
+their quotes were mostly a project title such as "Monterrey I LFG to Energy Project", so checking
+them added little.
 The list is one line of code, so it is easy to change.
 
 ## The rules
@@ -93,7 +95,7 @@ within each site, then by tier. Under each Tier 3–5 pair, one row per key valu
 
 **`corrected_value`** is typed in the unit the row shows: tonnes a year, square metres, a year, or a
 fraction from 0 to 1 for collection efficiency (75% is read as 0.75). Site type, gas collection
-(TRUE or FALSE) and gas use offer a dropdown. If an SME only knows the figure in another unit, they
+(TRUE or FALSE) offer a dropdown. If an SME only knows the figure in another unit, they
 put it in `notes`.
 
 A `corrected_value` typed with no decision is read as Wrong: typing a value says the found one is
@@ -163,7 +165,8 @@ here works on the search's saved responses and can be changed later without sear
 | Value rows | 0 | 27, under 21 weaker sources |
 | Values loaded with no person looking at the source | 51 | 0 |
 
-The 27 value rows: 8 site type, 8 gas collection, 7 gas use, 3 closure year, 1 area.
+The 27 value rows: 8 site type, 8 gas collection, 7 gas use, 3 closure year, 1 area. Without gas
+use (dropped 30 October), 20.
 
 ## Build order
 
@@ -202,7 +205,7 @@ one gas follow-up).
 | | |
 |---|---|
 | Source rows | 32 (12 Tier 1–2, 20 Tier 3–5) |
-| Value rows | 9 |
+| Value rows | 9 (5 without gas use, dropped since) |
 | Values that would load | 68 |
 | Sources placing the facility | 0 of 32: none stated usable coordinates or an address we could place, so the 5 km check never ran |
 

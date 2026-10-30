@@ -81,7 +81,6 @@ VALUE_CHECKED_ATTRIBUTES = [
     "annual_incoming_waste_metric_tonnes",
     "area_square_meters",
     "has_landfill_gas_collection",
-    "gccs_energy_project_type",
     "gccs_collection_efficiency",
 ]
 

@@ -131,6 +131,20 @@ def test_every_fill_goes_to_an_sme_and_a_tier_3_to_5_key_value_is_checked_on_its
     assert AUTO_APPROVED not in {row["status"] for row in rows(run_dir)}
 
 
+def test_gas_use_is_not_a_key_value_but_gas_collection_is(tmp_path):
+    """Hugh dropped gas use on 30 October: its quotes were mostly a project title, so checking it
+    added little. From a Tier 3 source it loads once the source is approved."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://news.example/brady", "Brady Road", source_type="News report", values=[
+            value("has_landfill_gas_collection", "Yes"),
+            value("gccs_energy_project_type", "Electricity Generation"),
+        ]),
+    ]})
+    found = by_attribute(run_dir)
+    assert found["has_landfill_gas_collection"]["value_check"] == "required"
+    assert found["gccs_energy_project_type"]["value_check"] == ""
+
+
 def test_a_source_whose_values_a_better_source_gives_is_still_listed(tmp_path):
     """With nothing approved automatically, a better source's value loads only if an SME approves it,
     so a weaker source giving the same field is reviewed too (719337d's rule is gone)."""

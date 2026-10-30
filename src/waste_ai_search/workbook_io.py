@@ -188,8 +188,8 @@ REVIEW_INSTRUCTIONS = [
             "YOUR WORKLIST. Each row is a web page the search found for one of our sites. Your main "
             "job is to say whether the page is really about that site. Pages from low-tier sources "
             "(Tier 3-5) also have indented rows (↳) under them, one for each important value the page "
-            "gives: site type, closure year, incoming waste, area, gas collection, gas use and "
-            "collection efficiency. Check those too. Pages from high-tier sources (Tier 1-2) have no "
+            "gives: site type, closure year, incoming waste, area, gas collection and collection "
+            "efficiency. Check those too. Pages from high-tier sources (Tier 1-2) have no "
             "↳ rows: we trust their values. Under each site, pages with a flag (a possible problem we "
             "spotted) come first."
         ),
@@ -336,20 +336,19 @@ def definition_range(wb, name: str) -> str:
     return f"=Definitions!${letter}$2:${letter}${len(DEFINITION_VALUES[name]) + 1}"
 
 
-def dropdown(wb, name: str, header: str, strict: bool = True) -> DataValidation:
-    """A dropdown of one Definitions vocabulary. A strict one accepts only a listed choice, since a
-    decision is read back as typed."""
+def dropdown(wb, name: str, header: str) -> DataValidation:
+    """A dropdown of one Definitions vocabulary. It accepts only a listed choice, since a decision is
+    read back as typed."""
     return DataValidation(
         type="list", formula1=definition_range(wb, name), allow_blank=True, showDropDown=False,
-        showErrorMessage=strict, errorTitle=f"Pick a {header}",
+        showErrorMessage=True, errorTitle=f"Pick a {header}",
         error=f"Pick one of: {', '.join(DEFINITION_VALUES[name])}.",
     )
 
 
-# The vocabulary a value row's corrected_value offers, by attribute. A list attribute (gas use) can
-# take several, so its dropdown also takes what is typed.
-CORRECTION_LISTS = {"facility_type": "facility_type", "gccs_energy_project_type": "gccs_energy_project_type"}
-LOOSE_LISTS = {"gccs_energy_project_type"}
+# The vocabulary a value row's corrected_value offers, by attribute; a TRUE/FALSE attribute offers
+# true_false.
+CORRECTION_LISTS = {"facility_type": "facility_type"}
 
 
 def add_validations(wb, ws, kinds: list[str] | None = None, attributes: list[str] | None = None) -> None:
@@ -385,7 +384,7 @@ def add_validations(wb, ws, kinds: list[str] | None = None, attributes: list[str
         else:
             by_list.setdefault(("decision", "decision"), []).append(f"{decision}{row}")
     for (name, header), cells in by_list.items():
-        validation = dropdown(wb, name, header, strict=name not in LOOSE_LISTS)
+        validation = dropdown(wb, name, header)
         ws.add_data_validation(validation)
         for cell_range in runs(cells):
             validation.add(cell_range)
