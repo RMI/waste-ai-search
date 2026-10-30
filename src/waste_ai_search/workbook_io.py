@@ -20,6 +20,7 @@ from .schema import (
     NEW_SITE,
     PARSE_WARNING_HEADERS,
     SITE_REVIEW_EDITABLE,
+    SITE_REVIEW_KEYS,
     SITE_REVIEW_HEADERS,
 )
 from .site_review import (
@@ -237,7 +238,10 @@ REVIEW_INSTRUCTIONS = [
             "A blank decision adds nothing, so leave it blank if you're unsure. Don't change any other "
             "column. If this tab is empty, there's nothing to review."
         ),
-        "editable": f"{', '.join(SITE_REVIEW_EDITABLE)} - nothing else",
+        "editable": (
+            f"{', '.join(SITE_REVIEW_EDITABLE)} - nothing else. Two hidden columns at the end, "
+            f"{', '.join(SITE_REVIEW_KEYS)}, are how your decisions are read back: leave them hidden."
+        ),
     },
     {
         "tab_name": "(file) found_values.csv",
@@ -472,6 +476,10 @@ def lay_out_site_review(ws, records: list[dict[str, Any]]) -> None:
     under its source, and links to the page at its quote; coordinates link to Google Maps."""
     headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
     ws.freeze_panes = "C2"
+    # The columns a decision is read back by are for accept-reviews, not the SME: hidden, so they
+    # are neither read nor edited, but still in the file (Hugh, 30 October).
+    for header in SITE_REVIEW_KEYS:
+        ws.column_dimensions[get_column_letter(headers[header])].hidden = True
     ws.sheet_properties.outlinePr.summaryBelow = False
     fill = PatternFill("solid", fgColor=VALUE_ROW_FILL)
     for offset, record in enumerate(records):

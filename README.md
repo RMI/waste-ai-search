@@ -1194,7 +1194,7 @@ approving it would do.
 | `source_coordinates`, `coordinates_from`, `distance_km`, `location_note` | Where the source places the facility, as `lat, lon`: paste it into Google Maps beside `our_coordinates`. `coordinates_from` says what it came from: coordinates the source states, a grid reference, or its address placed on the building or only on the street. A street point can be a kilometre or more off. `distance_km` is how far it is from our site. Where the source states a location but `source_coordinates` is blank, `location_note` says why (too coarse, its address and coordinates disagree, copied from the prompt, a postcode centroid), and `distance_km`, if filled, is roughly how far it is. |
 | `flags` | Why the row needs a second look, shaded where there are any (see below). |
 | `would_load` | What approving loads for this site of ours, one line per value: `attribute = value`, with the year for a yearly attribute, such as `facility_status = Active (2024)`. One value loads per site, attribute and year, so a line can lose to a better-tier value for the same field: the flags say where an auto-approved source's would. |
-| `review_id` | The pair's id, by which your decision is read back. Don't edit it. |
+| `review_id`, `check` | Hidden, at the end. The pair's id, and on a ↳ row which value it checks: your decisions are read back by them. |
 
 | Flag | What to do |
 |---|---|

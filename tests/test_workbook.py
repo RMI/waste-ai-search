@@ -110,7 +110,7 @@ def test_decision_is_the_only_dropdown_and_offers_the_four_decisions(tmp_path):
 def test_the_readme_says_which_columns_an_sme_may_edit(tmp_path):
     wb, _ = build(tmp_path)
     readme = {row[0]: row for row in list(wb["ReadMe"].values)[1:]}
-    assert readme["Site_Review"][3] == "decision, other_site_id, corrected_value, reviewer, reviewed_date, notes - nothing else"
+    assert readme["Site_Review"][3].startswith("decision, other_site_id, corrected_value, reviewer, reviewed_date, notes - nothing else.")
     assert {row[3] for name, row in readme.items() if name != "Site_Review"} == {"nothing"}
 
 
@@ -256,6 +256,18 @@ def test_a_value_row_is_shaded_folds_under_its_source_and_links_to_the_quote(tmp
     assert link.hyperlink.target == "https://news.example/landfill#:~:text=The%20landfill%20closed%20in,30%20years%20of%20service"
     # The source's own row keeps its plain link.
     assert ws[f"{column['source_url']}2"].hyperlink.target == "https://news.example/landfill"
+
+
+def test_the_columns_decisions_are_read_back_by_are_hidden_but_kept(tmp_path):
+    """review_id and check are for accept-reviews: hidden so an SME neither reads nor edits them,
+    and still filled (Hugh, 30 October)."""
+    wb = build(tmp_path, rows=VALUE_ROWS)[0]
+    ws = wb["Site_Review"]
+    column = letters(ws)
+    assert {header for header, letter in column.items() if ws.column_dimensions[letter].hidden} == {"review_id", "check"}
+    assert ws[f"{column['review_id']}2"].value and ws[f"{column['check']}3"].value == "closing_year"
+    editable = {row[0]: row[3] for row in list(wb["ReadMe"].values)[1:]}["Site_Review"]
+    assert "Two hidden columns at the end, review_id, check, are how your decisions are read back" in editable
 
 
 def test_every_link_sits_at_the_top_of_its_cell_beside_the_rows_other_text(tmp_path):

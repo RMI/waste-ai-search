@@ -576,6 +576,9 @@ ACCEPTED_VALUES_HEADERS = [
 
 # The Site_Review tab (site_review.py): one row per site-source pair with values that would load,
 # and under a Tier 3-5 pair one row per key value an SME checks. Left to right as an SME reads a row.
+# What accept-reviews reads a Site_Review row back by: the pair, and on a value row which value it
+# checks.
+SITE_REVIEW_KEYS = ["review_id", "check"]
 SITE_REVIEW_HEADERS = [
     # Our site, as our database holds it; our_coordinates is "lat, lon", linked to Google Maps, and
     # our_place the municipality and state it is in.
@@ -594,7 +597,8 @@ SITE_REVIEW_HEADERS = [
     # The SME's.
     "decision", "other_site_id", "corrected_value", "reviewer", "reviewed_date", "notes",
     # What accept-reviews reads a row back by: the pair, and on a value row which value it checks.
-    "review_id", "check",
+    # Hidden in the workbook.
+    *SITE_REVIEW_KEYS,
 ]
 # What an SME fills in on Site_Review; everything else there is set by the pipeline.
 SITE_REVIEW_EDITABLE = ["decision", "other_site_id", "corrected_value", "reviewer", "reviewed_date", "notes"]
