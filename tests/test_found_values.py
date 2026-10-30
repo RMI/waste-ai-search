@@ -145,6 +145,25 @@ def test_gas_use_is_not_a_key_value_but_gas_collection_is(tmp_path):
     assert found["gccs_energy_project_type"]["value_check"] == ""
 
 
+def test_a_waste_type_is_used_only_beside_an_incoming_waste_amount_from_the_same_source(tmp_path):
+    """bulk_waste_type says what an amount of incoming waste is made of (Hugh, 30 October). Given on
+    its own it describes the whole site, which is facility_type's job, so it isn't used."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://news.example/fire", "Brady Road", source_type="News report",
+               values=[value("bulk_waste_type", "municipal solid waste")]),
+        source("https://manitoba.example/report", "Brady Road Landfill", values=[
+            value("annual_incoming_waste_metric_tonnes", "400000", unit="t"),
+            value("bulk_waste_type", "municipal solid waste"),
+        ]),
+    ]})
+    waste_types = {row["source_url"]: row for row in rows(run_dir) if row["attribute_name"] == "bulk_waste_type"}
+    alone = waste_types["https://news.example/fire"]
+    assert alone["status"] == NOT_USED
+    assert alone["status_reason"].startswith("Says what waste the site takes, but the source gives no incoming waste amount")
+    assert waste_types["https://manitoba.example/report"]["status"] == SME_REVIEW
+    assert "no incoming waste amount 1" in run_config(run_dir)["values_not_used"]
+
+
 def test_a_source_whose_values_a_better_source_gives_is_still_listed(tmp_path):
     """With nothing approved automatically, a better source's value loads only if an SME approves it,
     so a weaker source giving the same field is reviewed too (719337d's rule is gone)."""

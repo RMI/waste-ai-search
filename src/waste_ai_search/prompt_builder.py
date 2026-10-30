@@ -171,18 +171,17 @@ ATTRIBUTE_GUIDANCE = {
         "number and set unit to '%'."
     ),
     "bulk_waste_type": (
-        "The type of waste that makes up MOST of what the facility receives. Allowed values only. "
+        "The type of waste making up MOST of the annual_incoming_waste_metric_tonnes amount you "
+        "return from the same source. Never return it on its own: what kind of site this is "
+        "belongs in facility_type. Allowed values only. "
         "municipal solid waste - waste from households, and similar waste from shops, offices, "
-        "markets and institutions, collected by or for a municipality. It contains food, garden, "
-        "paper and other material that decomposes. A site that mainly takes this but also some "
-        "rubble or soil is still municipal solid waste. "
+        "markets and institutions, collected by or for a municipality; it decomposes. Some rubble "
+        "or soil mixed in is still municipal solid waste. "
         "inert waste - waste that does not decompose or react: construction and demolition "
-        "rubble, concrete, bricks, soil, stones and excavation material. A site permitted for "
-        "inert waste only belongs here. "
-        "others - mainly another kind of waste, such as industrial, hazardous or mining waste, or "
-        "sewage sludge. "
-        "If no source says what waste the facility receives, or no one type makes up most of it, "
-        "do not return bulk_waste_type."
+        "rubble, concrete, bricks, soil, stones and excavation material. "
+        "others - mainly industrial, hazardous or mining waste, or sewage sludge. "
+        "If the source doesn't say what the amount is made of, or no one type makes up most of "
+        "it, do not return bulk_waste_type."
     ),
 }
 
@@ -303,6 +302,9 @@ def requested_attributes(site: dict[str, Any]) -> list[str]:
         if field in GCCS_ATTRIBUTES and not gas_present:
             continue
         requested.append(field)
+    # bulk_waste_type says what an incoming waste amount is made of, so it is asked only with one.
+    if "annual_incoming_waste_metric_tonnes" not in requested and "bulk_waste_type" in requested:
+        requested.remove("bulk_waste_type")
     return requested
 
 

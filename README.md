@@ -925,12 +925,19 @@ year rather than losing to a newer one.
 
 ‡ **Review-layer only: `operator`, `bulk_waste_type`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
 
-`bulk_waste_type` is the waste that makes up **most** of what a site receives. It separates
-municipal solid waste (household and similar waste, which decomposes and generates methane) from
-inert waste (construction and demolition rubble, soil, stones); `others` is mainly industrial,
-hazardous or mining waste or sludge. A site taking mostly municipal waste plus some rubble is
-municipal solid waste. There is no `unknown`: with no source on the waste received, or no one
-main type, the value stays NULL, so the site is asked again on a later pass.
+`bulk_waste_type` is the waste that makes up **most** of an incoming waste amount
+(`annual_incoming_waste_metric_tonnes`). It separates municipal solid waste (household and similar
+waste, which decomposes and generates methane) from inert waste (construction and demolition
+rubble, soil, stones); `others` is mainly industrial, hazardous or mining waste or sludge. An
+amount that is mostly municipal waste plus some rubble is municipal solid waste. There is no
+`unknown`: with no source on what the amount is made of, or no one main type, the value stays
+NULL, so the site is asked again on a later pass.
+
+Since 30 October 2026 it describes an amount, not the whole site: what kind of site a facility
+is belongs to `facility_type`. So it is asked only of a site whose incoming waste is asked too,
+and a waste type is used only where the same source gives an incoming waste amount; given alone
+it is listed as not used ("no incoming waste amount"). Before that it was asked of every site,
+and most sources gave it alone ("municipal solid waste" for a town's dump).
 
 `waste_depth` is the only **derived** categorical. The agent still reports a number and its
 unit; the pipeline converts to metres, then bins on the spec's 5 m boundary. The metre value is

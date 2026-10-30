@@ -91,7 +91,8 @@ UNUSABLE = "could not be converted or mapped"
 NOT_OFFERED = f"{NOT_A_WASTE_FACILITY} not offered"
 EXCLUDED_BY_AGENT = "excluded by the agent"
 UNVERIFIED = "the agent's unverified lead"
-NOT_USED_REASONS = [CONFIRMS, CHANGES, DEAD_LINK, NO_LINK, UNUSABLE, EXCLUDED_BY_AGENT, NOT_OFFERED, UNVERIFIED]
+NO_AMOUNT = "no incoming waste amount"
+NOT_USED_REASONS = [CONFIRMS, CHANGES, DEAD_LINK, NO_LINK, UNUSABLE, EXCLUDED_BY_AGENT, NOT_OFFERED, NO_AMOUNT, UNVERIFIED]
 # How status_reason begins for a value not used only because of the value we hold at the site
 # searched. That says nothing of another site, so an SME's Different site weighs it again there
 # (accept_reviews.py).
@@ -139,6 +140,8 @@ class Pair:
     roughly: bool = False
     # The state the source puts the facility in, where that isn't our site's state (measure).
     other_state: str = ""
+    # Whether the source gives an incoming waste amount, which a bulk_waste_type describes.
+    gives_incoming_waste: bool = False
 
     @property
     def review_id(self) -> str:
@@ -298,6 +301,8 @@ def sort_values(
     for row in evidence_rows:
         if row["attribute_name"] == "facility_type" and normalize_scalar(row.get("mapped_value")) == NOT_A_WASTE_FACILITY:
             pair_of[(row["site_id"], row["source_index"])].not_a_waste_facility = True
+        if row["attribute_name"] == "annual_incoming_waste_metric_tonnes" and normalize_scalar(row.get("mapped_value")) and not row.get("_excluded"):
+            pair_of[(row["site_id"], row["source_index"])].gives_incoming_waste = True
     for pair in pairs:
         pair.measure(sites_by_id.get(pair.site_id, {}))
 
@@ -399,6 +404,13 @@ def status_of(
     if attribute == "facility_type" and value == NOT_A_WASTE_FACILITY and not needs_contradiction_check(site):
         # The verdict is offered only to sites nothing independently confirms (WP-525).
         return NOT_USED, f"{NOT_A_WASTE_FACILITY} is used only where the search offered it, and this site was not offered it.", NOT_OFFERED
+    if attribute == "bulk_waste_type" and not pair.gives_incoming_waste:
+        # It says what an amount of incoming waste is made of; what kind of site the whole
+        # facility is belongs to facility_type (Hugh, 30 October).
+        return NOT_USED, (
+            "Says what waste the site takes, but the source gives no incoming waste amount for it to "
+            "describe: what kind of site it is belongs to facility_type."
+        ), NO_AMOUNT
     if not is_blank(ours):
         if comparable(ours, attribute) == comparable(value, attribute):
             return NOT_USED, CONFIRMS_TEXT, CONFIRMS
