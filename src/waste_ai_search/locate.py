@@ -123,6 +123,15 @@ STREET_OR_NUMBER = re.compile(
     r"rang|concession|strasse|straße|weg|calle|avenida|rua|rodovia|estrada|carretera|via)\b",
     re.IGNORECASE,
 )
+# A kilometre marker or a distance places a site along a road or away from a town, which a geocoder
+# can't: it finds the road or the town by name, and any stretch of the road will do. "Carretera
+# Colotlán km 15.5" came back 129 km from the site. Such an address is never sent.
+ALONG_A_ROAD = re.compile(
+    r"(?<![A-Za-z])(?:km|kms|kil[oó]met(?:ro|re|er)s?)\.?\s*\d"
+    r"|\d\s*(?:km|kms|kil[oó]met(?:ro|re|er)s?)(?![A-Za-z])",
+    re.IGNORECASE,
+)
+ALONG_A_ROAD_REASON = "a kilometre marker or a distance can't be placed: a geocoder finds only the road or the town"
 
 
 @dataclass
@@ -243,8 +252,31 @@ def prompt_point(site: dict[str, Any]) -> tuple[float, float] | None:
 # --- coordinates -----------------------------------------------------------------------------
 _HEMISPHERE_SIGN = {"N": 1, "S": -1, "E": 1, "W": -1}
 _MINUS = "-−–"
-# A hemisphere written as a word, "49.1234 North, 97.1234 West", is read as its letter.
-_HEMISPHERE_WORDS = re.compile(r"(?<![A-Za-z])(north|south|east|west)(?![A-Za-z])", re.IGNORECASE)
+# West is O in Spanish, Portuguese, French and Italian (oeste, ouest, ovest), so a Mexican page's
+# "98° 50’ 42.8” O" is west. In German and Dutch O is east (Ost, oost): it is east in the countries
+# that write them, which all lie east of Greenwich.
+O_IS_EAST_ISO3 = {"AUT", "BEL", "CHE", "DEU", "LIE", "LUX", "NLD"}
+# A hemisphere written as a word, "49.1234 North, 97.1234 West" or "98.8452 oeste", is read as its
+# letter. Words that are also common words in these languages ("sur", "est", "este") are not.
+_HEMISPHERE_LETTERS = {"north": "N", "south": "S", "east": "E", "west": "W", "oeste": "W", "ouest": "W", "ovest": "W"}
+_HEMISPHERE_WORDS = re.compile(
+    rf"(?<![A-Za-z])({'|'.join(_HEMISPHERE_LETTERS)})(?![A-Za-z])", re.IGNORECASE
+)
+# A hemisphere written with its axis rather than beside the number: "98° 50’ 42.8” longitud oeste",
+# "Longitude West: 97.1234", "south latitude". Read once words are letters, and only for a number
+# with no sign or hemisphere of its own. After a latitude's name, south may be a word ("latitud
+# sur", "latitude sul", "latitude sud"): there it can't be anything else.
+_SOUTH_AFTER_LATITUDE = {"sur": "S", "sul": "S", "sud": "S"}
+_AXIS_HEMISPHERE = {
+    axis: re.compile(
+        rf"(?<![A-Za-z]){label}\.?\s*:?\s*(?P<after>{after})(?![A-Za-z])"
+        rf"|(?<![A-Za-z])(?P<before>[{letters}])\s+{label}(?![A-Za-z])"
+    )
+    for axis, label, letters, after in (
+        ("lat", r"(?i:lat(?:itud(?:e|ine)?)?)", "NS", rf"[NS]|(?i:{'|'.join(_SOUTH_AFTER_LATITUDE)})"),
+        ("lon", r"(?i:long?(?:itud(?:e|ine)?)?)", "EWO", "[EWO]"),
+    )
+}
 # A number followed by a unit is a distance, an area or the like, never a coordinate: "12.345 ha
 # at 48.8434, -87.4296".
 _UNIT = re.compile(
@@ -260,18 +292,19 @@ _KM_PER_DEGREE = 111.32
 
 # Degrees, minutes and seconds: 63° 43' 58.15" N, or 51°30.25'N. The degree mark is required, so a
 # bare number in an address is never read as a coordinate. A hemisphere letter goes before or
-# after, never both: in "N 48.8 W 87.4" the W belongs to the second number.
+# after, never both: in "N 48.8 W 87.4" the W belongs to the second number. O is west or east by
+# country (O_IS_EAST_ISO3).
 _DMS = re.compile(
-    r"(?<![A-Za-z])(?P<pre>[NSEW](?![A-Za-z]))?\s*(?P<sign>[-+−–])?\s*"
+    r"(?<![A-Za-z])(?P<pre>[NSEWO](?![A-Za-z]))?\s*(?P<sign>[-+−–])?\s*"
     r"(?P<deg>\d{1,3}(?:\.\d+)?)\s*[°º˚]\s*"
     r"(?:(?P<min>\d{1,2}(?:[.,]\d+)?)\s*['′’`]\s*"
     r"(?:(?P<sec>\d{1,2}(?:[.,]\d+)?)\s*(?:\"|″|”|''|’’)?\s*)?)?"
-    r"(?(pre)|(?P<post>[NSEW](?![A-Za-z]))?)"
+    r"(?(pre)|(?P<post>[NSEWO](?![A-Za-z]))?)"
 )
 # Decimal degrees: 48.8434, -87.4296, or 48.8434°N 87.4296°W. A decimal point is required.
 _DECIMAL = re.compile(
-    r"(?<![A-Za-z\d.])(?P<pre>[NSEW](?![A-Za-z]))?\s*(?P<sign>[-+−–])?\s*"
-    r"(?P<deg>\d{1,3}\.\d+)(?!\d|\.\d)\s*[°º˚]?\s*(?(pre)|(?P<post>[NSEW](?![A-Za-z]))?)"
+    r"(?<![A-Za-z\d.])(?P<pre>[NSEWO](?![A-Za-z]))?\s*(?P<sign>[-+−–])?\s*"
+    r"(?P<deg>\d{1,3}\.\d+)(?!\d|\.\d)\s*[°º˚]?\s*(?(pre)|(?P<post>[NSEWO](?![A-Za-z]))?)"
 )
 _LAT_LABEL = re.compile(r"\blat(?:itude)?\b", re.IGNORECASE)
 _LON_LABEL = re.compile(r"\b(?:lon|long|lng|longitude)\b", re.IGNORECASE)
@@ -316,14 +349,22 @@ def _axis_label(text: str) -> str:
     return "lon" if lon else "lat" if lat else ""
 
 
-def _component(match: re.Match, text: str, previous_end: int, dms: bool) -> _Component:
+def _hemisphere(letter: str, iso3: str) -> str:
+    """N, S, E or W for a hemisphere letter, O being west or east by country."""
+    letter = letter.upper()
+    if letter == "O":
+        return "E" if iso3.upper() in O_IS_EAST_ISO3 else "W"
+    return letter
+
+
+def _component(match: re.Match, text: str, previous_end: int, dms: bool, iso3: str = "") -> _Component:
     degrees = float(match["deg"])
     minute_text = match.groupdict().get("min") or ""
     second_text = match.groupdict().get("sec") or ""
     value = degrees + float(minute_text.replace(",", ".") or 0) / 60 + float(second_text.replace(",", ".") or 0) / 3600
     if match["sign"] and match["sign"] in _MINUS:
         value = -value
-    hemisphere = (match["pre"] or match["post"] or "").upper()
+    hemisphere = _hemisphere(match["pre"] or match["post"] or "", iso3)
     if hemisphere and _HEMISPHERE_SIGN[hemisphere] < 0:
         value = -abs(value)
     if dms and minute_text:
@@ -345,7 +386,7 @@ def _component(match: re.Match, text: str, previous_end: int, dms: bool) -> _Com
     return _Component(value, hemisphere, fine, label, match.span(), resolution, unit)
 
 
-def _components(text: str) -> list[_Component]:
+def _components(text: str, iso3: str = "") -> list[_Component]:
     found: list[tuple[re.Match, bool]] = [(match, True) for match in _DMS.finditer(text)]
     taken = [match.span() for match, _dms in found]
     for match in _DECIMAL.finditer(text):
@@ -355,9 +396,20 @@ def _components(text: str) -> list[_Component]:
     out: list[_Component] = []
     previous_end = 0
     for match, dms in found:
-        out.append(_component(match, text, previous_end, dms))
+        out.append(_component(match, text, previous_end, dms, iso3))
         previous_end = match.end()
     return out
+
+
+def _axis_hemispheres(text: str, iso3: str) -> dict[str, str]:
+    """The hemisphere written with each axis's name, by axis: {"lon": "W"} for "longitud oeste"."""
+    said: dict[str, str] = {}
+    for axis, pattern in _AXIS_HEMISPHERE.items():
+        match = pattern.search(text)
+        if match:
+            written = match["after"] or match["before"]
+            said[axis] = _hemisphere(_SOUTH_AFTER_LATITUDE.get(written.lower(), written), iso3)
+    return said
 
 
 def _only_labels(text: str, spans: list[tuple[int, int]]) -> bool:
@@ -389,18 +441,19 @@ def _in_range(latitude: float, longitude: float) -> bool:
     return -90 <= latitude <= 90 and -180 <= longitude <= 180 and not (latitude == 0 and longitude == 0)
 
 
-def parse_coordinates(text: str, strict: bool = False) -> Located | None:
+def parse_coordinates(text: str, strict: bool = False, iso3: str = "") -> Located | None:
     """Read a latitude and longitude from text, or None if it holds no coordinate pair.
 
     "lat, lon" is assumed. "lon, lat" is read only when it is unambiguous: a hemisphere letter or
     word, or a label, says so, or the first number is beyond 90. `strict` asks for text that is
     nothing but the coordinates and their labels, for text the agent labelled something else.
+    `iso3` is the site's country, which says whether O is west or east (O_IS_EAST_ISO3).
     """
     text = normalize_scalar(text)
     if "." not in text and ";" in text:
         text = re.sub(r"(\d),(\d)", r"\1.\2", text)  # decimal commas: "48,8434; 2,3488"
-    text = _HEMISPHERE_WORDS.sub(lambda match: match[1][0].upper(), text)
-    components = [component for component in _components(text) if not component.unit]
+    text = _HEMISPHERE_WORDS.sub(lambda match: _HEMISPHERE_LETTERS[match[1].lower()], text)
+    components = [component for component in _components(text, iso3) if not component.unit]
     if len(components) < 2:
         return None
     if strict and (len(components) > 2 or not _only_labels(text, [c.span for c in components])):
@@ -413,6 +466,11 @@ def parse_coordinates(text: str, strict: bool = False) -> Located | None:
     latitude, longitude = (precise or in_range or pairs)[0]
 
     lat, lon = latitude.value, longitude.value
+    said = _axis_hemispheres(text, iso3)
+    if said.get("lat") == "S" and not latitude.hemisphere and lat > 0:
+        lat = -lat
+    if said.get("lon") == "W" and not longitude.hemisphere and lon > 0:
+        lon = -lon
     if not _in_range(lat, lon):
         return None if strict else Located(reason=f"coordinates out of range ({lat:g}, {lon:g})")
     if latitude.fine and longitude.fine:
@@ -594,15 +652,24 @@ def parse_grid_reference(text: str, iso3: str = "", strict: bool = False) -> Loc
 
 def parse_point(text: str, iso3: str = "", strict: bool = False) -> Located | None:
     """Coordinates or a grid reference, read locally; None if the text holds neither."""
-    return parse_coordinates(text, strict=strict) or parse_grid_reference(text, iso3, strict=strict)
+    return parse_coordinates(text, strict=strict, iso3=iso3) or parse_grid_reference(text, iso3, strict=strict)
 
 
 # --- addresses ---------------------------------------------------------------------------------
+# A match on a major road itself, its house number not found: the road runs for kilometres, and the
+# geocoder picks a stretch of it by name. Each of the four in the October 2026 test runs was more
+# than 5 km from the site (one 129 km), so none is used.
+MAJOR_ROAD = "major road"
+MAJOR_ROAD_REASON = "only a major road matched, and any stretch of it could be the one meant, so not used"
+# OpenStreetMap's classes of road between towns, which in a city are its arterials.
+MAJOR_ROADS = {"motorway", "trunk", "primary", "secondary"}
+
+
 @dataclass
 class GeocodeMatch:
     latitude: float
     longitude: float
-    # ROOFTOP or STREET, or "" for anything coarser, which is not used.
+    # ROOFTOP or STREET; MAJOR_ROAD, or "" for anything coarser, are not used.
     precision: str
     # What the geocoder said about the match, kept in source_locations.json.
     match: str
@@ -825,8 +892,9 @@ def nominatim_match(result: dict[str, Any]) -> GeocodeMatch | None:
 
     A house number Nominatim interpolated along its street comes back as place=house too, but on
     the interpolation line, a way, so it counts as street, as Azure Maps' interpolated addresses
-    do. Anything else - a town, a postcode, or a mapped feature such as a landfill that happens to
-    carry the address - is not used: the last would be OpenStreetMap's own point for the site.
+    do. A major road is not used (MAJOR_ROAD). Anything else - a town, a postcode, or a mapped
+    feature such as a landfill that happens to carry the address - is not used: the last would be
+    OpenStreetMap's own point for the site.
     """
     lat, lon = _float(result.get("lat")), _float(result.get("lon"))
     if lat is None or lon is None:
@@ -845,7 +913,7 @@ def nominatim_match(result: dict[str, Any]) -> GeocodeMatch | None:
     elif category == "place" and kind in {"house", "building"}:
         precision = STREET if on_way else ROOFTOP
     elif category == "highway":
-        precision = STREET
+        precision = MAJOR_ROAD if kind.removesuffix("_link") in MAJOR_ROADS else STREET
     return GeocodeMatch(lat, lon, precision, described)
 
 
@@ -1107,10 +1175,8 @@ def geocode_address(
         elif found.precision in (ROOFTOP, STREET):
             located, match = Located(found.latitude, found.longitude, found.precision, "", geocoder.name), found.match
         else:
-            located = Located(
-                found.latitude, found.longitude, NONE,
-                "geocoded only coarser than a street, so not used", geocoder.name,
-            )
+            reason = MAJOR_ROAD_REASON if found.precision == MAJOR_ROAD else "geocoded only coarser than a street, so not used"
+            located = Located(found.latitude, found.longitude, NONE, reason, geocoder.name)
             match = found.match
     if cache is not None:
         _record(cache, address, iso3, located, match)
@@ -1264,9 +1330,16 @@ def locate_source(
         elif not sent or names_a_facility(sent):
             tried = Located(reason="the stated location is the facility's name, which is never geocoded")
         else:
-            tried = geocode_address(sent, iso3, cache, geocoder, live)
+            # Text with a kilometre marker or a distance is never sent, but its plainer form, with
+            # the directions taken out, may be: "4 Sand Dam Road, North Bay".
+            if ALONG_A_ROAD.search(sent):
+                tried = Located(reason=ALONG_A_ROAD_REASON)
+                if live and cache is not None:
+                    _record(cache, sent, iso3, tried)
+            else:
+                tried = geocode_address(sent, iso3, cache, geocoder, live)
             plainer = plainer_address(sent, names) if tried.basis not in MATCHING_BASES else ""
-            if plainer:
+            if plainer and not ALONG_A_ROAD.search(plainer):
                 retried = geocode_address(plainer, iso3, cache, geocoder, live)
                 if retried.basis in MATCHING_BASES:
                     tried = retried

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime
 from typing import Any
@@ -785,6 +786,23 @@ def normalize_for_compare(value: Any) -> str:
     return normalize_scalar(value).lower().replace(",", "").strip()
 
 
+def list_items(value: Any) -> list[Any]:
+    """The members of a list value, however it is written: a list, text separated by commas or
+    semicolons, or the list written as JSON. The prompt asks for cover_types as an "Array", so the
+    agent often writes '["other soil mixture"]', which was split on its commas and dropped whole."""
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    text = normalize_scalar(value)
+    if text.startswith("["):
+        try:
+            members = json.loads(text)
+        except ValueError:
+            members = None
+        if isinstance(members, list):
+            return members
+    return [item.strip(" []\"'“”‘’") for item in re.split(r"[;,]", text)]
+
+
 def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
     """Map a search-vocabulary categorical onto the live database enum. Unmappable -> NULL."""
     if field_name not in ENUM_MAPS:
@@ -792,7 +810,7 @@ def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
     mapping, allowed = ENUM_MAPS[field_name]
 
     if field_name in ARRAY_TARGET_ATTRIBUTES:
-        raw_items = value if isinstance(value, (list, tuple)) else re.split(r"[;,]", normalize_scalar(value))
+        raw_items = list_items(value)
         mapped: list[str] = []
         notes: list[str] = []
         for item in raw_items:

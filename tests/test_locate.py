@@ -11,11 +11,14 @@ from __future__ import annotations
 import pytest
 
 from waste_ai_search.locate import (
+    ALONG_A_ROAD_REASON,
     AZURE_MAPS_API_VERSION,
     COORDINATES,
     DEFAULT_NOMINATIM_USER_AGENT,
     GRID_REFERENCE,
     HINT,
+    MAJOR_ROAD,
+    MAJOR_ROAD_REASON,
     NO_GEOCODER,
     NONE,
     NOT_LOCATED,
@@ -248,7 +251,7 @@ def test_an_older_responses_location_is_read_by_its_kinds():
 
     geocoder = FakeGeocoder({
         "Gate Road": GeocodeMatch(48.4500, -89.3700, ROOFTOP, ""),
-        "5 km east of Thunder Bay on Highway 61": GeocodeMatch(48.40, -89.20, STREET, ""),
+        "Mapleward Road east of Thunder Bay": GeocodeMatch(48.40, -89.20, STREET, ""),
     })
     both = old("48.4410, -89.3690 | Gate Road", "coordinates | street address")
     assert (both["stated_coordinates"], both["stated_address"]) == ("48.4410, -89.3690", "Gate Road")
@@ -256,7 +259,7 @@ def test_an_older_responses_location_is_read_by_its_kinds():
     # Labels were never reliable: coordinates labelled an address, or not at all, still count.
     assert locate_source(old("48.4410, -89.3690", "street address"), SITE).basis == COORDINATES
     assert locate_source(old("48.4410, -89.3690", ""), SITE).basis == COORDINATES
-    place = locate_source(old("5 km east of Thunder Bay on Highway 61", "place description"), SITE, {}, geocoder, live=True)
+    place = locate_source(old("Mapleward Road east of Thunder Bay", "place description"), SITE, {}, geocoder, live=True)
     assert place.basis == STREET
     assert locate_source(old("Not stated", "none"), SITE).reason == "no location stated"
 
@@ -325,6 +328,62 @@ def test_po_boxes_and_facility_names_are_never_sent():
     )
     assert "facility's name" in locate_source(named, SITE, {}, geocoder, live=True).reason
     assert geocoder.calls == []
+
+
+HASARS = {"site_id": "3560", "country_iso3": "MEX", "latitude": "20.922", "longitude": "-103.453"}
+
+
+@pytest.mark.parametrize(
+    "stated",
+    [
+        # As Zapopan's page gave it, in test10-mex-sample2: Nominatim matched the road near Colotlán,
+        # 129 km from the site.
+        "CARRETERA COLOTLAN KM 15.5",
+        "Km. 3.5 Carretera Federal 200, Bahía de Banderas, Nayarit",
+        "Kilómetro 12 de la carretera México-Puebla",
+        "Carretera a Tlapa, a 3 km del centro",
+        "5 km east of Thunder Bay on Highway 61",
+    ],
+)
+def test_a_kilometre_marker_or_a_distance_is_never_sent(stated):
+    """A geocoder finds the road or the town by name, and any stretch of the road will do."""
+    geocoder = FakeGeocoder({stated: GeocodeMatch(22.0682, -103.2724, STREET, "highway=primary")})
+    # As test10-mex-sample2's file held it from before: the answer is replaced, never read.
+    cache = {cache_key(stated, "MEX"): {"text": stated, "country": "MEX", "latitude": 22.0682, "longitude": -103.2724,
+                                         "basis": STREET, "reason": "", "geocoder": "nominatim", "match": "highway=primary"}}
+    located = locate_source(source(address=stated), HASARS, cache, geocoder, live=True)
+    assert (located.basis, located.reason) == (NONE, ALONG_A_ROAD_REASON)
+    assert geocoder.calls == []
+    assert (cache[cache_key(stated, "MEX")]["basis"], cache[cache_key(stated, "MEX")]["reason"]) == (NONE, ALONG_A_ROAD_REASON)
+
+
+def test_an_address_with_a_distance_is_sent_plainer_without_it():
+    stated = (
+        "4 Sand Dam Road, North Bay, approximately 21 kilometers from downtown North Bay, off Highway 11 at the "
+        "end of Sand Dam Road"
+    )
+    geocoder = FakeGeocoder({"4 Sand Dam Road, North Bay": GeocodeMatch(46.40, -79.40, ROOFTOP, "")})
+    located = locate_source(source(address=stated), SITE, {}, geocoder, live=True)
+    assert located.basis == ROOFTOP
+    assert geocoder.calls == [("4 Sand Dam Road, North Bay", "CA")]
+
+
+@pytest.mark.parametrize("stated", ["Calle Kmita 12, Monterrey", "1777 Brady Road, Winnipeg"])
+def test_an_address_with_no_kilometre_marker_is_sent(stated):
+    geocoder = FakeGeocoder()
+    locate_source(source(address=stated), HASARS, {}, geocoder, live=True)
+    assert geocoder.calls[0] == (stated, "MX")
+
+
+def test_a_match_on_a_major_road_itself_is_not_used():
+    """With its house number not found, a road between towns, or a city's arterial, could be met
+    anywhere along it: each such match in the October 2026 test runs was more than 5 km off."""
+    road = "carretera Guadalajara- El Salto, Tlaquepaque"
+    geocoder = FakeGeocoder({road: GeocodeMatch(20.55, -103.31, MAJOR_ROAD, "highway=secondary on way, rank 26")})
+    cache = {}
+    located = locate_source(source(address=road), HASARS, cache, geocoder, live=True)
+    assert (located.basis, located.reason) == (NONE, MAJOR_ROAD_REASON)
+    assert cache[cache_key(road, "MEX")]["match"] == "highway=secondary on way, rank 26"
 
 
 def test_a_leading_facility_name_is_taken_off_the_address():
@@ -621,6 +680,13 @@ def test_nominatims_url_and_user_agent_come_from_configuration(monkeypatch):
         ({"category": "building", "type": "yes"}, ROOFTOP),
         ({"category": "building", "type": "yes", "osm_type": "way"}, ROOFTOP),
         ({"category": "highway", "type": "residential"}, STREET),
+        ({"category": "highway", "type": "tertiary"}, STREET),
+        ({"category": "highway", "type": "unclassified"}, STREET),
+        # A major road runs for kilometres, and any stretch of it could be the one met.
+        ({"category": "highway", "type": "primary"}, MAJOR_ROAD),
+        ({"category": "highway", "type": "secondary"}, MAJOR_ROAD),
+        ({"category": "highway", "type": "trunk_link"}, MAJOR_ROAD),
+        ({"category": "highway", "type": "motorway"}, MAJOR_ROAD),
         # A mapped landfill that carries the address would be OSM's own point for the site.
         ({"category": "landuse", "type": "landfill"}, ""),
         ({"category": "boundary", "type": "administrative"}, ""),
@@ -692,6 +758,63 @@ def test_hemispheres_written_as_words():
     assert (located.latitude, located.longitude, located.basis) == (49.1234, -97.1234, COORDINATES)
     near(parse_coordinates("51°30'26\" North, 0°7'39\" West"), 51.507222, -0.1275, metres=1)
     assert parse_coordinates("33.8688 south, 151.2093 east").point == (-33.8688, 151.2093)
+
+
+CHICOLOAPAN = {"site_id": "3933", "country_iso3": "MEX", "latitude": "19.40162383", "longitude": "-98.84103484"}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # As a Mexican news page wrote it, in test10-mex-sample2: read as east, 15,289 km away.
+        "19° 24’ 14.7” N de latitud y 98° 50’ 42.8” O de longitud",
+        "N 19° 24’ 14.7” O 98° 50’ 42.8”",
+        "19.404083 N, 98.845222 O",
+        "19.404083 norte, 98.845222 oeste",
+    ],
+)
+def test_west_written_o_is_west(text):
+    """Spanish, Portuguese, French and Italian write west as O (oeste, ouest, ovest)."""
+    near(parse_point(text, "MEX"), 19.404083, -98.845222, metres=1)
+    located = locate_source(source(text), CHICOLOAPAN)
+    assert located.basis == COORDINATES
+    assert haversine_km(*located.point, 19.40162383, -98.84103484) < 1
+
+
+def test_o_is_east_where_german_or_dutch_is_written():
+    """In German and Dutch O is east (Ost, oost), as German Wikipedia writes Bochum."""
+    assert parse_point("51° 28′ 54″ N, 7° 12′ 57″ O", "DEU").longitude > 0
+    assert parse_point("51.9244 N, 4.4777 O", "NLD").longitude > 0
+    # A page read for itself, with no country, is read as Spanish and the rest.
+    assert parse_coordinates("51° 28′ 54″ N, 7° 12′ 57″ O").longitude < 0
+
+
+@pytest.mark.parametrize(
+    ("text", "iso3", "point"),
+    [
+        ("19°24'14.7\" latitud norte y 98°50'42.8\" longitud oeste", "MEX", (19.404083, -98.845222)),
+        ("Latitud Norte: 19° 24' 14.7''; Longitud Oeste: 98° 50' 42.8''", "MEX", (19.404083, -98.845222)),
+        ("Longitude West: 97.1234, Latitude 49.1234", "CAN", (49.1234, -97.1234)),
+        ("33.4514 latitud sur, 70.6542 longitud oeste", "CHL", (-33.4514, -70.6542)),
+        ("Latitude sul: 23.5505, Longitude oeste: 46.6333", "BRA", (-23.5505, -46.6333)),
+        # A number's own sign is kept.
+        ("Longitud oeste: -98.8452, latitud norte: 19.4041", "MEX", (19.4041, -98.8452)),
+    ],
+)
+def test_a_hemisphere_written_with_its_axis_counts(text, iso3, point):
+    near(parse_point(text, iso3), *point, metres=1)
+
+
+@pytest.mark.parametrize(
+    ("text", "iso3", "point"),
+    [
+        ("Le site est situé sur la route, 45.7640, 4.8357", "FRA", (45.764, 4.8357)),
+        ("El relleno está al sur de la ciudad, 19.4041, -98.8452", "MEX", (19.4041, -98.8452)),
+    ],
+)
+def test_a_word_that_only_sometimes_means_south_is_not_read_as_south(text, iso3, point):
+    """"sur" is south in Spanish but "on" in French, so it counts only after a latitude's name."""
+    assert parse_point(text, iso3).point == point
 
 
 @pytest.mark.parametrize(

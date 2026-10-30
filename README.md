@@ -258,7 +258,7 @@ turns them into a point and says how far it can be trusted, as its basis
 | An address placed on its building or address point | Geocoded | `rooftop` | `address (building)` |
 | An address placed only on its street | Geocoded | `street` | `address (street)` |
 | Coordinates with fewer decimals, or a coarser grid reference | Parsed locally | `hint` | blank: too approximate to show, but still measured for the 5 km check |
-| Anything else: a town or postcode match, a PO box | — | `none` | blank |
+| Anything else: a town or postcode match, a major road, a PO box, a kilometre marker | — | `none` | blank |
 
 **What the point is for.** A source's location never replaces ours. It is only used to check that
 the source is about our site. Three columns of `found_values.csv` and the Site_Review tab carry it:
@@ -289,6 +289,14 @@ hemisphere or a label says so, or the first number is beyond 90. A header naming
 `Lat/Long:` or `(lat, long)`, gives their order, and a well-known-text `POINT(lon lat)` is read
 longitude first. In prose, a number followed by a unit (km, m, ha,
 %) is a distance or an area, not a coordinate, and the first pair in range is the one used.
+
+**West is often written O.** Spanish, Portuguese, French and Italian write west as O (`oeste`,
+`ouest`, `ovest`), so a Mexican page's `98° 50’ 42.8” O` is west. In test10-mex-sample2 it was read
+as east, placing Chicoloapan's page 15,289 km from our site instead of 0.5 km. In German and Dutch
+O is east (`Ost`, `oost`), so in Germany, Austria, Switzerland, Liechtenstein, Luxembourg, the
+Netherlands and Belgium it is read as east. A hemisphere written with its axis's name counts too,
+for a number with no sign or hemisphere of its own: `98°50'42.8" longitud oeste`, `Longitude West:
+97.1234`, `latitud sur`. "Sur" counts as south only there, since in French it means "on".
 
 A labelled easting and northing (`E`/`N`, `Easting`/`Northing` or `X`/`Y`, in metres) is read in
 the country's grid: the British National Grid in the UK, and in Ireland the Irish Grid or ITM,
@@ -332,6 +340,15 @@ sent only if it still has a civic number or names a road: "29786 Rte. 2 PO Box 2
 is sent as "29786 Rte. 2, Wellington PE", while "PO Box 1234, Thunder Bay, ON" is not sent. Where a
 source gives two addresses, the second is tried when the first placed nothing.
 
+**A kilometre marker, a distance or a major road places nothing.** Mexican landfills are often
+addressed by a kilometre marker along a road ("Carretera Colotlán km 15.5"), and a geocoder can't
+use one: it finds the road by name and returns whichever stretch it picked. In test10-mex-sample2
+that put a Tier 1 page 129 km from Hasars. So text with a kilometre marker or a distance ("km
+15.5", "kilómetro 12", "a 3 km del centro") is never sent, though its plainer form may be (below).
+For the same reason, a match on a major road itself, its house number not found, is not used: a
+motorway, trunk, primary or secondary road, which runs between towns or across a city. Each of the
+four such matches in the October 2026 test runs was more than 5 km from the site.
+
 **An address written as a sentence is sent again, plainly.** Sources write "765 33rd Street East in
 Brandon, Manitoba" or "Reynolds Bach Drive, accessed from Eastern Hutt Road in Silverstream", and a
 geocoder finds nothing. Where the words as written place nothing at street level, the address is
@@ -356,7 +373,7 @@ configured". Choose one with `WASTE_AI_SEARCH_GEOCODER` in `.env`, or with `--ge
 | Geocoder | Settings | How a match is read |
 |---|---|---|
 | `azure-maps` | `AZURE_MAPS_SUBSCRIPTION_KEY`, or `AZURE_MAPS_CLIENT_ID` to sign in with Entra ID (`az login`) | [Get Geocoding](https://learn.microsoft.com/en-us/rest/api/maps/search/get-geocoding?view=rest-maps-2026-01-01), api-version 2026-01-01. An address matched to its rooftop or parcel is `rooftop`; an interpolated address, a block or an intersection is `street`. A match it had to broaden (`UpHierarchy`), an ambiguous one, or Low confidence is not used. The account is IT's to create. |
-| `nominatim` | `NOMINATIM_URL` (the public instance if blank) and `NOMINATIM_USER_AGENT` (default `waste-ai-search (RMI)`, which names the application, never a person) | OpenStreetMap's geocoder, at most one request a second. An address point or building is `rooftop`; a road, or a house number Nominatim interpolated along its street (`place=house` on a way), is `street`, as with Azure Maps. A mapped feature that carries the address, such as the landfill itself, is not used: it would be OSM's own point. Enough for the live test. |
+| `nominatim` | `NOMINATIM_URL` (the public instance if blank) and `NOMINATIM_USER_AGENT` (default `waste-ai-search (RMI)`, which names the application, never a person) | OpenStreetMap's geocoder, at most one request a second. An address point or building is `rooftop`; a minor road, or a house number Nominatim interpolated along its street (`place=house` on a way), is `street`, as with Azure Maps. A major road (motorway, trunk, primary, secondary) is not used. A mapped feature that carries the address, such as the landfill itself, is not used: it would be OSM's own point. Enough for the live test. |
 | `none` | | Addresses stay unlocated. |
 
 ### `source_locations.json`
@@ -955,6 +972,11 @@ less is not a measurement, so it is stored NULL rather than binned to `<=5m`.
 `has_biocover` is **not** derived from `cover_types` — a plain soil, clay or sand cover is not a
 biocover, and the prompt says so explicitly. `consolidated_facility` now carries the column but it
 is entirely NULL today, so the gap-fill rule still fires for every facility.
+
+An enum array is read however it is written: separated by semicolons or commas, or as a JSON list.
+The prompt asks for `cover_types` as an "Array", so the agent often writes `["other soil
+mixture"]`. Until 30 October 2026 that was split on its commas, brackets and all, and dropped as
+unmappable: 8 times in the October 2026 test runs, while 3 cover types got through.
 
 
 

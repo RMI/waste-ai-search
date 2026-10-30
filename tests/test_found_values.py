@@ -349,6 +349,31 @@ def test_a_grid_reference_is_converted_and_says_so(tmp_path):
     assert float(operator["distance_km"]) < 0.1
 
 
+def test_a_mexican_pages_west_written_o_is_west(tmp_path):
+    """Spanish writes west as O (oeste). In test10-mex-sample2 this page was read as east, 15,289 km
+    from Chicoloapan, and flagged more than 5 km away: it is half a kilometre from our site."""
+    chicoloapan = seed("3933", "CHICOLOAPAN LANDFILL", 19.40162383, -98.84103484, "MEX")
+    page = source("https://mvt.example/chicoloapan", "Relleno sanitario de Chicoloapan",
+                  "19° 24’ 14.7” N de latitud y 98° 50’ 42.8” O de longitud",
+                  values=[value("operator", "SEOSA")], source_type="News report")
+    run_dir = arbitrate(tmp_path, [chicoloapan], {"3933": [page]})
+    [operator] = rows(run_dir)
+    assert (operator["coordinates_from"], round(float(operator["distance_km"]), 1)) == ("stated", 0.5)
+    assert run_config(run_dir)["pairs_with_warnings"] == "0"
+
+
+def test_cover_types_written_as_a_json_list_are_read(tmp_path):
+    """The prompt asks for cover_types as an "Array", and the agent often writes one:
+    '["clay cover", "other soil mixture"]' was split on its commas and dropped as unmappable, 8 times
+    in the October 2026 test runs."""
+    page = source("https://manitoba.example/report", "Brady Road Landfill",
+                  values=[value("cover_types", '["clay cover", "other soil mixture"]')])
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [page]})
+    [cover] = rows(run_dir)
+    assert (cover["status"], cover["value"]) == (SME_REVIEW, "clay cover; other soil mixture")
+    assert rows(run_dir, "parse_warnings.csv") == []
+
+
 # --- the exceptions -------------------------------------------------------------------------------
 def test_the_5_km_check_needs_coordinates_on_both_sides(tmp_path):
     """No coordinates means no check, as in batch 1: a Tier 1-2 source giving none auto-approves, and

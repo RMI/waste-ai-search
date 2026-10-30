@@ -36,6 +36,7 @@ from .schema import (
     NOTHING_TO_REVIEW,
     TIME_VARYING_ATTRIBUTES,
     is_blank,
+    list_items,
     normalize_for_compare,
     normalize_scalar,
 )
@@ -73,8 +74,7 @@ def comparable(value: Any, attribute_name: str = "") -> str:
     Generation"), are the same value, not a conflict for a human to settle.
     """
     if attribute_name in ARRAY_TARGET_ATTRIBUTES | NUMERIC_ARRAY_TARGET_ATTRIBUTES:
-        items = value if isinstance(value, (list, tuple)) else re.split(r"[;,]", normalize_scalar(value))
-        keys = {comparable(item) for item in items if normalize_scalar(item)}
+        keys = {comparable(item) for item in list_items(value) if normalize_scalar(item)}
         return "; ".join(sorted(keys))
     if attribute_name == LOCATION_ATTRIBUTE:
         # Each coordinate to six significant digits, as each was compared when they were separate.
