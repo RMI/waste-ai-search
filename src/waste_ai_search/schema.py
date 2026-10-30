@@ -546,7 +546,8 @@ FOUND_VALUES_HEADERS = [
     # "lat, lon" to paste into Google Maps, coordinates_from says from what, and distance_km is how
     # far that is from our site's coordinates - or, where they were too rough to give a point, how
     # far the farthest rough reading of them is. location_note says why there is no point.
-    "facility_name_in_source", "facility_name_english", "source_address", "stated_coordinates",
+    # source_place is the municipality and state the source puts the facility in.
+    "facility_name_in_source", "facility_name_english", "source_address", "source_place", "stated_coordinates",
     "source_coordinates", "coordinates_from", "distance_km", "location_note",
     # The value, converted and mapped, and as the agent wrote it; our_value is ours for that year.
     "attribute_name", "value", "unit", "value_as_written", "value_date", "our_value",
@@ -576,15 +577,16 @@ ACCEPTED_VALUES_HEADERS = [
 # The Site_Review tab (site_review.py): one row per site-source pair with values that would load,
 # and under a Tier 3-5 pair one row per key value an SME checks. Left to right as an SME reads a row.
 SITE_REVIEW_HEADERS = [
-    # Our site, as our database holds it; our_coordinates is "lat, lon", linked to Google Maps.
-    "site_id", *SITE_NAME_COLUMNS, "country_iso3", "our_coordinates",
+    # Our site, as our database holds it; our_coordinates is "lat, lon", linked to Google Maps, and
+    # our_place the municipality and state it is in.
+    "site_id", *SITE_NAME_COLUMNS, "country_iso3", "our_coordinates", "our_place",
     # The source. On a value row, source_url links to the page at the value's quote, and
     # source_title says which value the row checks.
     "source_url", "source_title", "publisher", "source_tier", "link_status",
     # What the source says of the facility it describes, and where it places it, as found_values.csv
     # gives them: its address and coordinates as written, the point read from them, and why there is
     # none where a source states a location we couldn't place.
-    "facility_name_in_source", "facility_name_english", "source_address", "stated_coordinates",
+    "facility_name_in_source", "facility_name_english", "source_address", "source_place", "stated_coordinates",
     "source_coordinates", "coordinates_from", "distance_km", "location_note",
     # Why the row needs a second look, and what approving it would load: "attribute = value (year)".
     # On a value row, evidence is the quote, the value as written and the agent's note.

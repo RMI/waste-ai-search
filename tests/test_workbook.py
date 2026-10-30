@@ -72,11 +72,13 @@ def test_site_review_replaces_the_review_queue_the_leads_and_found_values(tmp_pa
 def test_the_columns_go_from_our_site_to_the_source_to_the_smes_decision():
     """Our site, then the source, what it says, the flags, what approving would load and the evidence,
     then the six columns an SME fills in, and last the two a decision is read back by."""
-    assert SITE_REVIEW_HEADERS[:6] == ["site_id", "site_name", "original_site_name", "source_language", "country_iso3", "our_coordinates"]
+    assert SITE_REVIEW_HEADERS[:7] == [
+        "site_id", "site_name", "original_site_name", "source_language", "country_iso3", "our_coordinates", "our_place",
+    ]
     for group in (
         ["source_url", "source_title", "publisher", "source_tier", "link_status"],
         # As the source writes them, then what we read from them, and why not where we couldn't.
-        ["facility_name_in_source", "facility_name_english", "source_address", "stated_coordinates",
+        ["facility_name_in_source", "facility_name_english", "source_address", "source_place", "stated_coordinates",
          "source_coordinates", "coordinates_from", "distance_km", "location_note"],
         ["flags", "would_load", "evidence"],
     ):

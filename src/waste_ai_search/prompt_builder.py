@@ -472,6 +472,8 @@ Names:
                 "facility_name_english": "That name in English (the same if already English), or blank",
                 "stated_address": "The site's address exactly as this source writes it, or blank",
                 "stated_coordinates": "The site's coordinates or grid reference exactly as this source writes them, or blank",
+                "stated_municipality": "Town or municipality, or blank",
+                "stated_state": "State or province, or blank",
                 "values": [
                     {
                         "attribute_name": "One attribute_name from the Target attributes list",
@@ -534,8 +536,8 @@ Definitions:
 
 {closure_focus}
 {status_and_closure}Identity first:
-- Return only sources about THIS facility. Use the names and approximate coordinates in
-  the site context to check that each source describes it.{confirmation}
+- Return only sources about THIS facility. Use the names, approximate coordinates,
+  municipality and admin names in the site context to check that each source describes it.{confirmation}
 - If you cannot confirm you found this specific facility, return an empty sources list
   and explain why in search_notes. Do not return data for a different site.
 - From a page listing many facilities, such as a registry, use only this facility's entry.
@@ -543,13 +545,18 @@ Definitions:
 What each source says about the facility:
 - Report each source you use once, with the facility as that source describes it:
   facility_name_in_source and facility_name_english, stated_address and
-  stated_coordinates. They are used to check that the source is about this facility.
+  stated_coordinates, stated_municipality and stated_state. They are used to check that
+  the source is about this facility.
 - stated_address is the site's own address, copied exactly as written: never the
   operator's office. A page often gives it in a contact box or footer, so look there too.
 - stated_coordinates is the site's coordinates or grid reference, copied exactly as
   written. Give both fields where the source gives both.
-- Never work a location out, never use the coordinates in the site context (rounded to
-  about 1 km, for searching only), and leave a field blank if the source gives none.
+- stated_municipality and stated_state: the town and the state or province the source puts
+  the site in, in full ("Nuevo León", not "N.L."); for a town alone, the state it is in. A
+  source in another state than admin1 is very likely about a different facility.
+- Never work out an address or coordinates, never use the coordinates in the site context
+  (rounded to about 1 km, for searching only), and leave a field blank if the source gives
+  none.
 
 Source requirements:
 - Every source needs a clickable URL.

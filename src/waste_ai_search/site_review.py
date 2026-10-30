@@ -33,6 +33,7 @@ from typing import Any
 
 from .arbitration import comparable, decision_key
 from .found_values import CHECK_REQUIRED, EXCEPTION_KM, SME_REVIEW, Pair, closures, pick_values
+from .geocoder import place_text
 from .lists import id_order
 from .locate import format_point, seed_point
 from .on_page import NOT_FOUND, PARTLY
@@ -67,6 +68,7 @@ LOCATION_FLAGS = {
     PARTLY: "address or coordinates only partly found on the page",
 }
 FAR_AWAY_FLAG = f"more than {EXCEPTION_KM:g} km from our site"
+OTHER_STATE_FLAG = "in a different state from our site"
 NOT_A_FACILITY_FLAG = f"says {NOT_A_WASTE_FACILITY}"
 PLANNED_FLAG = "planned: a closure the page expects, not one that has happened"
 # Said on a source row of a key value an SME checks on its own row below.
@@ -131,6 +133,7 @@ def site_review_rows(
             "check": "",
             "site_id": pair.site_id,
             "our_coordinates": our_coordinates(sites_by_id.get(pair.site_id, {})),
+            "our_place": place_text(sites_by_id.get(pair.site_id, {})),
             "flags": "\n".join(dict.fromkeys(flags)),
             "would_load": would_load(waiting),
             "evidence": "",
@@ -220,6 +223,8 @@ def pair_flags(
         flags.append(f"same page and name also cited for site{sites} {', '.join(pair.shared_with)}")
     if pair.far_away:
         flags.append(FAR_AWAY_FLAG)
+    if pair.other_state:
+        flags.append(f"{OTHER_STATE_FLAG}: the source says {pair.other_state}")
     if pair.not_a_waste_facility:
         # The likeliest false verdict is a closed landfill misread as never a waste site.
         if closed:

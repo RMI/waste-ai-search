@@ -46,7 +46,7 @@ from .arbitration import baseline_for, comparable, date_key, decision_key, site_
 from .credibility import TIER_2, TIER_5, TIER_BY_LABEL, tier_label
 from .facility_names import distinctive_words
 from .lists import citation_point, id_order, plain
-from .locate import coordinates_from, format_point, haversine_km, seed_point
+from .locate import coordinates_from, format_point, haversine_km, same_state, seed_point
 from .payload import normalize_url
 from .prompt_builder import needs_contradiction_check
 from .schema import NOT_A_WASTE_FACILITY, VALUE_CHECKED_ATTRIBUTES, is_blank, normalize_scalar
@@ -75,8 +75,12 @@ EXCEPTION_KM = 5.0
 # The warnings a pair can carry, whatever its tier, as Run_Config counts them.
 SAME_PAGE = "same page and name as another site"
 FAR_AWAY = f"more than {EXCEPTION_KM:g} km away"
+OTHER_STATE = "in another state"
 SAYS_NOT_A_FACILITY = NOT_A_WASTE_FACILITY
-EXCEPTIONS = [SAME_PAGE, FAR_AWAY, SAYS_NOT_A_FACILITY]
+EXCEPTIONS = [SAME_PAGE, FAR_AWAY, OTHER_STATE, SAYS_NOT_A_FACILITY]
+# Not a column: a site's or a citation's state as the geocoder names it (locate.canonical_state),
+# set by arbitration from the run's state_names.json.
+STATE_NAME = "_state"
 
 # Why a value is not used, as Run_Config counts them.
 CONFIRMS = "confirms our value"
@@ -133,6 +137,8 @@ class Pair:
     far_away: bool = False
     # Whether that is measured from points too rough to show as the source's own.
     roughly: bool = False
+    # The state the source puts the facility in, where that isn't our site's state (measure).
+    other_state: str = ""
 
     @property
     def review_id(self) -> str:
@@ -168,6 +174,10 @@ class Pair:
         how far off it may be. Coordinates that coarse still say the facility is 100 km away.
         """
         self.distance_km, self.far_away, self.roughly = None, False, False
+        # States as the geocoder names them (arbitrate.py), so "N.L." and "Nuevo León" are one.
+        ours_state = normalize_scalar(site.get(STATE_NAME))
+        theirs_state = next((normalize_scalar(c.get(STATE_NAME)) for c in self.citations if normalize_scalar(c.get(STATE_NAME))), "")
+        self.other_state = theirs_state if ours_state and theirs_state and not same_state(ours_state, theirs_state) else ""
         ours = seed_point(site)
         if ours is None:
             return
@@ -190,6 +200,8 @@ class Pair:
             found.append(SAME_PAGE)
         if self.far_away:
             found.append(FAR_AWAY)
+        if self.other_state:
+            found.append(OTHER_STATE)
         if self.not_a_waste_facility:
             found.append(SAYS_NOT_A_FACILITY)
         return found
@@ -334,6 +346,9 @@ def found_row(
         "facility_name_in_source": normalize_scalar(location.get("facility_name_in_source")),
         "facility_name_english": normalize_scalar(location.get("facility_name_english")),
         "source_address": normalize_scalar(location.get("stated_address")),
+        "source_place": ", ".join(dict.fromkeys(
+            part for part in (normalize_scalar(location.get("stated_municipality")), normalize_scalar(location.get("stated_state"))) if part
+        )),
         "stated_coordinates": normalize_scalar(location.get("stated_coordinates")),
         "source_coordinates": format_point(*point) if point is not None else "",
         "coordinates_from": coordinates_from(location.get("location_basis")) if point is not None else "",

@@ -48,9 +48,13 @@ SOURCE_FIRST = "source-first"
 SOURCE_FIELDS = [
     "url", "source_title", "publisher", "source_type", "publication_date", "language", "paywall_flag",
     "facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates",
+    "stated_municipality", "stated_state",
 ]
 # The fields that describe the facility as text, which validation checks are text.
-FACILITY_FIELDS = ["facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates"]
+FACILITY_FIELDS = [
+    "facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates",
+    "stated_municipality", "stated_state",
+]
 # Kept from older responses, which carried them on each citation.
 LEGACY_SOURCE_FIELDS = ["subscription_followup_needed", "source_tier"]
 # The one location a source-first response gave before stated_address and stated_coordinates, and

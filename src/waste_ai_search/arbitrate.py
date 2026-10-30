@@ -19,12 +19,14 @@ from .found_values import (
     FOUND_VALUES_FILE,
     NO_LINK,
     NOT_USED,
+    STATE_NAME,
     UNUSABLE,
     describe_sorting,
     pick_values,
     sort_values,
     unverified_rows,
 )
+from .geocoder import with_places
 from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, LinkResult, load_results
 from .lists import (
@@ -41,7 +43,9 @@ from .lists import (
 from .locate import (
     MATCHING_BASES,
     SOURCE_LOCATIONS_FILE,
+    STATE_NAMES_FILE,
     Located,
+    canonical_state,
     count_bases,
     describe_geocoders,
     format_coordinate,
@@ -286,6 +290,9 @@ def location_columns(source: dict[str, Any], place: Located) -> dict[str, Any]:
         "facility_name_english": normalize_scalar(source.get("facility_name_english")),
         "stated_address": stated_address(source),
         "stated_coordinates": stated_coordinates(source),
+        # The municipality and state the source puts the facility in, as the agent gives them.
+        "stated_municipality": normalize_scalar(source.get("stated_municipality")),
+        "stated_state": normalize_scalar(source.get("stated_state")),
         "location_basis": place.basis if stated else "",
         "located_latitude": format_coordinate(place.latitude) if stated else "",
         "located_longitude": format_coordinate(place.longitude) if stated else "",
@@ -537,6 +544,13 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     if not cached:
         raise ValueError(f"No cached responses in {raw_dir(config.run_dir)}. Run the search phase first.")
     sites, _headers = resolve_sites(config, allow_database=False)
+    # With the municipality and state each prompt named, and every state as the geocoder names it
+    # (state_names.json, from the locate step), so where a source puts the facility can be compared
+    # with where our site is.
+    sites = with_places(sites, config.run_dir)
+    states = load_locations(config.run_dir / STATE_NAMES_FILE)
+    for site in sites:
+        site[STATE_NAME] = canonical_state(site.get("admin1"), site.get("country_iso3"), states, None, live=False)
     sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
 
     # Read only: the search phase did the fetching and the geocoding, so arbitration stays offline.
@@ -598,6 +612,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             site, payload, config.run_id, config.dataset_version, access_date,
             link_results=link_results, keep_broken_links=config.keep_broken_links, locations=locations,
         )
+        for row in site_sources:
+            row[STATE_NAME] = canonical_state(row.get("stated_state"), site.get("country_iso3"), states, None, live=False)
         source_entries.extend(site_sources)
         for warning in warnings:
             warn(site_id, site, warning)

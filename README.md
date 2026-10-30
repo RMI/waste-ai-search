@@ -654,6 +654,8 @@ and the values it gives (build step 4 of
       "facility_name_english": "that name in English",
       "stated_address": "the site's address, exactly as this source writes it",
       "stated_coordinates": "the site's coordinates or grid reference, exactly as written",
+      "stated_municipality": "the town or municipality the source puts it in",
+      "stated_state": "the state or province the source puts it in, in full",
       "values": [
         {"attribute_name": "operator", "value": "...", "unit": "", "value_basis": "Direct",
          "confidence_score": "High", "value_date": "2024", "evidence_summary": "...",
@@ -672,7 +674,10 @@ and the values it gives (build step 4 of
   `stated_coordinates` its coordinates or grid reference. Both are copied as written and never
   worked out, and blank if the source gives none. The prompt adds that a page often gives the
   address in a contact box or footer.
-- These four fields only check that the source is about our site (see
+- `stated_municipality` and `stated_state` are the town and the state or province the source puts
+  the site in, the state written in full; where the source names only a town, the state it is in.
+  A source in another state than ours is flagged on Site_Review.
+- These six fields only check that the source is about our site (see
   [Locating each source](#locating-each-source)). They never replace our name or location.
 - Each value keeps the fields arbitration has always read.
 
@@ -690,12 +695,9 @@ the full point in the prompt, the agent once credited our own OSM centroid to a 
 reverse-geocoded `formatted_address` is left out for the same reason. The search cap
 (`--max-web-searches`) is unchanged.
 
-Only Brazil's seed has place names (SINIR's municipality and state). Every other country's come
-only from a reverse-geocode cache passed with `--use-geocode-cache` (see
-[Reverse Geocoding](#reverse-geocoding)), and no such cache exists yet. So outside Brazil the
-prompt names the site, its country and the rounded point, and no town. Batch 1's prompts had the
-full point and no town either, so a comparison with batch 1's yield measures the rounding, not the
-loss of place names.
+Only Brazil's seed has place names (SINIR's municipality and state). Every other site's are
+looked up from our coordinates when it is searched (see [Reverse Geocoding](#reverse-geocoding)),
+from 30 October 2026. Batches 1 and 2 were searched before that, with no town in the prompt.
 
 **Runs cached before this still arbitrate.** One reader,
 [`payload.py`](src/waste_ai_search/payload.py), turns any cached response into this shape, and
@@ -1179,8 +1181,9 @@ approving it would do.
 |---|---|
 | `site_id`, `site_name`, `original_site_name`, `source_language`, `country_iso3` | **Our site.** `site_name` is our database's name, machine-translated into English; `original_site_name` is the same name before translation, in `source_language`, and blank where it was never translated. The search uses the original, so a source about *EL HONGO* is the right facility even though `site_name` says *THE FUNGUS*. |
 | `our_coordinates` | Where our database puts the site, as `lat, lon`. Paste it into Google Maps' search box. |
+| `our_place` | The municipality and state our site is in, looked up from `our_coordinates`. |
 | `source_url`, `source_title`, `publisher`, `source_tier`, `link_status` | **The source. Open it.** `link_status` says whether the link was checked and found working (`OK`) or couldn't be verified (`Unverified`, usually a site refusing automated checks, so it may still open for you). |
-| `facility_name_in_source`, `facility_name_english`, `source_address`, `stated_coordinates` | The facility the source describes, as the source writes it: its name, address, and coordinates or grid reference; `facility_name_english` is the name in English. |
+| `facility_name_in_source`, `facility_name_english`, `source_address`, `source_place`, `stated_coordinates` | The facility the source describes, as the source writes it: its name, address, town and state, and coordinates or grid reference; `facility_name_english` is the name in English. |
 | `source_coordinates`, `coordinates_from`, `distance_km`, `location_note` | Where the source places the facility, as `lat, lon`: paste it into Google Maps beside `our_coordinates`. `coordinates_from` says what it came from: coordinates the source states, a grid reference, or its address placed on the building or only on the street. A street point can be a kilometre or more off. `distance_km` is how far it is from our site. Where the source states a location but `source_coordinates` is blank, `location_note` says why (too coarse, its address and coordinates disagree, copied from the prompt, a postcode centroid), and `distance_km`, if filled, is roughly how far it is. |
 | `flags` | Why the row needs a second look, shaded where there are any (see below). |
 | `would_load` | What approving loads for this site of ours, one line per value: `attribute = value`, with the year for a yearly attribute, such as `facility_status = Active (2024)`. One value loads per site, attribute and year, so a line can lose to a better-tier value for the same field: the flags say where an auto-approved source's would. |
@@ -1192,6 +1195,7 @@ approving it would do.
 | address or coordinates not found on the page, or only partly found | The same, for where the source places the facility. |
 | same page and name also cited for site(s) X | Searches for other sites of ours cited this page under the same facility name. It is about one of them at most, unless they are one facility recorded twice. The row is listed under each of those sites too, and the pair of sites is on `possible_duplicates.csv`. |
 | more than 5 km from our site | Compare `source_coordinates`, or where it is blank `stated_coordinates`, with `our_coordinates`. |
+| in a different state from our site: the source says X | The source puts the facility in another state or province than `our_place`. States are compared as Nominatim names them, so "N.L." and "Nuevo León" are one state. A site near a border may be described from the next state, so look at the map before rejecting it. |
 | says Not a Waste Facility | Approving loads that verdict. Check the source says the site was never a waste site: a closed landfill still is one. Where the run also found the site closed, the flag says so. |
 | an auto-approved Tier N source gives `attribute = value`, which loads instead | A source approved automatically, so not on this tab, gives a different value for the same field and year, and its better tier wins the pick: approving this row won't load that line. If you think this row's value is the right one, say so in `notes`. |
 | approving replaces an auto-approved Tier N source's `attribute = value` | The other way round: this row's tier wins, so approving it loads its value in place of one that would otherwise load automatically. |
@@ -1373,35 +1377,28 @@ URL, title and publisher there.
 
 ## Reverse Geocoding
 
-Reverse geocoding is optional but strongly recommended for live pilot runs. The
-pipeline supports cache-only geocoding through JSONL records with either a
-`site_id` or a rounded coordinate key.
+Each prompt names the municipality and state our site is in, so the agent can search the right
+town and reject a page about another one. Brazil's seed has them from SINIR; every other site's
+are looked up from our coordinates when the site is searched, with Nominatim (the locate step's
+geocoder, `WASTE_AI_SEARCH_GEOCODER=nominatim`), one request a second. Each answer goes into
+`data/geocode_cache.jsonl`, so a site is looked up once whatever run it is in; Mexico's 1,553
+sites take about half an hour the first time. `--no-geocode-cache` turns it off. Azure Maps can't
+look points up here yet, so with it the prompt names no town.
 
-Example cache row:
+A cache row holds a municipality and a state, never a street: a street address next to our site
+would say more of our point than the prompt's rounded coordinates.
 
 ```json
-{"site_id":"11489","municipality":"Lagos","admin1":"Lagos","admin2":"","formatted_address":"Olushosun, Lagos, Nigeria","geocoder_provider":"manual","geocoder_confidence":"High"}
+{"site_id":"6086","coord_key":"17.38000,-98.02100","municipality":"San Sebastián Tecomaxtlahuaca","admin1":"Oaxaca","admin2":"","formatted_address":"","geocoder_provider":"nominatim","geocoder_confidence":"","geocoded_at":"2026-10-30"}
 ```
 
-Pass the cache to the search phase so the prompt can use municipality and admin names, which
-matters most for local-language searching. Outside Brazil this cache is the only source of them,
-and since the prompt's point is rounded to about 1 km, the town is the most precise place it can
-name:
+The run keeps the place each prompt named in `site_places.json`. The locate step names every state
+it meets, ours and each source's `stated_state`, as Nominatim does ("N.L.", "Nuevo Leon" and
+"Nuevo León" are all "Nuevo León"), in `state_names.json`; arbitration reads both, offline, to
+show `our_place` beside `source_place` on Site_Review and flag a source in another state.
 
-```bash
-uv run waste-ai-search search --run-id pilot10 --use-geocode-cache \
-  --geocode-cache data/geocode_cache.jsonl
-```
-
-Without `--use-geocode-cache` those fields stay empty and every site records
-`geocode_status = disabled`.
-
-Live Azure Maps batch reverse geocoding should be added later as a separate
-pre-processing command that writes this cache.
-
-This is separate from the locate step's geocoder, which places the addresses sources state (see
-[Locating each source](#locating-each-source)). The prompt passes the municipality and admin names
-on, but no longer `formatted_address`: a street address next to our site would leak our point.
+This is separate from the locate step's address geocoding, which places the addresses sources
+state (see [Locating each source](#locating-each-source)).
 
 ## Standardized Facility Schema
 

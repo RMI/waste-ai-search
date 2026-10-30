@@ -17,14 +17,16 @@ from typing import Any
 
 from .costs import RUN_LOG_FILE, TOKEN_COLUMNS, Usage, describe_run_cost, run_cost
 from .credibility import dropped_source_site
-from .geocoder import enrich_sites_from_cache
+from .geocoder import enrich_sites_from_cache, look_up_places, save_site_places, with_places
 from .input_loader import resolve_sites, run_seed_path, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, check_urls
 from .page_text import PAGE_TEXT_DIR
 from .locate import (
     MATCHING_BASES,
     SOURCE_LOCATIONS_FILE,
+    STATE_NAMES_FILE,
     GeocoderError,
+    canonical_state,
     Located,
     describe_bases,
     load_locations,
@@ -203,6 +205,15 @@ class _CountingGeocoder:
         self.calls += 1
         return self.geocoder.geocode(address, iso2)
 
+    def __getattr__(self, name: str) -> Any:
+        # Only a geocoder that can look states up (Nominatim) has `state`.
+        if name == "state" and hasattr(self.geocoder, "state"):
+            def state(text: str, iso2: str) -> str:
+                self.calls += 1
+                return self.geocoder.state(text, iso2)
+            return state
+        raise AttributeError(name)
+
 
 # locate_run's default: the geocoder the run's configuration names.
 _CONFIGURED = object()
@@ -220,12 +231,14 @@ def locate_run(
     """
     if sites is None:
         sites, _headers = resolve_sites(config, allow_database=False)
-    sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
+    sites_by_id = {normalize_scalar(site.get("site_id")): site for site in with_places(sites, config.run_dir)}
     if geocoder is _CONFIGURED:
         geocoder = make_geocoder(config.geocoder)
     geocoder = _CountingGeocoder(geocoder) if geocoder is not None else None
     path = config.run_dir / SOURCE_LOCATIONS_FILE
     cache = load_locations(path)
+    states_path = config.run_dir / STATE_NAMES_FILE
+    states = load_locations(states_path)
     by_site: dict[str, list[Path]] = {}
     for response in sorted(raw_dir(config.run_dir).glob("site_*.json")):
         by_site.setdefault(site_id_from_path(response), []).append(response)
@@ -244,7 +257,14 @@ def locate_run(
                     payloads.append(load_json(response))
                 except (OSError, json.JSONDecodeError):
                     continue
-            for source in merge_payloads(payloads)["sources"] if payloads else []:
+            sources = merge_payloads(payloads)["sources"] if payloads else []
+            # Our site's state and each source's, as the geocoder names them, to compare.
+            try:
+                for written in [site.get("admin1"), *(source.get("stated_state") for source in sources)]:
+                    canonical_state(written, site.get("country_iso3"), states, geocoder, live=True)
+            except GeocoderError as exc:
+                failures.append(str(exc))
+            for source in sources:
                 if dropped_source_site(source.get("url")) or not states_location(source):
                     continue
                 try:
@@ -257,6 +277,7 @@ def locate_run(
                     saved_at = geocoder.calls
     finally:
         save_locations(path, cache)
+        save_locations(states_path, states)
 
     used = [item for item in located if item.basis in MATCHING_BASES]
     name = geocoder.name if geocoder is not None else "none configured"
@@ -318,19 +339,24 @@ def run_search(
         searched |= {normalize_scalar(site.get("site_id")) for site in selected}
         record_skips(config.run_dir, skipped, searched)
 
+    raw_dir(config.run_dir).mkdir(parents=True, exist_ok=True)
+    # Built before any search is paid for, so a geocoder configured wrongly stops the run here,
+    # not after it.
+    geocoder = make_geocoder(config.geocoder) if config.locate else None
+
     # The prompt asks the agent to search using municipality and admin names, so those fields
-    # have to be populated or that instruction is asking for context we never supplied.
+    # have to be populated or that instruction is asking for context we never supplied. A site
+    # whose seed has neither is looked up from our coordinates, once, into the cache; the run keeps
+    # what each prompt named, which arbitration compares with where each source puts the facility.
+    if config.use_geocode_cache:
+        selected = look_up_places(selected, config.geocode_cache, geocoder)
     selected = enrich_sites_from_cache(
         selected, cache_path=config.geocode_cache, enabled=config.use_geocode_cache
     )
     if config.use_geocode_cache:
         hits = sum(1 for site in selected if site.get("geocode_status") == "cache_hit")
         print(f"Geocode cache: {hits}/{len(selected)} sites enriched with admin context")
-
-    raw_dir(config.run_dir).mkdir(parents=True, exist_ok=True)
-    # Built before any search is paid for, so a geocoder configured wrongly stops the run here,
-    # not after it.
-    geocoder = make_geocoder(config.geocoder) if config.locate else None
+    save_site_places(config.run_dir, selected)
     agent = agent_identity(get_client(config))
 
     work: list[tuple[dict[str, Any], list[str]]] = []

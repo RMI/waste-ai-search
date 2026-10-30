@@ -50,7 +50,8 @@ def test_the_contract_is_sources_first():
     (source,) = output["sources"]
     assert list(source) == [
         "url", "source_title", "publisher", "source_type", "publication_date", "language", "paywall_flag",
-        "facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates", "values",
+        "facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates",
+            "stated_municipality", "stated_state", "values",
     ]
     assert list(source["values"][0]) == [
         "attribute_name", "value", "unit", "value_basis", "confidence_score", "value_date",
@@ -84,7 +85,7 @@ def test_neither_the_name_nor_the_location_is_asked_for_as_a_value():
 def test_the_agent_returns_only_sources_about_this_site_as_in_batch_1():
     prompt = " ".join(prompt_for(THUNDER_BAY).split())
     assert "Identity first: - Return only sources about THIS facility." in prompt
-    assert "Use the names and approximate coordinates in the site context to check that each source describes it." in prompt
+    assert "Use the names, approximate coordinates, municipality and admin names in the site context to check that each source describes it." in prompt
     assert (
         "If you cannot confirm you found this specific facility, return an empty sources list and explain why in "
         "search_notes. Do not return data for a different site."
@@ -100,12 +101,15 @@ def test_each_source_states_the_facilitys_name_address_and_coordinates_as_writte
     prompt = " ".join(prompt_for(THUNDER_BAY).split())
     assert (
         "Report each source you use once, with the facility as that source describes it: facility_name_in_source "
-        "and facility_name_english, stated_address and stated_coordinates."
+        "and facility_name_english, stated_address and stated_coordinates, stated_municipality and stated_state."
     ) in prompt
     assert "stated_address is the site's own address, copied exactly as written: never the operator's office." in prompt
     assert "stated_coordinates is the site's coordinates or grid reference, copied exactly as written." in prompt
     assert "Give both fields where the source gives both." in prompt
-    assert "Never work a location out" in prompt
+    assert "Never work out an address or coordinates" in prompt
+    # The town and state are checked against ours, so a town's state may be given.
+    assert "for a town alone, the state it is in" in prompt
+    assert "A source in another state than admin1 is very likely about a different facility." in prompt
     assert "never use the coordinates in the site context" in prompt
     assert "leave a field blank if the source gives none" in prompt
     # Optional in the plan: on gpt-5.4, 5 of 51 pages gave an address the agent didn't copy.

@@ -42,6 +42,7 @@ import os
 import re
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -778,6 +779,46 @@ class NominatimGeocoder:
         results = response.json() or []
         return nominatim_match(results[0]) if results else None
 
+    def reverse(self, latitude: float, longitude: float) -> dict[str, str]:
+        """The municipality and state a point is in (nominatim_place), or {} where it finds none."""
+        params = {"lat": latitude, "lon": longitude, "format": "jsonv2", "zoom": 10, "addressdetails": 1}
+        self._wait()
+        response = self.session.get(
+            f"{self.url}/reverse", params=params, headers={"User-Agent": self.user_agent}, timeout=self.timeout
+        )
+        response.raise_for_status()
+        return nominatim_place((response.json() or {}).get("address") or {})
+
+    def state(self, text: str, iso2: str) -> str:
+        """A state, province or region's name as Nominatim writes it, from any way of writing it:
+        "N.L.", "Nuevo Leon" and "Nuevo León" are all "Nuevo León". "" where it finds none."""
+        params: dict[str, Any] = {"q": text, "format": "jsonv2", "limit": 1, "featureType": "state"}
+        if iso2:
+            params["countrycodes"] = iso2.lower()
+        self._wait()
+        response = self.session.get(
+            f"{self.url}/search", params=params, headers={"User-Agent": self.user_agent}, timeout=self.timeout
+        )
+        response.raise_for_status()
+        results = response.json() or []
+        return normalize_scalar(results[0].get("name")) if results else ""
+
+
+def nominatim_place(address: dict[str, Any]) -> dict[str, str]:
+    """Nominatim's address parts as our place fields. The municipality is the smallest of its
+    local-government names: Mexico's municipios come back as `county`, a city as `city`. The state
+    is `state`, or a country's other first-level name."""
+    municipality = next(
+        (normalize_scalar(address.get(key)) for key in ("municipality", "city", "town", "village", "county") if address.get(key)),
+        "",
+    )
+    admin1 = next(
+        (normalize_scalar(address.get(key)) for key in ("state", "province", "region") if address.get(key)), ""
+    )
+    if not municipality and not admin1:
+        return {}
+    return {"municipality": municipality, "admin1": admin1, "admin2": normalize_scalar(address.get("state_district"))}
+
 
 def nominatim_match(result: dict[str, Any]) -> GeocodeMatch | None:
     """Read one Nominatim result: an address point or building is rooftop, a road is street.
@@ -1074,6 +1115,47 @@ def geocode_address(
     if cache is not None:
         _record(cache, address, iso3, located, match)
     return located
+
+
+# --- states ------------------------------------------------------------------------------------
+# A state written any way ("N.L.", "Edo. Méx.", "CDMX") as the geocoder names it, by country, so
+# where a source puts the facility can be compared with where our site is (found_values.py).
+STATE_NAMES_FILE = "state_names.json"
+
+
+def canonical_state(
+    text: Any, iso3: Any, cache: dict[str, dict[str, Any]] | None, geocoder: Any, live: bool
+) -> str:
+    """A state's name as the geocoder writes it, from the cache first; only a live locate step asks
+    a geocoder that can look states up (Nominatim). "" where none is known."""
+    written = normalize_scalar(text)
+    if not written:
+        return ""
+    key = cache_key(written, iso3)
+    entry = (cache or {}).get(key)
+    if entry is not None:
+        return normalize_scalar(entry.get("name"))
+    if not live or geocoder is None or not hasattr(geocoder, "state"):
+        return ""
+    try:
+        name = geocoder.state(written, iso2(iso3))
+    except Exception as exc:  # noqa: BLE001 - one bad lookup must not end the locate step
+        raise GeocoderError(f"{geocoder.name}: {type(exc).__name__}: {exc}") from exc
+    if cache is not None:
+        cache[key] = {
+            "text": written, "country": normalize_scalar(iso3).upper(), "name": name,
+            "geocoder": geocoder.name, "located_at": date.today().isoformat(),
+        }
+    return name
+
+
+def same_state(ours: str, theirs: str) -> bool:
+    """Whether two states' names, as canonical_state gives them, are one state, accents aside: a
+    seed's own state may be written without them."""
+    def bare(text: str) -> str:
+        return "".join(c for c in unicodedata.normalize("NFKD", _plain(text)) if not unicodedata.combining(c))
+
+    return bare(ours) == bare(theirs)
 
 
 # --- one source --------------------------------------------------------------------------------

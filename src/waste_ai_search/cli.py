@@ -116,9 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sites searched at once (1 = one at a time). Higher is faster until Foundry rate-limits.",
     )
     search.add_argument(
-        "--use-geocode-cache",
+        "--no-geocode-cache",
         action="store_true",
-        help="Fill municipality/admin context from the geocode cache so the prompt can use it.",
+        help=(
+            "Don't name each site's municipality and state in its prompt. By default they are looked up "
+            "from our coordinates (Nominatim) into the geocode cache, once per site."
+        ),
     )
     search.add_argument(
         "--geocode-cache",
@@ -191,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     full.add_argument("--search-tool-retries", type=int, default=SEARCH_TOOL_RETRY_ATTEMPTS)
     full.add_argument("--max-web-searches", type=int, default=DEFAULT_MAX_WEB_SEARCHES)
-    full.add_argument("--use-geocode-cache", action="store_true")
+    full.add_argument("--no-geocode-cache", action="store_true")
     full.add_argument("--geocode-cache", default=str(Path.cwd() / "data" / "geocode_cache.jsonl"))
     full.add_argument(
         "--no-followup",
@@ -329,7 +332,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         geocode_cache=(
             Path(args.geocode_cache).expanduser().resolve() if getattr(args, "geocode_cache", "") else None
         ),
-        use_geocode_cache=getattr(args, "use_geocode_cache", False),
+        use_geocode_cache=not getattr(args, "no_geocode_cache", False),
         check_links=not getattr(args, "no_link_check", False),
         keep_broken_links=getattr(args, "keep_broken_link_evidence", False),
         keep_page_text=not getattr(args, "no_page_text", False),
