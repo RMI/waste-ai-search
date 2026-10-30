@@ -98,7 +98,14 @@ ATTRIBUTE_GUIDANCE = {
         + FACILITY_TYPE_DEFINITIONS
     ),
     "cover_types": "Array. Allowed members only: clay cover, organic cover, sand cover, other soil mixture.",
-    "has_landfill_gas_collection": "Yes, No, or Unknown.",
+    # In test10-mex-sample2-run2 an order to "implement ... biogas management" at Naucalpan was
+    # read as Yes, which set off the gas follow-up search (Hugh, 30 October).
+    "has_landfill_gas_collection": (
+        "Whether the landfill has a system collecting its gas through wells and pipes, to a flare "
+        "or an engine. Yes only where the source says one exists or existed; not one that is "
+        "ordered, required, planned or proposed, and not vents that only let gas escape. Yes, No, "
+        "or Unknown."
+    ),
     "operator": (
         "The organisation that runs the facility day to day - a company, municipality, utility "
         "or public agency - as the source names it. If the source distinguishes them, give the "
@@ -165,8 +172,12 @@ ATTRIBUTE_GUIDANCE = {
         "Other. Flaring alone is NOT an energy project - leave empty if gas is only flared. "
         "(This 'Other' is a database enum value for project type, unrelated to source_type.)"
     ),
+    # The follow-up search then read Naucalpan's own status as its gas project's: Operational
+    # because waste was arriving, Closed because the site had been sealed (Hugh, 30 October).
     "gccs_current_project_status": (
-        "Array. Allowed members only: Operational, Under Construction, Planned, Closed."
+        "Array. Allowed members only: Operational, Under Construction, Planned, Closed. The status "
+        "of each landfill gas energy project, never of the landfill itself: a landfill that is "
+        "operating, closed or sealed says nothing of its gas project."
     ),
     "gccs_collection_efficiency": (
         "Fraction of generated landfill gas that is collected, as measured or reported for the "

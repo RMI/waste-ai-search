@@ -985,6 +985,15 @@ facility with no capture system about methane flaring buys a certain "nothing". 
 the gate: `has_landfill_gas_collection` is itself gap-filled, so `refresh-seed` merges a
 discovery into the baseline and the next pass picks up that facility's GCCS attributes.
 
+Since 30 October 2026 the prompt says what each counts as. `has_landfill_gas_collection` is a
+system collecting gas through wells and pipes, to a flare or an engine, that exists or existed: not
+one ordered, required, planned or proposed, and not vents that only let gas escape.
+`gccs_current_project_status` is the status of each gas energy project, never of the landfill
+itself. In test10-mex-sample2-run2, an order to Naucalpan's operator to "implement ... biogas
+management" was read as gas collection. That set off the follow-up search, which then gave the
+landfill's own status as its gas project's: Operational because waste was arriving, and Closed
+because the site had been sealed.
+
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
 | `gccs_ch4_flared_metric_tonnes` | numeric | `metric tonnes CH4` | `gccs_ch4_flared_metric_tonnes` |

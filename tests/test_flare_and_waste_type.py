@@ -65,6 +65,24 @@ def test_incoming_waste_counts_municipal_waste_only():
     assert '"not_municipal": "true only for an incoming waste amount the source says is mainly other waste; otherwise false"' in prompt
 
 
+def test_gas_collection_is_a_system_that_exists_and_a_project_status_is_the_projects():
+    """In test10-mex-sample2-run2 an order to "implement ... biogas management" at Naucalpan was read
+    as gas collection, and the gas follow-up then read the landfill's own status, operating or
+    sealed, as its gas project's (Hugh, 30 October)."""
+    asked = " ".join(build_site_prompt({"site_id": "1", "site_name": "Deponie"}, ["has_landfill_gas_collection"]).split())
+    assert "Whether the landfill has a system collecting its gas through wells and pipes, to a flare or an engine." in asked
+    assert (
+        "Yes only where the source says one exists or existed; not one that is ordered, required, planned or "
+        "proposed, and not vents that only let gas escape."
+    ) in asked
+    site = {"site_id": "1", "site_name": "Deponie", "has_landfill_gas_collection": "TRUE"}
+    followed_up = " ".join(build_site_prompt(site, ["gccs_current_project_status"]).split())
+    assert (
+        "The status of each landfill gas energy project, never of the landfill itself: a landfill that is "
+        "operating, closed or sealed says nothing of its gas project."
+    ) in followed_up
+
+
 def test_new_values_are_typed_and_checked():
     assert _mapped(_claim("has_flare", "Yes")) == ["TRUE"]
     assert _mapped(_claim("flare_efficiency", "98", "%")) == ["0.98"]
