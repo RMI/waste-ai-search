@@ -71,8 +71,9 @@ FAR_AWAY_FLAG = f"more than {EXCEPTION_KM:g} km from our site"
 OTHER_STATE_FLAG = "in a different state from our site"
 NOT_A_FACILITY_FLAG = f"says {NOT_A_WASTE_FACILITY}"
 PLANNED_FLAG = "planned: a closure the page expects, not one that has happened"
-# Said on a source row of a key value an SME checks on its own row below.
-CHECK_BELOW = "(check below)"
+# Said on a source row, which lists every value the page gives, of a key value an SME checks on
+# its own ↳ row below (Hugh, 30 October: "(check below)" said too little).
+CHECK_INDEPENDENTLY = "(check independently)"
 
 
 def our_coordinates(site: dict[str, Any]) -> str:
@@ -273,5 +274,5 @@ def would_load(rows: list[dict[str, Any]]) -> str:
     on its own row marked so."""
     ordered = sorted(rows, key=value_order)
     return "\n".join(dict.fromkeys(
-        f"{value_line(row)} {CHECK_BELOW}" if needs_check(row) else value_line(row) for row in ordered
+        f"{value_line(row)} {CHECK_INDEPENDENTLY}" if needs_check(row) else value_line(row) for row in ordered
     ))

@@ -23,7 +23,7 @@ from .schema import (
     SITE_REVIEW_HEADERS,
 )
 from .site_review import (
-    CHECK_BELOW,
+    CHECK_INDEPENDENTLY,
     KIND,
     SITE_REVIEW_SHEET,
     VALUE_ROW,
@@ -213,10 +213,11 @@ REVIEW_INSTRUCTIONS = [
             "from: a point from a street address can be a kilometre or more off.\n"
             "4. Read flags, shaded orange: possible problems our automatic checks spotted, such as a "
             "quote we couldn't find on the page, a site more than 5 km from ours or in a different "
-            "state, or another page giving a different value. The checks can't read images or maps and make mistakes, so "
+            "state, or another page giving a different value. The checks can't read images or maps, so "
             "look for yourself.\n"
-            "5. would_load is what approving the page adds to our database. A value marked "
-            f"{CHECK_BELOW} is only added once you mark its ↳ row Correct.\n"
+            "5. would_load lists every value the page gives. Approving the page adds them all except "
+            f"those marked {CHECK_INDEPENDENTLY}: each has its own ↳ row underneath, and is added "
+            "only once you mark that row Correct.\n"
             "6. Pick a decision:\n"
             "- Correct site: it's about our site.\n"
             "- Different site: it's about another of our sites. Put that site's ID in other_site_id. "

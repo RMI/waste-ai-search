@@ -75,7 +75,9 @@ within each site, then by tier. Under each Tier 3–5 pair, one row per key valu
 4. **flags:** warnings, shaded orange. For example: the same page is also cited for another of our
    sites; the source puts the facility more than 5 km away; the quote isn't on the page; it says
    the site isn't a waste facility.
-5. **would_load:** what approving loads, one line per value. Key values say "(check below)".
+5. **would_load:** every value the page gives, one line per value. Key values say "(check
+   independently)": each loads only once its own ↳ row is marked Correct (called "(check below)"
+   until Hugh's SME pass on 30 October).
 6. **decision:** Correct site / Different site / New site / Junk; **other_site_id** for Different
    site.
 

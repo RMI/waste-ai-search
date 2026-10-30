@@ -129,8 +129,8 @@ def test_a_tier_3_to_5_pair_has_a_row_for_each_key_value_and_a_tier_1_2_pair_non
     ]
     news, closing, incoming, area = rows[1:]
     assert news["would_load"] == (
-        "operator = City of Winnipeg\nclosing_year = 2031 (check below)\n"
-        "annual_incoming_waste_metric_tonnes = 400000 (2023) (check below)\narea_square_meters = 120000 (check below)"
+        "operator = City of Winnipeg\nclosing_year = 2031 (check independently)\n"
+        "annual_incoming_waste_metric_tonnes = 400000 (2023) (check independently)\narea_square_meters = 120000 (check independently)"
     )
     assert {row["review_id"] for row in (closing, incoming, area)} == {news["review_id"]}
     assert (area["source_title"], area["would_load"], area["site_id"], area["site_name"]) == (
@@ -183,7 +183,7 @@ def test_a_row_shows_our_site_the_source_and_where_the_source_places_the_facilit
     )
     assert row["location_note"] == ""
     assert row["flags"] == ""
-    assert row["would_load"] == "facility_status = Active (2023)\nclosing_year = 2045 (check below)"
+    assert row["would_load"] == "facility_status = Active (2023)\nclosing_year = 2045 (check independently)"
 
 
 def test_a_location_too_coarse_to_place_is_shown_as_written_with_why(tmp_path):
