@@ -147,7 +147,7 @@ def test_an_empty_worklist_still_writes_the_tab(tmp_path):
     ws = wb["Site_Review"]
     assert ws.max_row == 1 and [cell.value for cell in ws[1]] == SITE_REVIEW_HEADERS
     readme = {row[0]: row[2] for row in list(wb["ReadMe"].values)[1:]}
-    assert "An empty tab means nothing needs you." in readme["Site_Review"]
+    assert "If this tab is empty, there's nothing to review." in readme["Site_Review"]
 
 
 def test_definitions_tab_publishes_the_tier_scale(tmp_path):
@@ -168,13 +168,11 @@ def test_readme_tab_documents_every_tab_and_the_csv_sidecars(tmp_path):
     assert not {"Review_Queue", "Leads", "Found_Values"} & described
 
 
-def test_the_readme_walks_an_sme_through_a_row_keeping_our_site_and_the_source_apart(tmp_path):
+def test_the_readme_walks_an_sme_through_a_row_in_plain_words(tmp_path):
     readme = {row[0]: row for row in list(build(tmp_path)[0]["ReadMe"].values)[1:]}
     purpose, steps = readme["Site_Review"][1], readme["Site_Review"][2]
     assert purpose.startswith("YOUR WORKLIST.")
-    assert "whether the source is about this site of ours" in purpose
-    for words in ("our database", "the facility it describes", "where the source places the facility"):
-        assert words in steps
+    assert "whether the page is really about that site" in purpose
     numbered = [line.split(".")[0] for line in steps.splitlines() if line[:1].isdigit()]
     assert numbered == ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
     for column in ("our_coordinates", "source_url", "source_coordinates", "coordinates_from", "distance_km",
@@ -182,10 +180,16 @@ def test_the_readme_walks_an_sme_through_a_row_keeping_our_site_and_the_source_a
         assert column in steps, column
     for decision in SITE_REVIEW_DECISIONS:
         assert f"- {decision}:" in steps
-    assert FAR_AWAY_FLAG in steps
     # accept-reviews stops on a Different site with no other_site_id, so an SME who can't tell which
     # of our sites leaves the decision blank.
-    assert "if you can't tell which of our sites it is about, leave decision blank" in steps
+    assert "If you can't tell which, leave decision blank" in steps
+    # Short enough to be read.
+    assert len(purpose.split()) + len(steps.split()) < 500
+
+
+def test_the_readme_tells_smes_which_rows_they_can_skip(tmp_path):
+    readme = {row[0]: row[2] for row in list(build(tmp_path)[0]["ReadMe"].values)[1:]}
+    assert all("You can skip this." in action for tab, action in readme.items() if tab != "Site_Review")
 
 
 def test_the_readme_says_what_each_status_means(tmp_path):

@@ -24,10 +24,7 @@ from .schema import (
 )
 from .site_review import (
     CHECK_BELOW,
-    FAR_AWAY_FLAG,
     KIND,
-    NOT_A_FACILITY_FLAG,
-    PLANNED_FLAG,
     SITE_REVIEW_SHEET,
     VALUE_ROW,
 )
@@ -188,75 +185,47 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": SITE_REVIEW_SHEET,
         "purpose": (
-            "YOUR WORKLIST. Each source row is a web page the search found for one of our sites, whose "
-            "values would fill fields that are empty in our database for that site. The question for "
-            "each is whether the source is about this site of ours. Under a source of Tier 3-5 (news, "
-            "trade press, NGO reports, directories, blogs, or a page whose kind is unclear) come its "
-            "value rows (marked ↳): key values you also check against the page - site type, closure "
-            "year, incoming waste, area, gas collection, gas use and collection efficiency. A Tier 1-2 "
-            "source (a regulator, permit or operator; government statistics, peer-reviewed or "
-            "intergovernmental data) is trusted to have been read correctly, so it has no value rows. "
-            "Rows are grouped by our site, with flagged sources first. Your decisions are read back "
-            "from this tab."
+            "YOUR WORKLIST. Each row is a web page the search found for one of our sites. Your main "
+            "job is to say whether the page is really about that site. Pages from low-tier sources "
+            "(Tier 3-5) also have indented rows (↳) under them, one for each important value the page "
+            "gives: site type, closure year, incoming waste, area, gas collection, gas use and "
+            "collection efficiency. Check those too. Pages from high-tier sources (Tier 1-2) have no "
+            "↳ rows: we trust their values. Under each site, pages with a flag (a possible problem we "
+            "spotted) come first."
         ),
         "sme_action": (
-            "Work top to bottom. Click the - and + at the left of the sheet to fold value rows away or "
-            "open them.\n"
-            "FOR EACH SOURCE ROW:\n"
-            "1. Our site: site_name is our database's name for it, machine-translated into English; "
-            "original_site_name is the same name before translation. Click our_coordinates to see "
-            "where our database puts it on Google Maps.\n"
-            "2. The source: open source_url. facility_name_in_source, source_address and "
-            "stated_coordinates are the facility it describes, as the source writes them; "
-            "facility_name_english is that name in English.\n"
-            "3. Click source_coordinates to see where the source places the facility. coordinates_from "
-            "says what they come from: coordinates the source states, a grid reference, or its "
-            "address, placed on the building or only on the street (a street point can be a kilometre "
-            "or more off). distance_km is how far that is from our site. Where source_coordinates is "
-            "blank but the source states a location, location_note says why we couldn't place it.\n"
-            "4. Read flags, shaded where there are any:\n"
-            "- \"not found\" or \"only partly found on the page\": our automated check couldn't find "
-            "the quote, or the address or coordinates, on the source's page. Look yourself: the check "
-            "can't read images or maps, and it makes mistakes.\n"
-            "- \"same page and name also cited for site\": searches for other sites of ours cited this "
-            "page under the same facility name. It is about one of them at most, unless they are one "
-            "facility recorded twice.\n"
-            f"- \"{FAR_AWAY_FLAG}\": where the source places the facility, as in step 3.\n"
-            f"- \"{NOT_A_FACILITY_FLAG}\": approving loads that verdict. Check the source says the "
-            "site was never a waste site: a closed landfill still is one.\n"
-            "- \"a Tier N source here gives ...\": another source on this tab gives a different value "
-            "for the same field. One value loads per field, the best tier first; the flag says which "
-            "loads if both sources are approved.\n"
-            "5. would_load is what approving loads for this site of ours: attribute = value, with the "
-            f"year for a yearly attribute. A line marked {CHECK_BELOW} loads only once you mark its "
-            "value row Correct.\n"
-            "6. Pick decision:\n"
-            "- Correct site: the source is about this site of ours. Its values load here.\n"
-            "- Different site: it is about another site of ours. Put that site's id in other_site_id, "
-            "and its values load there, where that site's fields are empty. A Different site with no "
-            "other_site_id can't be read back: if you can't tell which of our sites it is about, leave "
-            "decision blank and say so in notes.\n"
-            "- New site: it is about a landfill that isn't in our database. Nothing loads, and it is "
-            "listed for ingestion as a new facility.\n"
-            "- Junk: the source is no use - it isn't about one facility, or you can't tell which. "
-            "Nothing loads, and its value rows turn grey: skip them.\n"
-            "If a Tier 1-2 source misreads a value, say so in notes; its values still load.\n"
-            "FOR EACH VALUE ROW (↳) under a source that is Correct site or Different site:\n"
-            "7. would_load is the value; evidence is the quote from the page, the value as the page "
-            "writes it, and the search's note. source_url opens the page at the quote, highlighted "
-            "(Chrome and Edge; not PDFs).\n"
-            f"- \"{PLANNED_FLAG}\": the source gives a closure that hasn't happened yet. Mark it "
-            "Correct to keep it.\n"
-            "8. Pick decision: Correct if the page bears the value out, Wrong if not. If it is Wrong and "
-            "you know the right value, type it in corrected_value, in the unit would_load shows "
-            "(tonnes a year, square metres, a year, or a fraction from 0 to 1 for efficiency); site "
-            "type, gas collection and gas use offer a list. It loads instead. corrected_value is "
-            "optional: Wrong with it blank loads nothing.\n"
-            "Nothing from a row loads while its decision is blank.\n"
-            "9. Put your name in reviewer, the date in reviewed_date, and anything worth knowing in "
+            "Work down the sheet. The - and + at the far left hide or show the ↳ rows.\n"
+            "FOR EACH PAGE:\n"
+            "1. Click our_coordinates to see our site on Google Maps.\n"
+            "2. Click source_url to open the page. Is it about our site? Compare the name the page "
+            "uses (facility_name_in_source) with ours (site_name).\n"
+            "3. If the page says where the site is, click source_coordinates to see it on the map. "
+            "distance_km is how far that is from ours. coordinates_from says where the point came "
+            "from: a point from a street address can be a kilometre or more off.\n"
+            "4. Read flags, shaded orange: possible problems our automatic checks spotted, such as a "
+            "quote we couldn't find on the page, a site more than 5 km from ours, or another page "
+            "giving a different value. The checks can't read images or maps and make mistakes, so "
+            "look for yourself.\n"
+            "5. would_load is what approving the page adds to our database. A value marked "
+            f"{CHECK_BELOW} is only added once you mark its ↳ row Correct.\n"
+            "6. Pick a decision:\n"
+            "- Correct site: it's about our site.\n"
+            "- Different site: it's about another of our sites. Put that site's ID in other_site_id. "
+            "If you can't tell which, leave decision blank and say so in notes.\n"
+            "- New site: it's about a landfill that isn't in our database.\n"
+            "- Junk: it's no use, or you can't tell which site it's about.\n"
+            "Only Correct site and Different site add anything. If a high-tier page has a value wrong, "
+            "say so in notes.\n"
+            "FOR EACH ↳ ROW (skip it if the page is New site or Junk: it turns grey):\n"
+            "7. Click source_url: the page opens at the quote, highlighted (in Chrome or Edge, not in "
+            "PDFs). evidence shows the quote. A closure year flagged as planned is one the page "
+            "expects in the future: Correct keeps it.\n"
+            "8. Pick Correct or Wrong. If it's wrong and you know the right value, you can type it in "
+            "corrected_value, in the same unit as would_load.\n"
+            "9. Put your name in reviewer, the date in reviewed_date, and anything worth saying in "
             "notes.\n"
-            "Leave review_id and check as they are: your decisions are read back by them.\n"
-            "An empty tab means nothing needs you."
+            "A blank decision adds nothing, so leave it blank if you're unsure. Don't change any other "
+            "column. If this tab is empty, there's nothing to review."
         ),
         "editable": f"{', '.join(SITE_REVIEW_EDITABLE)} - nothing else",
     },
@@ -274,7 +243,7 @@ REVIEW_INSTRUCTIONS = [
             "row's, and loaded says whether the value loads: yes, or no where another value was picked "
             "for the same site, attribute and year."
         ),
-        "sme_action": "Read only. Open it to see each value's quote, and why it has its status.",
+        "sme_action": "For the data team. You can skip this.",
         "editable": "nothing",
     },
     {
@@ -285,13 +254,13 @@ REVIEW_INSTRUCTIONS = [
             "values disagree, the best tier wins, then the newest, then the value most sources give. "
             "approved_by is the reviewer. For ingestion."
         ),
-        "sme_action": "Read only.",
+        "sme_action": "For the data team. You can skip this.",
         "editable": "nothing",
     },
     {
         "tab_name": "(file) new_facility_candidates.csv",
         "purpose": "Landfills none of our sites is, from the sources SMEs mark New site on Site_Review. For ingestion.",
-        "sme_action": "Read only.",
+        "sme_action": "For the data team. You can skip this.",
         "editable": "nothing",
     },
     {
@@ -302,7 +271,7 @@ REVIEW_INSTRUCTIONS = [
             "says is likelier where the sites are more than 5 km apart. A page cited with no name is "
             "left out. The page is sent to Site_Review under each site. For ingestion."
         ),
-        "sme_action": "Read only.",
+        "sme_action": "For the data team. You can skip this.",
         "editable": "nothing",
     },
     {
@@ -312,7 +281,7 @@ REVIEW_INSTRUCTIONS = [
             "2 or more facilities, or from a publisher of datasets and found by 3 or more searches. A search "
             "reads only the entry it used, so ingestion can load the rest of the page once, as a source of its own."
         ),
-        "sme_action": "Read only.",
+        "sme_action": "For the data team. You can skip this.",
         "editable": "nothing",
     },
     {
@@ -321,13 +290,13 @@ REVIEW_INSTRUCTIONS = [
             "Values the pipeline dropped or could not map, including unit and enum problems, and "
             "citations of the two map sites that are never used as sources."
         ),
-        "sme_action": "Scan for systematic problems worth fixing upstream.",
+        "sme_action": "For the data team. You can skip this.",
         "editable": "nothing",
     },
     {
         "tab_name": "Definitions",
         "purpose": "The decisions Site_Review offers, the tiers, and allowed values, mirrored from the live database enums.",
-        "sme_action": "Read only.",
+        "sme_action": "For the data team. You can skip this.",
         "editable": "nothing",
     },
 ]

@@ -139,7 +139,7 @@ def test_a_tier_3_to_5_pair_has_a_row_for_each_key_value_and_a_tier_1_2_pair_non
     assert area["evidence"] == "“The 12 ha site”\nAs written: 12 ha\nAgent: Footprint."
     # The permit gives a closing year too: the better tier loads if both are approved.
     assert closing["flags"] == (
-        "a planned closure, not an actual one: the source says the site is expected to close then\n"
+        "planned: a closure the page expects, not one that has happened\n"
         "a Tier 1 source here gives closing_year = 2019; if both are approved, that one loads"
     )
 

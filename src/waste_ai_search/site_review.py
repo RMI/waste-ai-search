@@ -68,7 +68,7 @@ LOCATION_FLAGS = {
 }
 FAR_AWAY_FLAG = f"more than {EXCEPTION_KM:g} km from our site"
 NOT_A_FACILITY_FLAG = f"says {NOT_A_WASTE_FACILITY}"
-PLANNED_FLAG = "a planned closure, not an actual one: the source says the site is expected to close then"
+PLANNED_FLAG = "planned: a closure the page expects, not one that has happened"
 # Said on a source row of a key value an SME checks on its own row below.
 CHECK_BELOW = "(check below)"
 
