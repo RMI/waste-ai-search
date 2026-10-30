@@ -1,19 +1,18 @@
-"""Every value the search found is sorted: auto-approved, SME review or not used (found_values.py).
+"""Every value the search found is sorted: SME review or not used (found_values.py).
 
-Step 2 of the approve-sources plan. The agent returns only sources about the site searched, so
-every source is filed under that site; nothing moves a source to another site any more. A value's
-status is decided for its site-source pair:
+Step 2 of the approve-sources plan, as the key-values plan changed it. The agent returns only
+sources about the site searched, so every source is filed under that site; nothing moves a source to
+another site any more. A value's status is decided for its site-source pair:
 
-- auto-approved: a Tier 1-2 source filling an empty field, with none of the exceptions;
-- SME review: a Tier 3-5 source filling an empty field, or a Tier 1-2 one with an exception (the same
-  page and name cited for another of our sites, a point more than 5 km from ours, or a "Not a Waste
-  Facility" verdict);
+- SME review: it fills an empty field, and loads once an SME approves its pair; a key value from a
+  Tier 3-5 pair (value_check "required") only once its own row is marked Correct too. What once sent
+  a Tier 1-2 pair to SMEs (the same page and name cited for another of our sites, a point more than
+  5 km from ours, or a "Not a Waste Facility" verdict) is now a warning in its status_reason;
 - not used: it confirms or would change a value we hold, its link is dead, it couldn't be converted,
   or the agent excluded it.
 
-This reverses F36's "nothing is accepted automatically" on purpose (test_resolved_csv.py pinned it,
-and is replaced by this file), and the matcher's tests went with match.py (test_pooled_review.py and
-test_match.py). These run end to end through run_arbitration, on hand-built source-first responses.
+The approve-sources plan's auto-approval of Tier 1-2 fills is gone (the key-values plan), and the
+matcher's tests went with match.py (test_pooled_review.py and test_match.py). These run end to end through run_arbitration, on hand-built source-first responses.
 """
 from __future__ import annotations
 
@@ -108,48 +107,52 @@ NEARBY = seed("13414", "domestic landfill", 50.10, -97.20)
 
 
 # --- the statuses ---------------------------------------------------------------------------------
-def test_a_tier_1_or_2_fill_is_auto_approved_and_a_tier_3_to_5_fill_goes_to_an_sme(tmp_path):
-    """Batch 1's rule returns: a Tier 1-2 value filling an empty field is approved without review."""
+def test_every_fill_goes_to_an_sme_and_a_tier_3_to_5_key_value_is_checked_on_its_own(tmp_path):
+    """Nothing is approved automatically (key-values plan): an SME checks every source's match. A
+    Tier 1-2 source's values are trusted as read; a key value from a Tier 3-5 source is checked too."""
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
-        source("https://manitoba.example/permit", "Brady Road Landfill", values=[value("operator", "City of Winnipeg")]),
+        source("https://manitoba.example/permit", "Brady Road Landfill",
+               values=[value("operator", "City of Winnipeg"), value("closing_year", "2019")]),
         source("https://stats.example/table", "Brady Road", values=[value("opening_year", "1973")], source_type="Government statistics"),
-        source("https://news.example/brady", "Brady Road", values=[value("closing_year", "2045")], source_type="News report"),
+        source("https://news.example/brady", "Brady Road", values=[value("area_square_meters", "12", unit="ha")], source_type="News report"),
         source("https://wiki.example/brady", "Brady Road", values=[value("facility_status", "Active")], source_type="Wiki or aggregator"),
     ]})
     found = by_attribute(run_dir)
-    assert [(found[name]["source_tier"], found[name]["status"]) for name in ("operator", "opening_year", "closing_year", "facility_status")] == [
-        ("Tier 1", AUTO_APPROVED), ("Tier 2", AUTO_APPROVED), ("Tier 3", SME_REVIEW), ("Tier 4", SME_REVIEW),
+    assert [
+        (found[name]["source_tier"], found[name]["status"], found[name]["value_check"])
+        for name in ("operator", "closing_year", "opening_year", "area_square_meters", "facility_status")
+    ] == [
+        ("Tier 1", SME_REVIEW, ""), ("Tier 1", SME_REVIEW, ""), ("Tier 2", SME_REVIEW, ""),
+        ("Tier 3", SME_REVIEW, "required"), ("Tier 4", SME_REVIEW, ""),
     ]
     assert found["operator"]["status_reason"] == "Tier 1 source, filling an empty field."
-    assert found["closing_year"]["status_reason"] == "Tier 3 source."
-    assert {row["sme_decision"] for row in found.values()} == {""} and {row["loaded"] for row in found.values()} == {""}
+    assert found["area_square_meters"]["status_reason"] == "Tier 3 source, filling an empty field."
+    assert {(row["sme_decision"], row["value_decision"], row["corrected_value"], row["loaded"]) for row in found.values()} == {("", "", "", "")}
+    assert AUTO_APPROVED not in {row["status"] for row in rows(run_dir)}
 
 
-def test_a_source_whose_every_value_a_better_auto_approved_source_gives_is_not_reviewed(tmp_path):
-    """Tier comes first when one value is picked per site, attribute and year, so approving such a
-    source could load nothing; asking an SME about it would only cost their time."""
+def test_a_source_whose_values_a_better_source_gives_is_still_listed(tmp_path):
+    """With nothing approved automatically, a better source's value loads only if an SME approves it,
+    so a weaker source giving the same field is reviewed too (719337d's rule is gone)."""
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
-        source("https://manitoba.example/permit", "Brady Road Landfill",
-               values=[value("operator", "City of Winnipeg"), value("facility_status", "Active", "2024")]),
-        # Everything it gives, the permit gives too: not reviewed, whether it agrees or not.
-        source("https://news.example/one", "Brady Road", source_type="News report",
-               values=[value("operator", "Waste Connections"), value("facility_status", "Active", "2024")]),
-        # One value nothing auto-approved gives, so the whole source is reviewed.
-        source("https://news.example/two", "Brady Road", source_type="News report",
-               values=[value("operator", "City of Winnipeg"), value("has_flare", "TRUE")]),
-        # Another year's status is another value, so it is reviewed.
-        source("https://news.example/three", "Brady Road", source_type="News report",
-               values=[value("facility_status", "Inactive", "2019")]),
+        source("https://manitoba.example/permit", "Brady Road Landfill", values=[value("operator", "City of Winnipeg")]),
+        source("https://news.example/one", "Brady Road", source_type="News report", values=[value("operator", "Waste Connections")]),
     ]})
-    found = {(row["source_url"], row["attribute_name"]): row for row in rows(run_dir) if row["review_id"]}
-    assert found[("https://news.example/one", "operator")]["status"] == NOT_USED
-    assert found[("https://news.example/one", "facility_status")]["status"] == NOT_USED
-    assert found[("https://news.example/one", "operator")]["status_reason"].startswith(
-        "An auto-approved source of a better tier already gives this site, attribute and year"
-    )
-    assert {found[("https://news.example/two", name)]["status"] for name in ("operator", "has_flare")} == {SME_REVIEW}
-    assert found[("https://news.example/three", "facility_status")]["status"] == SME_REVIEW
-    assert "an auto-approved source already gives it 2" in run_config(run_dir)["values_not_used"]
+    found = {row["source_url"]: row for row in rows(run_dir) if row["review_id"]}
+    assert found["https://news.example/one"]["status"] == SME_REVIEW
+
+
+def test_a_planned_closing_year_is_marked_and_not_read_as_a_closure(tmp_path):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://news.example/brady", "Brady Road", source_type="News report",
+               values=[value("closing_year", "2031", planned=True)]),
+        source("https://news.example/other", "Brady Road", source_type="News report",
+               values=[value("operator", "City of Winnipeg", planned=True)]),
+    ]})
+    found = by_attribute(run_dir)
+    assert (found["closing_year"]["planned"], found["closing_year"]["value"]) == ("TRUE", "2031")
+    # Only a closing_year can be planned.
+    assert found["operator"]["planned"] == ""
 
 
 def test_a_tier_1_source_sent_to_review_by_an_exception_is_reviewed_though_a_tier_2_one_gives_its_value(tmp_path):
@@ -183,7 +186,7 @@ def test_only_fills_of_empty_fields_load(tmp_path):
     assert found["facility_status"]["status"] == NOT_USED
     assert found["facility_status"]["status_reason"] == "Would change our value, Active: only fills of empty fields load."
     assert found["facility_status"]["our_value"] == "Active"
-    assert found["opening_year"]["status"] == AUTO_APPROVED
+    assert found["opening_year"]["status"] == SME_REVIEW
 
 
 def test_a_value_that_cant_be_used_is_listed_as_not_used_with_why(tmp_path):
@@ -212,7 +215,7 @@ def test_a_dead_link_is_not_used_unless_broken_links_are_kept(tmp_path):
     [dead] = rows(arbitrate(tmp_path / "a", [BRADY], responses, links=links))
     assert (dead["status"], dead["status_reason"], dead["link_status"]) == (NOT_USED, "Source link broken (404).", BROKEN)
     [kept] = rows(arbitrate(tmp_path / "b", [BRADY], responses, links=links, keep_broken_links=True))
-    assert kept["status"] == AUTO_APPROVED
+    assert kept["status"] == SME_REVIEW
 
 
 def test_a_value_the_agent_excluded_is_not_used(tmp_path):
@@ -228,7 +231,7 @@ def test_a_value_the_agent_excluded_is_not_used(tmp_path):
         assert (found[name]["status"], found[name]["status_reason"]) == (
             NOT_USED, "The agent marked it an excluded candidate, not a finding.",
         )
-    assert found["operator"]["status"] == AUTO_APPROVED
+    assert found["operator"]["status"] == SME_REVIEW
 
 
 def test_the_agents_unverified_leads_are_listed_as_not_used(tmp_path):
@@ -254,7 +257,7 @@ def test_a_source_placing_the_facility_at_another_site_of_ours_stays_with_the_si
     run_dir = arbitrate(tmp_path, [BRADY, NEARBY], {"13414": [permit]})
     [operator] = rows(run_dir)
     assert (operator["site_id"], operator["site_name"], operator["status"]) == ("13414", "domestic landfill", SME_REVIEW)
-    assert operator["status_reason"] == "Tier 1 source; it places the facility 38 km from our site."
+    assert operator["status_reason"] == "Tier 1 source, filling an empty field; it places the facility 38 km from our site."
     assert not (run_dir / "outside_run_matches.csv").exists()
 
 
@@ -282,7 +285,7 @@ def test_a_grid_reference_is_converted_and_says_so(tmp_path):
     register = source("https://environment.data.gov.uk/EPR-RP3531DV", "Cowpen Bewley Landfill Site", "NZ4914124539",
                       values=[value("operator", "Augean")])
     [operator] = rows(arbitrate(tmp_path, [cowpen], {"18572": [register]}))
-    assert (operator["coordinates_from"], operator["status"]) == ("grid reference", AUTO_APPROVED)
+    assert (operator["coordinates_from"], operator["status"]) == ("grid reference", SME_REVIEW)
     assert float(operator["distance_km"]) < 0.1
 
 
@@ -301,10 +304,10 @@ def test_the_5_km_check_needs_coordinates_on_both_sides(tmp_path):
     })
     status = {(row["site_id"], row["attribute_name"]): (row["status"], row["distance_km"]) for row in rows(run_dir)}
     assert status == {
-        ("13413", "operator"): (AUTO_APPROVED, "2.41"),
-        ("13413", "opening_year"): (AUTO_APPROVED, ""),
+        ("13413", "operator"): (SME_REVIEW, "2.41"),
+        ("13413", "opening_year"): (SME_REVIEW, ""),
         ("13413", "closing_year"): (SME_REVIEW, "5.75"),
-        ("1", "operator"): (AUTO_APPROVED, ""),
+        ("1", "operator"): (SME_REVIEW, ""),
     }
 
 
@@ -324,7 +327,7 @@ def test_coordinates_far_away_go_to_an_sme_even_where_their_address_disagrees(tm
     [row] = rows(arbitrate(tmp_path, [BRADY], {"13413": [permit]}))
     assert (row["source_coordinates"], row["distance_km"]) == ("", "103.08")
     assert row["location_note"] == "doubtful: its address lands 3.0 km from its coordinates"
-    assert (row["status"], row["status_reason"]) == (SME_REVIEW, "Tier 1 source; it places the facility roughly 103 km from our site.")
+    assert (row["status"], row["status_reason"]) == (SME_REVIEW, "Tier 1 source, filling an empty field; it places the facility roughly 103 km from our site.")
 
 
 def test_the_same_page_and_name_cited_for_two_sites_goes_to_smes_for_both(tmp_path):
@@ -339,12 +342,12 @@ def test_the_same_page_and_name_cited_for_two_sites_goes_to_smes_for_both(tmp_pa
         "18499": [source(registry, "City of Brandon – Eastview Landfill.", values=[value("operator", "City of Brandon")])],
     })
     found = {row["site_id"]: row for row in rows(run_dir)}
-    assert found["13338"]["status_reason"] == "Tier 1 source; the same page and name are also cited for site 18499."
-    assert found["18499"]["status_reason"] == "Tier 1 source; the same page and name are also cited for site 13338."
+    assert found["13338"]["status_reason"] == "Tier 1 source, filling an empty field; the same page and name are also cited for site 18499."
+    assert found["18499"]["status_reason"] == "Tier 1 source, filling an empty field; the same page and name are also cited for site 13338."
     [pair] = rows(run_dir, "possible_duplicates.csv")
     assert (pair["site_id_a"], pair["site_id_b"], pair["source_urls"]) == ("13338", "18499", registry)
     config = run_config(run_dir)
-    assert (config["pairs_sme_review"], config["possible_duplicates"]) == ("2: same page and name as another site 2 (2 values)", 1)
+    assert (config["pairs_with_warnings"], config["possible_duplicates"]) == ("2: same page and name as another site 2", 1)
 
 
 def test_two_spellings_of_one_name_on_one_page_are_the_same_page_and_name(tmp_path):
@@ -363,8 +366,8 @@ def test_two_spellings_of_one_name_on_one_page_are_the_same_page_and_name(tmp_pa
         "18499": [source(report, "Eastview Landfill", values=[value("operator", "City of Brandon")])],
     })
     found = {(row["site_id"], row["attribute_name"]): row for row in rows(run_dir)}
-    assert found[("18499", "operator")]["status_reason"] == "Tier 1 source; the same page and name are also cited for site 13338."
-    assert found[("13338", "opening_year")]["status_reason"] == "Tier 1 source; the same page and name are also cited for site 18499."
+    assert found[("18499", "operator")]["status_reason"] == "Tier 1 source, filling an empty field; the same page and name are also cited for site 13338."
+    assert found[("13338", "opening_year")]["status_reason"] == "Tier 1 source, filling an empty field; the same page and name are also cited for site 18499."
     assert found[("13338", "opening_year")]["review_id"] != found[("13338", "closing_year")]["review_id"]
     [pair] = rows(run_dir, "possible_duplicates.csv")
     assert (pair["site_id_a"], pair["site_id_b"]) == ("13338", "18499")
@@ -373,7 +376,7 @@ def test_two_spellings_of_one_name_on_one_page_are_the_same_page_and_name(tmp_pa
         source(report, "The Eastview Landfill", values=[value("opening_year", "2015")]),
         source(report, "Eastview Landfill site", values=[value("closing_year", "2060")]),
     ]})
-    assert {row["status"] for row in rows(alone)} == {AUTO_APPROVED}
+    assert {row["status"] for row in rows(alone)} == {SME_REVIEW}
 
 
 def test_one_page_naming_different_facilities_for_two_sites_is_no_duplicate(tmp_path):
@@ -386,7 +389,7 @@ def test_one_page_naming_different_facilities_for_two_sites_is_no_duplicate(tmp_
         "101": [source(register, "Smith Road Landfill", values=[value("operator", "Council")])],
         "102": [source(register, "Jones Road Landfill", values=[value("operator", "Council")])],
     })
-    assert {row["status"] for row in rows(named)} == {AUTO_APPROVED}
+    assert {row["status"] for row in rows(named)} == {SME_REVIEW}
     assert rows(named, "possible_duplicates.csv") == []
     unnamed = arbitrate(tmp_path / "unnamed", council, {
         "101": [source(register, values=[value("operator", "Council")])],
@@ -408,7 +411,7 @@ def test_a_not_a_waste_facility_verdict_sends_its_whole_pair_to_an_sme(tmp_path)
     })
     found = {(row["site_id"], row["attribute_name"]): row for row in rows(run_dir)}
     assert found[("1", "facility_type")]["status"] == SME_REVIEW
-    assert found[("1", "operator")]["status_reason"] == f"Tier 1 source; it says the site is {NOT_A_WASTE_FACILITY}."
+    assert found[("1", "operator")]["status_reason"] == f"Tier 1 source, filling an empty field; it says the site is {NOT_A_WASTE_FACILITY}."
     assert found[("2", "facility_type")]["status"] == NOT_USED
     assert "this site was not offered it" in found[("2", "facility_type")]["status_reason"]
     assert found[("2", "operator")]["status"] == SME_REVIEW
@@ -437,7 +440,7 @@ def test_a_page_about_two_of_our_sites_is_two_pairs_each_loading_its_own_values(
         "102": [source(page, "Jones Road Landfill", "-41.0001, 175.0001", values=[value("opening_year", "1990")])],
     })
     found = {row["site_id"]: row for row in rows(run_dir)}
-    assert (found["101"]["attribute_name"], found["101"]["status"]) == ("operator", AUTO_APPROVED)
+    assert (found["101"]["attribute_name"], found["101"]["status"]) == ("operator", SME_REVIEW)
     assert (found["102"]["attribute_name"], found["102"]["status"]) == ("opening_year", SME_REVIEW)
     assert found["101"]["review_id"] != found["102"]["review_id"]
 
@@ -467,7 +470,7 @@ def test_a_page_described_twice_by_one_search_takes_its_best_tier(tmp_path):
         source(register, "Cowpen Bewley Landfill Site", values=[value("operator", "Augean")], source_type="Permit or registry"),
     ]})
     assert {(row["attribute_name"], row["source_tier"], row["status"]) for row in rows(found)} == {
-        ("operator", "Tier 1", AUTO_APPROVED), ("has_flare", "Tier 1", AUTO_APPROVED),
+        ("operator", "Tier 1", SME_REVIEW), ("has_flare", "Tier 1", SME_REVIEW),
     }
 
 
@@ -504,7 +507,7 @@ def test_a_yearly_baseline_is_ours_for_its_own_year_and_else_our_latest(tmp_path
     ]})
     found = {row["year"]: row for row in rows(run_dir)}
     assert (found["2016"]["status"], found["2016"]["status_reason"]) == (NOT_USED, "Confirms our value.")
-    assert found["2022"]["status"] == AUTO_APPROVED and found["2022"]["our_value"] == ""
+    assert found["2022"]["status"] == SME_REVIEW and found["2022"]["our_value"] == ""
     assert found["2022"]["status_reason"].endswith("our value, 1000000, is from 2016.")
     assert found["2010"]["status"] == NOT_USED and "Our value is for 2016" in found["2010"]["status_reason"]
 
@@ -601,9 +604,10 @@ def test_run_config_counts_the_pairs_and_values_by_status(tmp_path):
         "13414": [source("https://d.example", "Brady Road", "49.7590, -97.2010", values=[value("operator", "Winnipeg")])],
     })
     config = run_config(run_dir)
-    assert config["site_source_pairs"] == 3
-    assert config["pairs_auto_approved"] == "1 (2 values)"
-    assert config["pairs_sme_review"] == "2: Tier 3-5 1, more than 5 km away 1 (2 values)"
+    assert config["site_source_pairs"] == "3: Tier 1-2 2, Tier 3-5 1 (4 values)"
+    assert config["pairs_with_warnings"] == "1: more than 5 km away 1"
+    # The news report's facility_status isn't a key value.
+    assert config["values_to_check"] == 0
     assert config["values_not_used"] == "1: confirms our value 1"
 
 

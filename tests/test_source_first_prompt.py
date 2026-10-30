@@ -54,7 +54,7 @@ def test_the_contract_is_sources_first():
     ]
     assert list(source["values"][0]) == [
         "attribute_name", "value", "unit", "value_basis", "confidence_score", "value_date",
-        "evidence_summary", "search_terms_used", "quoted_evidence_short",
+        "evidence_summary", "search_terms_used", "quoted_evidence_short", "planned",
     ]
     assert "stated_location" not in prompt_for(THUNDER_BAY)
 
@@ -157,17 +157,24 @@ def test_the_search_cap_and_map_site_guidance_are_unchanged():
 
 def test_only_actual_figures_and_dates_are_asked_for():
     """In the 10-site tests most wrong values from the right facility were planned, permitted or
-    design figures read as actual - a licensed 217,000 t/yr at a site that never took waste, an
-    expected 2027 closure - and permit dates read as opening years."""
+    design figures read as actual - a licensed 217,000 t/yr at a site that never took waste - and
+    permit dates read as opening years."""
     prompt = " ".join(prompt_for(THUNDER_BAY).split())
     assert "Return only actual figures and dates" in prompt
     assert "a permitted capacity or annual limit is not waste received" in prompt
-    assert "Never return a future year" in prompt
     assert "A gas project's status may still be Planned or Under Construction" in prompt
     assert "closed or is expected to close" not in prompt
-    assert "Not a planned or expected closure" in prompt
     assert "Not the date of a permit or licence, or of a later stage, cell or extension opening" in prompt
     assert "not a permitted or licensed limit or a design capacity" in prompt
+
+
+def test_a_planned_closing_year_is_asked_for_and_marked():
+    """Hugh keeps expected closures such as Moose Jaw's 2028 (key-values plan): the agent returns
+    them marked planned, and SMEs check them from a Tier 3-5 source. No other future year."""
+    prompt = " ".join(prompt_for(THUNDER_BAY).split())
+    assert "Never return a future year, except a planned closing_year (planned = true)" in prompt
+    assert "return that year with planned = true; an actual closure is planned = false" in prompt
+    assert "Not a planned or expected closure" not in prompt
 
 def test_the_prompt_stays_compact():
     """About as long as the attribute-first prompt it replaced (16.5k characters for this site)."""

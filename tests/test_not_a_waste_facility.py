@@ -23,7 +23,7 @@ from datetime import date
 from openpyxl import load_workbook
 
 from waste_ai_search.arbitrate import extract_evidence
-from waste_ai_search.found_values import AUTO_APPROVED, SME_REVIEW, pick_values, sort_values
+from waste_ai_search.found_values import SME_REVIEW, pick_values, sort_values
 from waste_ai_search.prompt_builder import (
     build_site_prompt,
     needs_contradiction_check,
@@ -147,14 +147,16 @@ def test_even_a_tier_1_verdict_is_routed_to_review():
     row = row_for(found, "facility_type")
 
     assert row["status"] == SME_REVIEW
-    assert row["status_reason"] == f"Tier 1 source; it says the site is {NOT_A_WASTE_FACILITY}."
+    assert row["status_reason"] == f"Tier 1 source, filling an empty field; it says the site is {NOT_A_WASTE_FACILITY}."
 
 
-def test_an_ordinary_tier_1_facility_type_is_auto_approved():
-    """Reversed twice on purpose: this once auto-validated, then nothing was accepted automatically,
-    and now batch 1's rule is back. The verdict alone is an exception."""
+def test_an_ordinary_tier_1_facility_type_goes_to_an_sme_with_no_value_check():
+    """Reversed three times on purpose: this once auto-validated, then nothing was accepted
+    automatically, then batch 1's rule came back, and now an SME checks every source's match again
+    (key-values plan). A Tier 1 source's site type is trusted as read, so it has no value check."""
     found, _ = arbitrate(unconfirmed_site(), attribute("facility_type", "Dumpsite", [REGULATOR]))
-    assert row_for(found, "facility_type")["status"] == AUTO_APPROVED
+    row = row_for(found, "facility_type")
+    assert (row["status"], row["value_check"]) == (SME_REVIEW, "")
 
 
 # --- a low-tier contradiction -------------------------------------------------------------------

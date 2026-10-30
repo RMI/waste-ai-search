@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 
 from waste_ai_search.arbitrate import extract_evidence
-from waste_ai_search.found_values import AUTO_APPROVED, SME_REVIEW, sort_values
+from waste_ai_search.found_values import SME_REVIEW, sort_values
 from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
 from waste_ai_search.schema import (
     ATTRIBUTE_TO_STANDARD_COLUMN,
@@ -114,9 +114,10 @@ def test_a_found_operator_is_carried_into_the_next_pass_seed():
     assert "operator" not in requested_attributes(refreshed)
 
 
-def test_a_tier_1_operator_is_auto_approved_like_any_attribute():
-    """Reversed twice on purpose: a Tier 1-2 fill once auto-validated, then every found value was
-    reviewed, and now batch 1's rule is back (step 2 of the approve-sources plan)."""
+def test_a_tier_1_operator_goes_to_an_sme_like_any_attribute():
+    """Reversed three times on purpose: a Tier 1-2 fill once auto-validated, then every found value
+    was reviewed, then batch 1's rule came back (step 2 of the approve-sources plan), and now an SME
+    checks every source's match (key-values plan)."""
     regulator = dict(NEWS, source_type="Regulator", url="https://agency.example.gov/permit")
     _s, row = sort_operator("Lagos Waste Management Authority", [regulator])
-    assert row["status"] == AUTO_APPROVED
+    assert row["status"] == SME_REVIEW

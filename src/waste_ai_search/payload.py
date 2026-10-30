@@ -64,6 +64,8 @@ PART_SEPARATOR = "|"
 VALUE_FIELDS = [
     "attribute_name", "value", "unit", "value_basis", "confidence_score", "value_date",
     "evidence_summary", "search_terms_used", "quoted_evidence_short",
+    # Only a closing_year can be planned; responses before the key-values plan don't give it.
+    "planned",
 ]
 REQUIRED_VALUE_FIELDS = ["attribute_name", "value", "value_basis", "confidence_score"]
 # An attribute-first response's required fields, as validation reported them.

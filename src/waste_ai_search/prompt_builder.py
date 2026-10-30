@@ -106,10 +106,11 @@ ATTRIBUTE_GUIDANCE = {
         "or of a later stage, cell or extension opening."
     ),
     "closing_year": (
-        "Four-digit year the facility closed, meaning it stopped accepting waste. Not a planned or "
-        "expected closure. REQUIRED whenever the facility is closed or inactive - a closure date "
-        "almost always exists in news coverage, a council resolution, or a closure order. Search "
-        "for it specifically."
+        "Four-digit year the facility closed, meaning it stopped accepting waste. REQUIRED whenever "
+        "the facility is closed or inactive - a closure date almost always exists in news coverage, "
+        "a council resolution, or a closure order. Search for it specifically. If the facility is "
+        "still open and a source gives the year it is planned or expected to close, return that "
+        "year with planned = true; an actual closure is planned = false."
     ),
     "annual_incoming_waste_metric_tonnes": (
         "Waste actually accepted per year - not a permitted or licensed limit or a design "
@@ -482,6 +483,7 @@ Names:
                         "evidence_summary": "Short source-backed explanation",
                         "search_terms_used": "Search terms and languages used",
                         "quoted_evidence_short": "A short passage copied word for word from the source, in its own language",
+                        "planned": "true only for a closing_year the source gives as planned or expected; otherwise false",
                     }
                 ],
             }
@@ -584,8 +586,8 @@ Value requirements:
   does not, omit them rather than returning zeros.
 - Return only actual figures and dates: what the facility is, did or does. Leave out
   planned, proposed, permitted or licensed, design and projected numbers - a permitted
-  capacity or annual limit is not waste received, a design capacity is not waste in place,
-  and an expected closure is not a closing year. Never return a future year. If a source
+  capacity or annual limit is not waste received, and a design capacity is not waste in place.
+  Never return a future year, except a planned closing_year (planned = true). If a source
   gives only such a figure, leave the attribute out and mention the figure in
   evidence_summary. (A gas project's status may still be Planned or Under Construction.)
 - Label anything not directly stated by the source as value_basis = Inferred.

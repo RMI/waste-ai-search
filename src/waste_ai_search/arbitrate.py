@@ -51,6 +51,7 @@ from .locate import (
     stated_coordinates,
     states_location,
 )
+from .normalize_values import normalize_value
 from .on_page import PageChecker, describe_results
 from .payload import (
     citation_ids,
@@ -71,36 +72,18 @@ from .schema import (
     canonical_attribute,
     NOT_A_WASTE_FACILITY,
     ACCEPTED_VALUES_HEADERS,
-    ARRAY_TARGET_ATTRIBUTES,
-    ATTRIBUTE_RANGES,
-    BOOLEAN_TARGET_ATTRIBUTES,
-    ENUM_MAPS,
     FOUND_VALUES_HEADERS,
     IDENTITY_VALUES,
-    NUMERIC_TARGET_ATTRIBUTES,
     PARSE_WARNING_HEADERS,
     SOURCES_HEADERS,
     VALUE_ATTRIBUTES,
-    bucket_waste_depth,
     is_blank,
-    map_enum_value,
     normalize_scalar,
     parse_tristate_bool,
     validate_foundry_payload,
 )
 from .site_review import site_review_rows
-from .unit_converter import convert_attribute_value
 from .workbook_io import write_review_workbook
-
-
-def parse_float(value: Any) -> float | None:
-    text = normalize_scalar(value).replace(",", "")
-    if not text:
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return None
 
 
 # --- phase 2: arbitrate (pure, offline) -------------------------------------------------------
@@ -185,55 +168,9 @@ def extract_evidence(
         evidence_id, fallback_source_id = citation_ids(site_id, source_index, value_index, attribute)
         source_id = source_id_for(url, fallback=fallback_source_id)
 
-        conversion = convert_attribute_value(name, attribute.get("value"), attribute.get("unit"))
-        # A failed conversion returns the value untouched in its ORIGINAL unit. Using that would
-        # file an unconverted number in a column whose name asserts the canonical unit - e.g. an
-        # ambiguous "30000 tons" landing in waste_in_place_metric_tonnes, a 10% error if the
-        # source meant short tons. If we could not normalize it, it cannot be used.
-        conversion_failed = bool(conversion.warning)
-        if conversion.warning:
-            warnings.append(f"{name}: {conversion.warning}")
-
-        value: Any = conversion.value
-        mapping_note = ""
-        if name in BOOLEAN_TARGET_ATTRIBUTES:
-            parsed, note = parse_tristate_bool(value)
-            mapping_note = note
-            value = "" if parsed is None else ("TRUE" if parsed else "FALSE")
-        elif name == "waste_depth":
-            # Bin the CONVERTED metres, not the raw value: the source may have reported feet,
-            # and the 5m boundary is only meaningful once the unit conversion above has run. A
-            # failed conversion leaves conversion.value in its original unit, so skip binning
-            # entirely there and let the conversion warning exclude the row.
-            if conversion_failed:
-                value = ""
-            else:
-                mapped, mapping_note = bucket_waste_depth(conversion.value)
-                value = normalize_scalar(mapped or "")
-        elif name in ENUM_MAPS:
-            mapped, mapping_note = map_enum_value(name, attribute.get("value"))
-            value = normalize_scalar(mapped) if name in ARRAY_TARGET_ATTRIBUTES else normalize_scalar(mapped or "")
-        if mapping_note:
-            warnings.append(f"{name}: {mapping_note}")
-
-        # A numeric attribute whose value is not a number must never be used. The agent can return
-        # unit text or prose here, and it would otherwise land in a numeric spec column.
-        numeric_note = ""
-        if conversion_failed:
-            numeric_note = f"{name}: {conversion.warning}"
-        elif name in NUMERIC_TARGET_ATTRIBUTES and not is_blank(value):
-            parsed = parse_float(value)
-            if parsed is None:
-                numeric_note = f"{name} value {value!r} is not numeric; not used."
-            else:
-                low, high = ATTRIBUTE_RANGES.get(name, (None, None))
-                if (low is not None and parsed < low) or (high is not None and parsed > high):
-                    bounds = f"{low if low is not None else '-inf'} to {high if high is not None else 'inf'}"
-                    numeric_note = (
-                        f"{name} value {parsed:g} is outside the spec range {bounds}; not used."
-                    )
-            if numeric_note:
-                warnings.append(numeric_note)
+        normal = normalize_value(name, attribute.get("value"), attribute.get("unit"))
+        conversion, value, mapping_note, numeric_note = normal.conversion, normal.value, normal.mapping_note, normal.numeric_note
+        warnings.extend(normal.warnings)
 
         order += 1
         tier, rule = assign_source_tier(source, name)
@@ -292,6 +229,8 @@ def extract_evidence(
                 "tier_rule_applied": rule,
                 "evidence_summary": normalize_scalar(attribute.get("evidence_summary")),
                 "quoted_evidence_short": normalize_scalar(attribute.get("quoted_evidence_short")),
+                # A closing_year the source gives as planned or expected, not actual.
+                "planned": "TRUE" if name == "closing_year" and parse_tristate_bool(attribute.get("planned"))[0] else "",
                 "search_terms_used": normalize_scalar(attribute.get("search_terms_used")),
                 # Whether the value can be used at all: its status is decided in found_values.py.
                 "promotion_eligible": "FALSE" if exclusion else "TRUE",

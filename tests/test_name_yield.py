@@ -158,11 +158,12 @@ def test_a_run_with_found_values_is_measured_from_them(tmp_path):
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
     run = ny.load_run("run", ny.local_reader(run_dir))
-    assert [(row["site_id"], row["attribute_name"]) for row in run.review] == [("7", "operator")]
-    assert [(row["site_id"], row["attribute_name"]) for row in run.resolved] == [("7", "opening_year")]
+    # Nothing is approved automatically (key-values plan): both wait on an SME.
+    assert [(row["site_id"], row["attribute_name"]) for row in run.review] == [("7", "operator"), ("7", "opening_year")]
+    assert run.resolved == []
     [row] = ny.site_rows(run)
     assert row["site_id"] == "7"
-    assert (row["new_values_accepted"], row["new_values_to_review"], row["filed_under_another_site"]) == (1, 1, 0)
+    assert (row["new_values_accepted"], row["new_values_to_review"], row["filed_under_another_site"]) == (0, 2, 0)
     assert row["found_name"]
 
 

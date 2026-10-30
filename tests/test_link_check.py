@@ -418,7 +418,7 @@ def test_a_dead_source_is_listed_when_a_working_source_filled_the_attribute(tmp_
 
     import csv
     found = {r["source_url"]: r for r in csv.DictReader((run_dir / "found_values.csv").open())}
-    assert (found[alive]["value"], found[alive]["status"]) == ("Active", "auto-approved")  # the working source
+    assert (found[alive]["value"], found[alive]["status"]) == ("Active", "SME review")  # the working source
     assert (found[dead]["status"], found[dead]["status_reason"]) == ("not used", "Source link broken (404).")
 
 

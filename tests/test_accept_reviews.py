@@ -1,10 +1,12 @@
-"""accept-reviews loads what is approved: the auto-approved pairs, and those SMEs approve (accept_reviews.py).
+"""accept-reviews loads what SMEs approve: the pairs, and the key values under them (accept_reviews.py).
 
-Step 4 of the approve-sources plan. SMEs decide each site-source pair on the Site_Review tab: Correct
-site, Different site (with other_site_id), New site or Junk. accept-reviews reads the decisions back by
-review_id, applies them to found_values.csv's rows, picks one value per site, attribute and year where
-accepted values disagree, and writes accepted_values.csv for ingestion, found_values.csv's sme_decision
-and loaded, and the New site sources to new_facility_candidates.csv. It replaces collect-new-facilities,
+Step 4 of the approve-sources plan, as the key-values plan changed it. SMEs decide each site-source
+pair on the Site_Review tab: Correct site, Different site (with other_site_id), New site or Junk; and
+each key value of a Tier 3-5 pair on its own row: Correct, or Wrong with an optional corrected_value.
+accept-reviews reads the decisions back by review_id (and check, for a value row), applies them to
+found_values.csv's rows, picks one value per site, attribute and year where accepted values disagree,
+and writes accepted_values.csv for ingestion, found_values.csv's sme_decision, value_decision,
+corrected_value and loaded, and the New site sources to new_facility_candidates.csv. It replaces collect-new-facilities,
 which read "New facility - not in our database" rejections off the Review_Queue that Site_Review
 replaced (its tests, test_new_facilities.py, went with it).
 
@@ -29,6 +31,7 @@ from waste_ai_search.accept_reviews import (
     accept,
     accept_reviews,
     read_decisions,
+    read_value_decisions,
     reviewed_workbook,
 )
 from waste_ai_search.arbitrate import run_arbitration
@@ -81,14 +84,21 @@ def arbitrate(tmp_path, seeds, responses):
 
 def decide(run_dir, decisions):
     """Record decisions in the run's workbook as an SME would: `decisions` maps a source_url (and,
-    where a page is listed under two sites, its site_id) to the cells to fill in."""
+    where a page is listed under two sites, its site_id) to the cells to fill in on its source row,
+    and (source_url, check) to those on one of its value rows."""
     path = run_dir / "run_review.xlsx"
     book = load_workbook(path)
     ws = book["Site_Review"]
     column = {cell.value: cell.column for cell in ws[1]}
+    url_of = {}
     for row in range(2, ws.max_row + 1):
         url, site_id = ws.cell(row, column["source_url"]).value, ws.cell(row, column["site_id"]).value
-        cells = decisions.get((url, site_id), decisions.get(url))
+        review, check = ws.cell(row, column["review_id"]).value, ws.cell(row, column["check"]).value
+        if check:
+            cells = decisions.get((url_of.get(review), check))
+        else:
+            url_of[review] = url
+            cells = decisions.get((url, site_id), decisions.get(url))
         for name, typed in (cells or {}).items():
             ws.cell(row, column[name]).value = typed
     book.save(path)
@@ -120,45 +130,122 @@ NEWS = source("https://news.example/landfill", "Springfield Landfill",
 
 
 # --- each decision -------------------------------------------------------------------------------
-def test_an_auto_approved_pair_loads_and_a_pair_not_decided_yet_waits(tmp_path):
-    """accept-reviews can run before review is finished: what is auto-approved loads, approved by
-    "auto", and a pair for SME review with no decision loads nothing yet."""
+def test_nothing_loads_before_an_sme_decides_whatever_the_tier(tmp_path):
+    """accept-reviews can run before review is finished: a pair with no decision loads nothing yet,
+    a Tier 1 one included (key-values plan: nothing is approved automatically)."""
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [PERMIT, NEWS]})
     accept_reviews(run_dir, run_dir / "run_review.xlsx")
 
-    [row] = accepted(run_dir)
+    assert accepted(run_dir) == []
+    loaded = {r["attribute_name"]: (r["status"], r["value_check"], r["sme_decision"], r["loaded"]) for r in found(run_dir)}
+    assert loaded == {
+        # A Tier 1 source's site type is trusted as read; a Tier 3 source's closing year is checked.
+        "facility_type": (SME_REVIEW, "", "", ""),
+        "operator": (SME_REVIEW, "", "", ""),
+        "opening_year": (NOT_USED, "", "", ""),
+        "closing_year": (SME_REVIEW, "required", "", ""),
+    }
+
+
+def test_correct_site_loads_the_pairs_values_and_a_key_value_once_marked_correct(tmp_path):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [PERMIT, NEWS]})
+    decide(run_dir, {PERMIT["url"]: {"decision": CORRECT_SITE, **SME}, NEWS["url"]: {"decision": CORRECT_SITE, **SME}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+
+    [row, _operator] = accepted(run_dir)
     assert list(row) == ACCEPTED_VALUES_HEADERS
     assert (row["site_id"], row["site_name"], row["country_iso3"], row["attribute_name"], row["value"]) == (
         "13413", "Brady Road Resource Management Facility", "CAN", "facility_type", "Sanitary Landfill",
     )
+    # Excel keeps the typed date as a date and time; it is read back as the date.
     assert (row["source_url"], row["source_tier"], row["approved_by"], row["reviewed_date"], row["year"]) == (
-        "https://manitoba.example/permit", "Tier 1", "auto", "", "2024",
+        "https://manitoba.example/permit", "Tier 1", "A. Reviewer", "2026-11-02", "2024",
     )
-    loaded = {r["attribute_name"]: (r["status"], r["sme_decision"], r["loaded"]) for r in found(run_dir)}
-    assert loaded == {
-        "facility_type": (AUTO_APPROVED, "", "yes"),
-        "operator": (SME_REVIEW, "", ""),
-        "opening_year": (NOT_USED, "", ""),
-        "closing_year": (SME_REVIEW, "", ""),
-    }
+    # The closing year is a key value from a Tier 3 source: it waits on its own row.
+    assert {r["attribute_name"] for r in accepted(run_dir)} == {"facility_type", "operator"}
 
-
-def test_correct_site_loads_the_pairs_values_at_the_site_searched(tmp_path):
-    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [PERMIT, NEWS]})
-    decide(run_dir, {NEWS["url"]: {"decision": CORRECT_SITE, **SME}})
+    decide(run_dir, {(NEWS["url"], "closing_year"): {"decision": "correct"}})
     accept_reviews(run_dir, run_dir / "run_review.xlsx")
-
-    loads = {(r["site_id"], r["attribute_name"]): (r["value"], r["approved_by"], r["reviewed_date"]) for r in accepted(run_dir)}
-    assert loads == {
-        ("13413", "facility_type"): ("Sanitary Landfill", "auto", ""),
-        # Excel keeps the typed date as a date and time; it is read back as the date.
-        ("13413", "operator"): ("RM of Springfield", "A. Reviewer", "2026-11-02"),
-        ("13413", "closing_year"): ("2045", "A. Reviewer", "2026-11-02"),
-    }
-    news = [r for r in found(run_dir) if r["source_url"] == NEWS["url"]]
-    assert {r["sme_decision"] for r in news} == {CORRECT_SITE}
+    loads = {r["attribute_name"]: r["value"] for r in accepted(run_dir)}
+    assert loads == {"facility_type": "Sanitary Landfill", "operator": "RM of Springfield", "closing_year": "2045"}
+    news = {r["attribute_name"]: (r["sme_decision"], r["value_decision"], r["loaded"]) for r in found(run_dir) if r["source_url"] == NEWS["url"]}
     # 1960 would change our opening_year, 1973: only fills of empty fields load.
-    assert {r["attribute_name"]: r["loaded"] for r in news} == {"operator": "yes", "opening_year": "", "closing_year": "yes"}
+    assert news == {
+        "operator": (CORRECT_SITE, "", "yes"),
+        "opening_year": (CORRECT_SITE, "", ""),
+        "closing_year": (CORRECT_SITE, "Correct", "yes"),
+    }
+
+
+@pytest.mark.parametrize("cells, loads", [
+    # Wrong, with the right value typed in: that loads instead.
+    ({"decision": "Wrong", "corrected_value": 2041}, "2041"),
+    # A value typed with no decision says the found one is wrong.
+    ({"corrected_value": "2041"}, "2041"),
+    # Wrong alone loads nothing.
+    ({"decision": "Wrong"}, None),
+])
+def test_a_wrong_key_value_loads_the_smes_correction_if_they_give_one(tmp_path, cells, loads):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [NEWS]})
+    decide(run_dir, {NEWS["url"]: {"decision": CORRECT_SITE}, (NEWS["url"], "closing_year"): cells})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert {r["attribute_name"]: r["value"] for r in accepted(run_dir)}.get("closing_year") == loads
+    [closing] = [r for r in found(run_dir) if r["attribute_name"] == "closing_year"]
+    assert (closing["value"], closing["value_decision"], closing["corrected_value"]) == ("2045", "Wrong", str(cells.get("corrected_value", "")))
+
+
+@pytest.mark.parametrize("attribute, typed, says", [
+    ("closing_year", "soon", "corrected_value 'soon' can't be used: closing_year value 'soon' is not numeric"),
+    ("closing_year", "20410", "corrected_value '20410' can't be used: closing_year '20410' is not a year"),
+    ("facility_type", "Quarry", "corrected_value 'Quarry' can't be used"),
+    # 75 or 75% reads as 0.75, as the search's own values do; 150% is more than all of it.
+    ("gccs_collection_efficiency", "150%", "value 1.5 is outside the required 0-1 range."),
+])
+def test_a_corrected_value_that_isnt_a_valid_value_stops_it_naming_the_row(tmp_path, attribute, typed, says):
+    news = source("https://news.example/landfill", "Springfield Landfill", values=[
+        value("closing_year", "2045"), value("facility_type", "Sanitary Landfill"), value("has_landfill_gas_collection", "TRUE"),
+    ])
+    gas = source("https://news.example/gas", "Springfield Landfill", values=[value("gccs_collection_efficiency", "0.6")])
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [news, gas]})
+    decide(run_dir, {(url, attribute): {"decision": "Wrong", "corrected_value": typed} for url in (news["url"], gas["url"])})
+    with pytest.raises(ReviewError) as stopped:
+        accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert f"({attribute}): " in str(stopped.value) and says in str(stopped.value)
+    assert not (run_dir / ACCEPTED_VALUES_FILE).exists()
+
+
+def test_a_value_decision_under_a_rejected_or_undecided_source_is_said_and_loads_nothing(tmp_path, capsys):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [NEWS]})
+    decide(run_dir, {NEWS["url"]: {"decision": JUNK}, (NEWS["url"], "closing_year"): {"decision": "Correct", "corrected_value": "2041"}})
+    capsys.readouterr()
+    result = accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    out = capsys.readouterr().out
+    assert accepted(run_dir) == []
+    assert any("(closing_year): its source is Junk, so it loads nothing." in warning for warning in result.value_warnings)
+    assert any("it is marked Correct, so its corrected_value '2041' is ignored." in warning for warning in result.value_warnings)
+    assert "!! 2 thing(s) to check in value decisions:" in out
+
+
+def test_a_tier_3_key_value_with_no_row_of_its_own_doesnt_load_at_a_different_site(tmp_path):
+    """A value that confirms ours at the site searched gets no value row, so at the Different site,
+    where it would fill a field, nothing has checked it."""
+    site = {**BRADY, "facility_type": "Sanitary Landfill"}
+    news = source("https://news.example/landfill", "Springfield Landfill",
+                  values=[value("operator", "RM of Springfield"), value("facility_type", "Sanitary Landfill")])
+    run_dir = arbitrate(tmp_path, [site, NEARBY], {"13413": [news]})
+    decide(run_dir, {news["url"]: {"decision": DIFFERENT_SITE, "other_site_id": "900"}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert [(r["site_id"], r["attribute_name"]) for r in accepted(run_dir)] == [("900", "operator")]
+
+
+def test_value_decisions_are_read_by_review_id_and_check(tmp_path):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [NEWS]})
+    decide(run_dir, {(NEWS["url"], "closing_year"): {"decision": " WRONG ", "corrected_value": "2041"}})
+    [decision] = read_value_decisions(run_dir / "run_review.xlsx").values()
+    assert (decision.check, decision.attribute, decision.decision, decision.typed, decision.corrected) == (
+        "closing_year", "closing_year", "Wrong", "2041", "2041",
+    )
+    assert decision.review_id.startswith("WAIREV-13413-")
 
 
 def test_a_different_site_worth_a_second_look_is_applied_and_said(tmp_path, capsys):
@@ -300,9 +387,9 @@ def test_within_a_tier_the_newest_wins_then_the_value_most_sources_give():
 
 def test_a_yearly_attribute_loads_one_value_per_year():
     rows_in = [
-        found_row("a", "annual_incoming_waste_metric_tonnes", "1000", year="2022", value_date="2022"),
-        found_row("a", "annual_incoming_waste_metric_tonnes", "1200", year="2023", value_date="2023"),
-        found_row("b", "annual_incoming_waste_metric_tonnes", "1100", year="2023", value_date="2023-06"),
+        found_row("a", "waste_in_place_metric_tonnes", "1000", year="2022", value_date="2022"),
+        found_row("a", "waste_in_place_metric_tonnes", "1200", year="2023", value_date="2023"),
+        found_row("b", "waste_in_place_metric_tonnes", "1100", year="2023", value_date="2023-06"),
     ]
     assert picked(rows_in, correct("a", "b")) == ([("b", "1100"), ("a", "1000")], ["yes", "no", "yes"])
 
@@ -358,7 +445,7 @@ def test_accepting_again_writes_the_same_files(tmp_path):
 
 def test_a_decision_changed_since_is_applied_as_it_now_stands(tmp_path):
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [NEWS]})
-    workbook = decide(run_dir, {NEWS["url"]: {"decision": CORRECT_SITE}})
+    workbook = decide(run_dir, {NEWS["url"]: {"decision": CORRECT_SITE}, (NEWS["url"], "closing_year"): {"decision": "Correct"}})
     accept_reviews(run_dir, workbook)
     assert len(accepted(run_dir)) == 2
     decide(run_dir, {NEWS["url"]: {"decision": JUNK}})
@@ -434,14 +521,14 @@ def test_a_decision_on_a_pair_the_run_no_longer_has_is_reported_not_applied(tmp_
 
 # --- what stops it -------------------------------------------------------------------------------
 @pytest.mark.parametrize("cells, says", [
-    ({"decision": "Approve"}, "row 2 (WAIREV-13413-"),
+    ({"decision": "Approve"}, "row 3 (WAIREV-13413-"),
     ({"decision": "Approve"}, "'Approve' is not a decision. Pick one of Correct site, Different site, New site, Junk."),
     ({"decision": DIFFERENT_SITE}, "Different site needs the id of the site it is about in other_site_id."),
     ({"decision": DIFFERENT_SITE, "other_site_id": "12345"}, "other_site_id 12345 is not a site in the run's seed.csv."),
     ({"decision": DIFFERENT_SITE, "other_site_id": "13413"}, "other_site_id 13413 is this row's own site. Pick Correct site instead."),
     ({"decision": CORRECT_SITE, "other_site_id": "900"}, "only Different site takes one, and the decision is Correct site."),
     ({"other_site_id": "900"}, "only Different site takes one, and the decision is blank."),
-    ({"decision": CORRECT_SITE, "review_id": None}, "row 2: it is filled in but has no review_id"),
+    ({"decision": CORRECT_SITE, "review_id": None}, "row 3: it is filled in but has no review_id"),
 ])
 def test_a_decision_that_cant_be_read_back_stops_it_naming_the_row(tmp_path, cells, says):
     run_dir = arbitrate(tmp_path, [BRADY, NEARBY], {"13413": [PERMIT, NEWS]})
@@ -460,9 +547,9 @@ def test_two_rows_deciding_one_pair_two_ways_stop_it(tmp_path):
     book = load_workbook(path)
     ws = book["Site_Review"]
     ws.append([cell.value for cell in ws[2]])
-    ws.cell(3, [cell.value for cell in ws[1]].index("decision") + 1, JUNK)
+    ws.cell(ws.max_row, [cell.value for cell in ws[1]].index("decision") + 1, JUNK)
     book.save(path)
-    with pytest.raises(ReviewError, match="row 3 .*: row 2 decides the same pair Correct site, and this row Junk"):
+    with pytest.raises(ReviewError, match=f"row {ws.max_row} .*: row 2 decides the same pair Correct site, and this row Junk"):
         accept_reviews(run_dir, path)
 
 
@@ -486,8 +573,9 @@ def test_the_command_accepts_the_reviewed_workbook(tmp_path, capsys):
     assert main(args) == 0
     out = capsys.readouterr().out
     assert "Decisions read from" in out and "1 (Correct site 1)" in out
-    assert "Values to load: 3 for 1 site(s), 1 auto-approved and 2 approved by an SME" in out
-    assert len(accepted(run_dir)) == 3
+    assert "Key values decided: 0 (Correct 0, Wrong 0, 0 of them corrected); waiting under approved sources: 1" in out
+    assert "Values to load: 1 for 1 site(s), in accepted_values.csv" in out
+    assert len(accepted(run_dir)) == 1
 
 
 def test_the_command_removes_the_retired_outputs_a_pull_brings_back(tmp_path):
@@ -500,7 +588,7 @@ def test_the_command_removes_the_retired_outputs_a_pull_brings_back(tmp_path):
         (run_dir / name).write_text("pulled back from blob")
     assert main(["accept-reviews", "--run-id", "run", "--run-dir", str(run_dir), "--workbook", str(workbook), "--local"]) == 0
     assert not [name for name in retired if (run_dir / name).exists()]
-    assert len(accepted(run_dir)) == 2
+    assert len(accepted(run_dir)) == 1
 
 
 def test_the_command_says_why_it_stopped(tmp_path, capsys):

@@ -72,6 +72,19 @@ GAP_FILL_ATTRIBUTES = [
     "gccs_collection_efficiency",
 ]
 
+# The key values (key-values plan, docs/plans/2026-10-26-smes-check-key-values.md): from a Tier 3-5
+# source an SME checks each of these against the page, on its own Site_Review row, as well as the
+# source's match to our site. A Tier 1-2 source's values are trusted as read.
+VALUE_CHECKED_ATTRIBUTES = [
+    "facility_type",
+    "closing_year",
+    "annual_incoming_waste_metric_tonnes",
+    "area_square_meters",
+    "has_landfill_gas_collection",
+    "gccs_energy_project_type",
+    "gccs_collection_efficiency",
+]
+
 # Attributes that hold a value for each year, as consolidation keeps them: its
 # TIME_VARYING_ATTRIBUTE_COLUMNS, in RMI/waste_data_ingestion_pipeline's
 # facility_etl/consolidation/consolidation_techniques.py, less the columns this repository never
@@ -541,8 +554,14 @@ FOUND_VALUES_HEADERS = [
     # The agent's quote, and whether it, and the location the source states, are on the source's page
     # as the link check kept its text (on_page.py).
     "quote", "quote_on_page", "location_on_page", "agent_note", "value_basis", "agent_confidence",
-    # review_id is the site-source pair whose status this is; accept-reviews fills the last two.
-    "review_id", "status", "status_reason", "sme_decision", "loaded",
+    # planned is TRUE for a closing_year the source gives as planned or expected.
+    "planned",
+    # review_id is the site-source pair whose status this is. value_check is "required" for a key
+    # value from a Tier 3-5 pair, which an SME checks on its own row; accept-reviews fills the rest:
+    # the pair's decision, the value's (Correct or Wrong) and any value the SME typed instead, and
+    # whether it loads.
+    "review_id", "status", "status_reason", "value_check",
+    "sme_decision", "value_decision", "corrected_value", "loaded",
 ]
 
 # accepted_values.csv: the one value to load for each site, attribute and year (for a yearly
@@ -555,25 +574,29 @@ ACCEPTED_VALUES_HEADERS = [
     "source_url", "source_tier", "approved_by", "reviewed_date", "review_id",
 ]
 
-# The Site_Review tab: one row per site-source pair whose values wait on an SME (site_review.py).
+# The Site_Review tab (site_review.py): one row per site-source pair with values that would load,
+# and under a Tier 3-5 pair one row per key value an SME checks. Left to right as an SME reads a row.
 SITE_REVIEW_HEADERS = [
-    "review_id",
-    # Our site, as our database holds it; our_coordinates is "lat, lon" to paste into Google Maps.
+    # Our site, as our database holds it; our_coordinates is "lat, lon", linked to Google Maps.
     "site_id", *SITE_NAME_COLUMNS, "country_iso3", "our_coordinates",
-    # The source.
+    # The source. On a value row, source_url links to the page at the value's quote, and
+    # source_title says which value the row checks.
     "source_url", "source_title", "publisher", "source_tier", "link_status",
     # What the source says of the facility it describes, and where it places it, as found_values.csv
     # gives them: its address and coordinates as written, the point read from them, and why there is
     # none where a source states a location we couldn't place.
     "facility_name_in_source", "facility_name_english", "source_address", "stated_coordinates",
     "source_coordinates", "coordinates_from", "distance_km", "location_note",
-    # Why the pair needs a second look, and what approving it would load: "attribute = value (year)".
-    "flags", "would_load",
+    # Why the row needs a second look, and what approving it would load: "attribute = value (year)".
+    # On a value row, evidence is the quote, the value as written and the agent's note.
+    "flags", "would_load", "evidence",
     # The SME's.
-    "decision", "other_site_id", "reviewer", "reviewed_date", "notes",
+    "decision", "other_site_id", "corrected_value", "reviewer", "reviewed_date", "notes",
+    # What accept-reviews reads a row back by: the pair, and on a value row which value it checks.
+    "review_id", "check",
 ]
 # What an SME fills in on Site_Review; everything else there is set by the pipeline.
-SITE_REVIEW_EDITABLE = ["decision", "other_site_id", "reviewer", "reviewed_date", "notes"]
+SITE_REVIEW_EDITABLE = ["decision", "other_site_id", "corrected_value", "reviewer", "reviewed_date", "notes"]
 
 # Batch 1's resolved.csv, Review_Queue and Leads columns, as main wrote them before the
 # approve-sources plan. Nothing here writes those now (found_values.csv and Site_Review replace them),
@@ -671,6 +694,10 @@ DIFFERENT_SITE = "Different site"
 NEW_SITE = "New site"
 JUNK = "Junk"
 SITE_REVIEW_DECISIONS = [CORRECT_SITE, DIFFERENT_SITE, NEW_SITE, JUNK]
+# What an SME decides of a key value on its own Site_Review row: the page bears it out, or not.
+CORRECT = "Correct"
+WRONG = "Wrong"
+VALUE_DECISIONS = [CORRECT, WRONG]
 
 DEFINITION_VALUES = {
     "attribute_name": REQUESTABLE_ATTRIBUTES,
@@ -687,6 +714,8 @@ DEFINITION_VALUES = {
     "source_tier": ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Tier 5"],
     # What an SME decides of a site-source pair on the Site_Review tab.
     "decision": SITE_REVIEW_DECISIONS,
+    # What an SME decides of a key value on its own row there.
+    "value_decision": VALUE_DECISIONS,
     # Booleans as found values show them.
     "true_false": ["TRUE", "FALSE"],
 }

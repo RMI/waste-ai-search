@@ -1,20 +1,23 @@
-"""Sort every value the search found: auto-approved, SME review or not used.
+"""Sort every value the search found: SME review or not used.
 
-Step 2 of the approve-sources plan (docs/plans/2026-10-21-approve-sources-site-by-site.md). The
-agent returns only sources about the site searched, so every source is filed under that site, and
-what a person has to check is whether a source is about our site. So a value's status is decided
-for its site-source pair: the site searched, and the source, which is one exact page
-(payload.normalize_url) under one facility name, compared without case, accents or punctuation (a
-blank name is one name). A page with good data on three of our sites is three pairs, each decided
-on its own, and each loads only that site's values.
+Step 2 of the approve-sources plan (docs/plans/2026-10-21-approve-sources-site-by-site.md), as the
+key-values plan (docs/plans/2026-10-26-smes-check-key-values.md) changed it. The agent returns only
+sources about the site searched, so every source is filed under that site, and an SME checks whether
+each source is about our site. So a value's status is decided for its site-source pair: the site
+searched, and the source, which is one exact page (payload.normalize_url) under one facility name,
+compared without case, accents or punctuation (a blank name is one name). A page with good data on
+three of our sites is three pairs, each decided on its own, and each loads only that site's values.
 
 | Status | When |
 |---|---|
-| auto-approved | The value fills an empty field, and its pair's source is Tier 1-2 with none of the exceptions |
-| SME review | The value fills an empty field, and its pair's source is Tier 3-5 or one of the exceptions applies |
+| SME review | The value fills an empty field. It loads once an SME approves its pair |
 | not used | Anything else, and status_reason says which: it confirms our value, would change one we hold, its link is dead or missing, it could not be converted or mapped, or the agent itself marked it an excluded candidate |
 
-The exceptions, which send a Tier 1-2 pair to SMEs whatever its tier:
+Nothing is approved automatically. A Tier 1-2 pair's values are trusted as read, so they load with
+its match; a key value (schema.VALUE_CHECKED_ATTRIBUTES) from a Tier 3-5 pair is also checked by an
+SME on its own row, and value_check says so ("required").
+
+What once sent a Tier 1-2 pair to SMEs is now a warning on its row (Pair.exceptions):
 
 - the same page and facility name are cited for two or more of our sites (possible_duplicates.csv
   lists them);
@@ -30,7 +33,7 @@ listed, not loaded. A source's name and coordinates only check the match; they n
 
 found_values.csv has one row per site, year, source and attribute. It replaces evidence.csv,
 resolved.csv, review_queue.csv and supplementary_leads.csv. sme_decision and loaded are left blank
-for accept-reviews to fill.
+for accept-reviews to fill, with value_decision and corrected_value.
 """
 from __future__ import annotations
 
@@ -46,25 +49,30 @@ from .lists import citation_point, id_order, plain
 from .locate import coordinates_from, format_point, haversine_km, seed_point
 from .payload import normalize_url
 from .prompt_builder import needs_contradiction_check
-from .schema import NOT_A_WASTE_FACILITY, is_blank, normalize_scalar
+from .schema import NOT_A_WASTE_FACILITY, VALUE_CHECKED_ATTRIBUTES, is_blank, normalize_scalar
 
 
 FOUND_VALUES_FILE = "found_values.csv"
 
-AUTO_APPROVED = "auto-approved"
 SME_REVIEW = "SME review"
 NOT_USED = "not used"
-# The statuses whose values load once approved: automatically, or by an SME.
+# Written by runs arbitrated before the key-values plan, which approved Tier 1-2 fills automatically.
+# Nothing writes it now; reading an older found_values.csv still knows it.
+AUTO_APPROVED = "auto-approved"
+# The statuses whose values load once approved.
 LOADABLE = (AUTO_APPROVED, SME_REVIEW)
 
 # Tier 1 is a regulator, permit or operator; Tier 2 government statistics, peer-reviewed or
-# intergovernmental data. Their fills of empty fields are approved without review (decision 3).
-MAX_AUTO_APPROVED_TIER = TIER_2
+# intergovernmental data. Their values are trusted as read: they load with their pair's match, with
+# no value check (key-values plan, rule 3).
+MAX_TRUSTED_TIER = TIER_2
+# value_check for a key value from a Tier 3-5 pair: an SME checks it on its own Site_Review row.
+CHECK_REQUIRED = "required"
 # Batch 1's location check: a source placing the facility further than this from our coordinates
 # may be about another facility, so an SME looks, whatever its tier.
 EXCEPTION_KM = 5.0
 
-# Why a Tier 1-2 pair goes to an SME (decision 4), as Run_Config counts them.
+# The warnings a pair can carry, whatever its tier, as Run_Config counts them.
 SAME_PAGE = "same page and name as another site"
 FAR_AWAY = f"more than {EXCEPTION_KM:g} km away"
 SAYS_NOT_A_FACILITY = NOT_A_WASTE_FACILITY
@@ -79,8 +87,7 @@ UNUSABLE = "could not be converted or mapped"
 NOT_OFFERED = f"{NOT_A_WASTE_FACILITY} not offered"
 EXCLUDED_BY_AGENT = "excluded by the agent"
 UNVERIFIED = "the agent's unverified lead"
-COVERED = "an auto-approved source already gives it"
-NOT_USED_REASONS = [CONFIRMS, CHANGES, DEAD_LINK, NO_LINK, UNUSABLE, EXCLUDED_BY_AGENT, NOT_OFFERED, UNVERIFIED, COVERED]
+NOT_USED_REASONS = [CONFIRMS, CHANGES, DEAD_LINK, NO_LINK, UNUSABLE, EXCLUDED_BY_AGENT, NOT_OFFERED, UNVERIFIED]
 # How status_reason begins for a value not used only because of the value we hold at the site
 # searched. That says nothing of another site, so an SME's Different site weighs it again there
 # (accept_reviews.py).
@@ -188,15 +195,17 @@ class Pair:
         return found
 
     @property
-    def status(self) -> str:
-        """What the pair's fills of empty fields are."""
-        return AUTO_APPROVED if self.tier <= MAX_AUTO_APPROVED_TIER and not self.exceptions() else SME_REVIEW
+    def trusted(self) -> bool:
+        """Whether the pair's values are trusted as read: a Tier 1-2 source."""
+        return self.tier <= MAX_TRUSTED_TIER
+
+    def value_check(self, attribute: str) -> str:
+        """CHECK_REQUIRED for a key value of a Tier 3-5 pair, else blank."""
+        return CHECK_REQUIRED if attribute in VALUE_CHECKED_ATTRIBUTES and not self.trusted else ""
 
     def reason(self) -> str:
-        """Why the pair's fills have that status, in words."""
-        if self.status == AUTO_APPROVED:
-            return f"{tier_label(self.tier)} source, filling an empty field."
-        parts = [f"{tier_label(self.tier)} source"]
+        """Why the pair's fills go to an SME, in words: its tier, and its warnings."""
+        parts = [f"{tier_label(self.tier)} source, filling an empty field"]
         for exception in self.exceptions():
             if exception == SAME_PAGE:
                 others = ", ".join(self.shared_with)
@@ -286,7 +295,6 @@ def sort_values(
         site = sites_by_id.get(row["site_id"], {})
         found.append(found_row(row, pair_of[key], citation_of[key], site, run_year, order))
     rows = collapse(found)
-    skip_covered(rows)
     flag_closures(rows)
     return Sorted(rows, pairs, {key: [c for pair in group for c in pair.citations] for key, group in shared.items()})
 
@@ -301,6 +309,7 @@ def found_row(
     site_then, note = site_for_year(site, attribute, year)
     ours = baseline_for(site_then, attribute)
     status, reason, why = status_of(row, attribute, value, ours, pair, site)
+    check = pair.value_check(attribute) if status == SME_REVIEW else ""
     if note:
         reason = f"{reason} {note}"
     location = pair.location
@@ -342,10 +351,14 @@ def found_row(
         "agent_note": normalize_scalar(row.get("evidence_summary")),
         "value_basis": normalize_scalar(row.get("value_basis")),
         "agent_confidence": normalize_scalar(row.get("agent_confidence")),
+        "planned": normalize_scalar(row.get("planned")),
         "review_id": pair.review_id,
         "status": status,
         "status_reason": reason,
+        "value_check": check,
         "sme_decision": "",
+        "value_decision": "",
+        "corrected_value": "",
         "loaded": "",
         "_why": why,
         "_order": order,
@@ -375,7 +388,7 @@ def status_of(
         if comparable(ours, attribute) == comparable(value, attribute):
             return NOT_USED, CONFIRMS_TEXT, CONFIRMS
         return NOT_USED, f"{CHANGES_TEXT}, {ours}: only fills of empty fields load.", CHANGES
-    return pair.status, pair.reason(), ""
+    return SME_REVIEW, pair.reason(), ""
 
 
 def collapse(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -404,53 +417,14 @@ def collapse(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def skip_covered(rows: list[dict[str, Any]]) -> None:
-    """Mark not used a pair for review whose every value an auto-approved source of a better tier
-    already gives for the same site, attribute and year (a yearly attribute's year only), so no SME
-    is asked about it.
-
-    The pick (pick_values) puts tier first, so approving such a pair could load nothing. That is
-    every Tier 3-5 pair whose values a Tier 1-2 source gives; a Tier 1 source sent to review by an
-    exception can still beat an auto-approved Tier 2 value, so it is reviewed. So is a pair that
-    says the site is Not a Waste Facility: it contradicts the site rather than adding to it.
-    """
-    def key(row: dict[str, Any]) -> tuple[str, str, Any]:
-        return decision_key(normalize_scalar(row["site_id"]), row["attribute_name"], int(row["year"]))
-
-    def tier(row: dict[str, Any]) -> int:
-        return TIER_BY_LABEL.get(normalize_scalar(row.get("source_tier")), TIER_5)
-
-    best_given: dict[tuple[str, str, Any], int] = {}
-    for row in rows:
-        if row["status"] == AUTO_APPROVED:
-            best_given[key(row)] = min(best_given.get(key(row), TIER_5), tier(row))
-    by_pair: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        if row["status"] == SME_REVIEW:
-            by_pair.setdefault(row["review_id"], []).append(row)
-    for pair_rows in by_pair.values():
-        if any(row["attribute_name"] == "facility_type" and row["value"] == NOT_A_WASTE_FACILITY for row in pair_rows):
-            continue
-        if all(key(row) in best_given and best_given[key(row)] < tier(row) for row in pair_rows):
-            for row in pair_rows:
-                row.update(
-                    status=NOT_USED,
-                    status_reason=(
-                        "An auto-approved source of a better tier already gives this site, attribute and year, "
-                        "and so does one for every other value this source gives, so it isn't reviewed."
-                    ),
-                    _why=COVERED,
-                )
-
-
 def closures(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
     """What the run found of each site having closed: "facility_status = Inactive", or its
-    closing_year, from any source."""
+    closing_year, from any source. A planned closure says nothing of the site having closed."""
     closure: dict[str, list[str]] = {}
     for row in rows:
         if row["attribute_name"] == "facility_status" and row["value"] == "Inactive":
             closure.setdefault(row["site_id"], []).append("facility_status = Inactive")
-        elif row["attribute_name"] == "closing_year" and row["value"]:
+        elif row["attribute_name"] == "closing_year" and row["value"] and not row.get("planned"):
             closure.setdefault(row["site_id"], []).append(f"closing_year = {row['value']}")
     return {site_id: list(dict.fromkeys(reported)) for site_id, reported in closure.items()}
 
@@ -538,27 +512,22 @@ def pick_values(rows: list[dict[str, Any]], statuses: tuple[str, ...] = LOADABLE
 
 # --- what Run_Config says ------------------------------------------------------------------------
 def describe_sorting(rows: list[dict[str, Any]], pairs: list[Pair]) -> list[dict[str, Any]]:
-    """How the run's values and pairs were sorted, for Run_Config. A pair is counted by the status of
-    its values that would load; a pair none of whose values would load is not counted. A pair for
-    review is counted as Tier 3-5, or else by the exceptions that sent a Tier 1-2 source to review."""
-    loading = Counter((row["review_id"], row["status"]) for row in rows if row["status"] in LOADABLE)
-    auto = [pair for pair in pairs if (pair.review_id, AUTO_APPROVED) in loading]
-    review = [pair for pair in pairs if (pair.review_id, SME_REVIEW) in loading]
-    why_reviewed = Counter()
-    for pair in review:
-        if pair.tier > MAX_AUTO_APPROVED_TIER:
-            why_reviewed["Tier 3-5"] += 1
-        else:
-            why_reviewed.update(pair.exceptions())
+    """How the run's values and pairs were sorted, for Run_Config. A pair is counted where any of its
+    values would load; a pair none of whose values would load is not counted, nor listed."""
+    review_ids = {row["review_id"] for row in rows if row["status"] == SME_REVIEW}
+    review = [pair for pair in pairs if pair.review_id in review_ids]
+    tiers = Counter("Tier 1-2" if pair.trusted else "Tier 3-5" for pair in review)
+    warned = Counter(exception for pair in review for exception in pair.exceptions())
     statuses = Counter(row["status"] for row in rows)
+    checks = sum(1 for row in rows if row.get("value_check") == CHECK_REQUIRED)
     not_used = Counter(row["_why"] for row in rows if row["status"] == NOT_USED)
     return [
-        {"setting": "site_source_pairs", "value": len(auto) + len(review)},
-        {"setting": "pairs_auto_approved", "value": f"{len(auto)} ({statuses[AUTO_APPROVED]} values)"},
         {
-            "setting": "pairs_sme_review",
-            "value": f"{len(review)}{_breakdown(why_reviewed, ['Tier 3-5', *EXCEPTIONS])} ({statuses[SME_REVIEW]} values)",
+            "setting": "site_source_pairs",
+            "value": f"{len(review)}{_breakdown(tiers, ['Tier 1-2', 'Tier 3-5'])} ({statuses[SME_REVIEW]} values)",
         },
+        {"setting": "pairs_with_warnings", "value": f"{sum(1 for pair in review if pair.exceptions())}{_breakdown(warned, EXCEPTIONS)}"},
+        {"setting": "values_to_check", "value": checks},
         {"setting": "values_not_used", "value": f"{statuses[NOT_USED]}{_breakdown(not_used, NOT_USED_REASONS)}"},
     ]
 

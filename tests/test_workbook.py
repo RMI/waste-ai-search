@@ -1,7 +1,8 @@
 """The workbook is the only file an SME opens, so its affordances must match the instructions.
 
 Since step 3 of the approve-sources plan its worklist is the Site_Review tab: one row per site-source
-pair an SME decides, grouped by our site. It replaces the Review_Queue and Leads tabs, whose tests
+pair an SME decides, grouped by our site, and since the key-values plan, under a Tier 3-5 pair a row
+per key value an SME checks against the page. It replaces the Review_Queue and Leads tabs, whose tests
 (the validation_status, rejection_reason, corrected_value and corrected_site_id dropdowns, and the
 match column) went in step 2, and step 2's read-only Found_Values tab, whose rows are in
 found_values.csv. Which pairs are listed, and their flags, are tested in test_site_review.py.
@@ -11,15 +12,30 @@ import zipfile
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from waste_ai_search.schema import SITE_REVIEW_DECISIONS, SITE_REVIEW_EDITABLE, SITE_REVIEW_HEADERS
-from waste_ai_search.site_review import FAR_AWAY_FLAG
-from waste_ai_search.workbook_io import FLAG_FILL, write_review_workbook
+from waste_ai_search.schema import (
+    FACILITY_TYPE_ALLOWED,
+    JUNK,
+    SITE_REVIEW_DECISIONS,
+    SITE_REVIEW_EDITABLE,
+    SITE_REVIEW_HEADERS,
+    VALUE_DECISIONS,
+)
+from waste_ai_search.site_review import FAR_AWAY_FLAG, KIND, SOURCE_ROW, VALUE_ROW
+from waste_ai_search.workbook_io import FLAG_FILL, IGNORED_FILL, QUOTE_LINK_TEXT, VALUE_ROW_FILL, quote_link, write_review_workbook
 
 
 def review_row(site_id, url="https://a.example/permit", flags="", **extra):
     return {h: "" for h in SITE_REVIEW_HEADERS} | {
-        "review_id": f"WAIREV-{site_id}-{url}", "site_id": site_id,
+        KIND: SOURCE_ROW, "review_id": f"WAIREV-{site_id}-{url}", "site_id": site_id,
         "source_url": url, "flags": flags, "would_load": "operator = City", **extra,
+    }
+
+
+def value_row(source, attribute, quote="The landfill closed in 2008 after 30 years of service", **extra):
+    return {h: "" for h in SITE_REVIEW_HEADERS} | {
+        KIND: VALUE_ROW, "review_id": source["review_id"], "site_id": source["site_id"], "check": attribute,
+        "source_url": source["source_url"], "source_title": f"↳ check {attribute}", "quote": quote,
+        "_attribute": attribute, "would_load": f"{attribute} = 2008", **extra,
     }
 
 
@@ -49,24 +65,27 @@ def test_site_review_replaces_the_review_queue_the_leads_and_found_values(tmp_pa
     assert wb.sheetnames == ["ReadMe", "Run_Config", "Site_Review", "Parse_Warnings", "Definitions"]
     ws = wb["Site_Review"]
     assert [cell.value for cell in ws[1]] == SITE_REVIEW_HEADERS
-    assert [ws.cell(r, 2).value for r in range(2, ws.max_row + 1)] == ["900", "900", "13413"]
+    column = letters(ws)["site_id"]
+    assert [ws[f"{column}{r}"].value for r in range(2, ws.max_row + 1)] == ["900", "900", "13413"]
 
 
 def test_the_columns_go_from_our_site_to_the_source_to_the_smes_decision():
-    """Our site, then the source, what it says, the flags and what approving would load, and last
-    the five columns an SME fills in."""
-    assert SITE_REVIEW_HEADERS[0] == "review_id"
-    assert SITE_REVIEW_HEADERS[1:7] == ["site_id", "site_name", "original_site_name", "source_language", "country_iso3", "our_coordinates"]
+    """Our site, then the source, what it says, the flags, what approving would load and the evidence,
+    then the six columns an SME fills in, and last the two a decision is read back by."""
+    assert SITE_REVIEW_HEADERS[:6] == ["site_id", "site_name", "original_site_name", "source_language", "country_iso3", "our_coordinates"]
     for group in (
         ["source_url", "source_title", "publisher", "source_tier", "link_status"],
         # As the source writes them, then what we read from them, and why not where we couldn't.
         ["facility_name_in_source", "facility_name_english", "source_address", "stated_coordinates",
          "source_coordinates", "coordinates_from", "distance_km", "location_note"],
-        ["flags", "would_load"],
+        ["flags", "would_load", "evidence"],
     ):
         start = SITE_REVIEW_HEADERS.index(group[0])
         assert SITE_REVIEW_HEADERS[start:start + len(group)] == group
-    assert SITE_REVIEW_HEADERS[-5:] == SITE_REVIEW_EDITABLE == ["decision", "other_site_id", "reviewer", "reviewed_date", "notes"]
+    assert SITE_REVIEW_HEADERS[-8:-2] == SITE_REVIEW_EDITABLE == [
+        "decision", "other_site_id", "corrected_value", "reviewer", "reviewed_date", "notes",
+    ]
+    assert SITE_REVIEW_HEADERS[-2:] == ["review_id", "check"]
 
 
 def test_decision_is_the_only_dropdown_and_offers_the_four_decisions(tmp_path):
@@ -89,7 +108,7 @@ def test_decision_is_the_only_dropdown_and_offers_the_four_decisions(tmp_path):
 def test_the_readme_says_which_columns_an_sme_may_edit(tmp_path):
     wb, _ = build(tmp_path)
     readme = {row[0]: row for row in list(wb["ReadMe"].values)[1:]}
-    assert readme["Site_Review"][3] == "decision, other_site_id, reviewer, reviewed_date, notes - nothing else"
+    assert readme["Site_Review"][3] == "decision, other_site_id, corrected_value, reviewer, reviewed_date, notes - nothing else"
     assert {row[3] for name, row in readme.items() if name != "Site_Review"} == {"nothing"}
 
 
@@ -110,7 +129,7 @@ def test_a_flags_cell_with_a_flag_in_it_is_shaded(tmp_path):
     wb, _ = build(tmp_path)
     ws = wb["Site_Review"]
     flags = letters(ws)["flags"]
-    [(cells, [rule])] = [(str(ranges.sqref), ranges.rules) for ranges in ws.conditional_formatting]
+    [(cells, [rule])] = [(str(ranges.sqref), ranges.rules) for ranges in ws.conditional_formatting if "LEN" in ranges.rules[0].formula[0]]
     assert cells == f"{flags}2:{flags}4"
     assert rule.formula == [f"LEN(${flags}2)>0"]
     assert rule.dxf.fill.fgColor.rgb.endswith(FLAG_FILL)
@@ -157,9 +176,9 @@ def test_the_readme_walks_an_sme_through_a_row_keeping_our_site_and_the_source_a
     for words in ("our database", "the facility it describes", "where the source places the facility"):
         assert words in steps
     numbered = [line.split(".")[0] for line in steps.splitlines() if line[:1].isdigit()]
-    assert numbered == ["1", "2", "3", "4", "5", "6", "7"]
+    assert numbered == ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
     for column in ("our_coordinates", "source_url", "source_coordinates", "coordinates_from", "distance_km",
-                   "flags", "would_load", *SITE_REVIEW_EDITABLE):
+                   "flags", "would_load", "evidence", *SITE_REVIEW_EDITABLE):
         assert column in steps, column
     for decision in SITE_REVIEW_DECISIONS:
         assert f"- {decision}:" in steps
@@ -171,7 +190,7 @@ def test_the_readme_walks_an_sme_through_a_row_keeping_our_site_and_the_source_a
 
 def test_the_readme_says_what_each_status_means(tmp_path):
     purpose = {row[0]: row[1] for row in list(build(tmp_path)[0]["ReadMe"].values)[1:]}["(file) found_values.csv"]
-    for words in ("auto-approved", "SME review", "not used", "more than 5 km", "Not a Waste Facility", "review_id", "Site_Review"):
+    for words in ("SME review", "not used", "value_check", "review_id", "Site_Review", "corrected_value"):
         assert words in purpose
 
 
@@ -207,3 +226,74 @@ def test_an_smes_decisions_in_the_sharepoint_copy_survive_publishing_again(tmp_p
     ws = load_workbook(published)["Site_Review"]
     assert (ws[f"{letters(ws)['decision']}2"].value, ws[f"{letters(ws)['reviewer']}2"].value) == ("Correct site", "An SME")
     assert load_workbook(beside)["Site_Review"].max_row == 2
+
+
+# --- value rows ------------------------------------------------------------------------------------
+VALUE_ROWS = [
+    news := review_row("13413", url="https://news.example/landfill"),
+    value_row(news, "closing_year"),
+    value_row(news, "facility_type"),
+    review_row("13413", url="https://news.example/other.pdf"),
+]
+
+
+def test_a_value_row_is_shaded_folds_under_its_source_and_links_to_the_quote(tmp_path):
+    wb, _ = build(tmp_path, rows=VALUE_ROWS)
+    ws = wb["Site_Review"]
+    column = letters(ws)
+    assert [ws.row_dimensions[r].outlineLevel for r in range(2, 6)] == [0, 1, 1, 0]
+    assert ws.sheet_properties.outlinePr.summaryBelow is False
+    assert ws[f"{column['site_id']}3"].fill.fgColor.rgb.endswith(VALUE_ROW_FILL)
+    link = ws[f"{column['source_url']}3"]
+    assert link.value == QUOTE_LINK_TEXT
+    # A long quote is marked by its first and last four words.
+    assert link.hyperlink.target == "https://news.example/landfill#:~:text=The%20landfill%20closed%20in,30%20years%20of%20service"
+    # The source's own row keeps its plain link.
+    assert ws[f"{column['source_url']}2"].hyperlink.target == "https://news.example/landfill"
+
+
+def test_a_quote_link_marks_the_quote_and_falls_back_to_the_page():
+    assert quote_link("https://a.example/p", "A short - quote, & more") == "https://a.example/p#:~:text=A%20short%20%2D%20quote%2C%20%26%20more"
+    assert quote_link("https://a.example/p#top", "Closed 2008") == "https://a.example/p#top:~:text=Closed%202008"
+    # A PDF doesn't follow text fragments, and a link with no quote has nothing to mark.
+    assert quote_link("https://a.example/report.pdf", "Closed 2008") == "https://a.example/report.pdf"
+    assert quote_link("https://a.example/p", "") == "https://a.example/p"
+    assert quote_link("javascript:alert(1)", "x") is None
+
+
+def test_coordinates_open_google_maps(tmp_path):
+    rows = [review_row("13413", our_coordinates="49.7583, -97.2004", source_coordinates="49.759, -97.201")]
+    ws = build(tmp_path, rows=rows)[0]["Site_Review"]
+    column = letters(ws)
+    assert ws[f"{column['our_coordinates']}2"].hyperlink.target == "https://www.google.com/maps/search/?api=1&query=49.7583,-97.2004"
+    assert ws[f"{column['source_coordinates']}2"].hyperlink.target == "https://www.google.com/maps/search/?api=1&query=49.759,-97.201"
+
+
+def test_a_value_rows_decision_offers_correct_or_wrong_and_its_correction_the_attributes_values(tmp_path):
+    wb, _ = build(tmp_path, rows=VALUE_ROWS)
+    ws = wb["Site_Review"]
+    column = letters(ws)
+    defs = list(wb["Definitions"].values)
+    by_range = {str(v.sqref): v for v in ws.data_validations.dataValidation}
+    decision, corrected = column["decision"], column["corrected_value"]
+    assert set(by_range) == {f"{decision}2 {decision}5", f"{decision}3:{decision}4", f"{corrected}4"}
+
+    def listed(validation):
+        letter = validation.formula1.split("$")[1]
+        index = [cell for cell in defs[0]].index(wb["Definitions"][f"{letter}1"].value)
+        return [row[index] for row in defs[1:] if row[index]]
+
+    assert listed(by_range[f"{decision}2 {decision}5"]) == SITE_REVIEW_DECISIONS
+    assert listed(by_range[f"{decision}3:{decision}4"]) == VALUE_DECISIONS == ["Correct", "Wrong"]
+    # A closing year is typed; a site type is picked from its list.
+    assert listed(by_range[f"{corrected}4"]) == FACILITY_TYPE_ALLOWED
+
+
+def test_a_value_row_greys_out_once_its_source_is_junk_or_a_new_site(tmp_path):
+    ws = build(tmp_path, rows=VALUE_ROWS)[0]["Site_Review"]
+    column = letters(ws)
+    [grey] = [ranges.rules[0] for ranges in ws.conditional_formatting if "COUNTIFS" in ranges.rules[0].formula[0]]
+    formula = grey.formula[0]
+    assert formula.startswith(f'AND(${column["check"]}2<>"",')
+    assert f'"{JUNK}"' in formula and '"New site"' in formula
+    assert grey.dxf.fill.fgColor.rgb.endswith(IGNORED_FILL)

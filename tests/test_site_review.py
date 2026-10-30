@@ -1,9 +1,11 @@
-"""The Site_Review tab lists the site-source pairs an SME decides (site_review.py).
+"""The Site_Review tab lists the site-source pairs an SME decides, and under a Tier 3-5 pair the key
+values an SME checks (site_review.py).
 
-Step 3 of the approve-sources plan. What a person checks is whether a source is about our site, so
-the tab has one row per site-source pair whose values wait on an SME, grouped by our site with the
-flagged pairs first. Each row shows our site, the source, what it says of the facility it
-describes, the flags, and what approving it would load. The workbook's own affordances (columns,
+Step 3 of the approve-sources plan, as the key-values plan changed it. A person checks whether every
+source is about our site, so the tab has one source row per site-source pair with values that would
+load, grouped by our site with the flagged pairs first. Each shows our site, the source, what it says
+of the facility it describes, the flags, and what approving it would load. Under a Tier 3-5 pair, a
+value row per key value shows the value, the evidence and its flags. The workbook's own affordances (columns,
 dropdown, links, shading) are in test_workbook.py. These run end to end through run_arbitration
 where they can, on hand-built source-first responses.
 """
@@ -43,8 +45,8 @@ def source(url, name="", location="", values=(), source_type="Regulator", addres
     }
 
 
-def value(attribute, found, value_date="2024"):
-    return {"attribute_name": attribute, "value": found, "unit": "", "value_basis": "Direct",
+def value(attribute, found, value_date="2024", unit=""):
+    return {"attribute_name": attribute, "value": found, "unit": unit, "value_basis": "Direct",
             "confidence_score": "High", "value_date": value_date, "evidence_summary": "Says so.",
             "quoted_evidence_short": "It says so."}
 
@@ -62,11 +64,16 @@ def arbitrate(tmp_path, seeds, responses):
     return run_dir
 
 
-def site_review(run_dir):
+def all_rows(run_dir):
     ws = load_workbook(run_dir / "run_review.xlsx")["Site_Review"]
     header = [cell.value for cell in ws[1]]
     assert header == SITE_REVIEW_HEADERS
     return [{h: ("" if v is None else v) for h, v in zip(header, row)} for row in ws.iter_rows(min_row=2, values_only=True)]
+
+
+def site_review(run_dir):
+    """The source rows."""
+    return [row for row in all_rows(run_dir) if not row["check"]]
 
 
 def found_values(run_dir):
@@ -79,9 +86,10 @@ NEARBY = seed("900", "domestic landfill", 50.10, -97.20)
 
 
 # --- which pairs are listed ------------------------------------------------------------------------
-def test_only_pairs_waiting_on_an_sme_are_listed_one_row_each(tmp_path):
-    """An auto-approved pair isn't listed, nor a pair none of whose values would load; a pair giving
-    several values is one row, under the review_id its values have in found_values.csv."""
+def test_every_pair_with_values_that_would_load_is_listed_one_source_row_each(tmp_path):
+    """A Tier 1 pair is listed too (key-values plan); a pair none of whose values would load isn't; a
+    pair giving several values is one source row, under the review_id its values have in
+    found_values.csv."""
     site = {**BRADY, "facility_type": "Sanitary Landfill"}
     run_dir = arbitrate(tmp_path, [site], {"13413": [
         source("https://manitoba.example/permit", "Brady Road Landfill", values=[value("operator", "City of Winnipeg")]),
@@ -90,11 +98,50 @@ def test_only_pairs_waiting_on_an_sme_are_listed_one_row_each(tmp_path):
         # Tier 3, but it only confirms our facility type.
         source("https://blog.example/brady", "Brady Road", values=[value("facility_type", "Sanitary Landfill")], source_type="News report"),
     ]})
-    [row] = site_review(run_dir)
-    assert (row["source_url"], row["source_tier"]) == ("https://news.example/brady", "Tier 3")
+    listed = site_review(run_dir)
+    assert [(row["source_url"], row["source_tier"]) for row in listed] == [
+        ("https://manitoba.example/permit", "Tier 1"), ("https://news.example/brady", "Tier 3"),
+    ]
     waiting = {r["review_id"] for r in found_values(run_dir) if r["status"] == SME_REVIEW}
-    assert waiting == {row["review_id"]}
-    assert (row["decision"], row["other_site_id"], row["reviewer"], row["reviewed_date"], row["notes"]) == ("", "", "", "", "")
+    assert waiting == {row["review_id"] for row in listed}
+    assert {(row["decision"], row["other_site_id"], row["corrected_value"], row["reviewer"], row["reviewed_date"], row["notes"]) for row in listed} == {("", "", "", "", "", "")}
+
+
+def test_a_tier_3_to_5_pair_has_a_row_for_each_key_value_and_a_tier_1_2_pair_none(tmp_path):
+    """The key values of a Tier 3-5 source are checked against the page on rows of their own, under
+    it; a Tier 1-2 source's are trusted as read."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://manitoba.example/permit", "Brady Road Landfill", values=[value("closing_year", "2019"), value("operator", "City")]),
+        source("https://news.example/brady", "Brady Road", source_type="News report", values=[
+            value("operator", "City of Winnipeg"),
+            {**value("area_square_meters", "12", unit="ha"), "quoted_evidence_short": "The 12 ha site", "evidence_summary": "Footprint."},
+            {**value("closing_year", "2031"), "planned": True},
+            value("annual_incoming_waste_metric_tonnes", "400000", "2023", unit="t"),
+        ]),
+    ]})
+    rows = all_rows(run_dir)
+    assert [(row["source_url"], row["check"]) for row in rows] == [
+        ("https://manitoba.example/permit", ""),
+        ("https://news.example/brady", ""),
+        ("open the page at the quote", "closing_year"),
+        ("open the page at the quote", "annual_incoming_waste_metric_tonnes (2023)"),
+        ("open the page at the quote", "area_square_meters"),
+    ]
+    news, closing, incoming, area = rows[1:]
+    assert news["would_load"] == (
+        "operator = City of Winnipeg\nclosing_year = 2031 (check below)\n"
+        "annual_incoming_waste_metric_tonnes = 400000 (2023) (check below)\narea_square_meters = 120000 (check below)"
+    )
+    assert {row["review_id"] for row in (closing, incoming, area)} == {news["review_id"]}
+    assert (area["source_title"], area["would_load"], area["site_id"], area["site_name"]) == (
+        "↳ check area_square_meters", "area_square_meters = 120000", "13413", "",
+    )
+    assert area["evidence"] == "“The 12 ha site”\nAs written: 12 ha\nAgent: Footprint."
+    # The permit gives a closing year too: the better tier loads if both are approved.
+    assert closing["flags"] == (
+        "a planned closure, not an actual one: the source says the site is expected to close then\n"
+        "a Tier 1 source here gives closing_year = 2019; if both are approved, that one loads"
+    )
 
 
 def test_our_sites_come_in_id_order_with_flagged_pairs_first(tmp_path):
@@ -108,11 +155,12 @@ def test_our_sites_come_in_id_order_with_flagged_pairs_first(tmp_path):
         ],
         "900": [source("https://wiki.example/landfill", "Landfill", values=[value("opening_year", "1960")], source_type="Wiki or aggregator")],
     })
-    listed = [(row["site_id"], row["source_url"], row["flags"]) for row in site_review(run_dir)]
+    listed = [(row["site_id"], row["source_url"], row["flags"]) for row in all_rows(run_dir)]
     assert listed == [
         ("900", "https://wiki.example/landfill", ""),
         ("13413", "https://manitoba.example/permit", "more than 5 km from our site"),
         ("13413", "https://news.example/brady", ""),
+        ("13413", "open the page at the quote", ""),
     ]
 
 
@@ -135,7 +183,7 @@ def test_a_row_shows_our_site_the_source_and_where_the_source_places_the_facilit
     )
     assert row["location_note"] == ""
     assert row["flags"] == ""
-    assert row["would_load"] == "facility_status = Active (2023)\nclosing_year = 2045"
+    assert row["would_load"] == "facility_status = Active (2023)\nclosing_year = 2045 (check below)"
 
 
 def test_a_location_too_coarse_to_place_is_shown_as_written_with_why(tmp_path):
@@ -151,10 +199,10 @@ def test_a_location_too_coarse_to_place_is_shown_as_written_with_why(tmp_path):
     assert row["flags"] == "more than 5 km from our site"
 
 
-def test_a_value_an_auto_approved_source_contradicts_is_flagged_with_which_loads(tmp_path):
-    """One value loads per site, attribute and year, by tier first, and auto-approved pairs aren't on
-    the tab. Without the flag, an SME approving Hutt City Council as the operator would never learn a
-    Tier 1 page they never saw loads WM New Zealand instead."""
+def test_a_value_another_source_contradicts_is_flagged_with_which_loads(tmp_path):
+    """One value loads per site, attribute and year, by tier first. Without the flag, an SME approving
+    Hutt City Council as the operator might not notice that a Tier 1 page elsewhere on the tab loads WM
+    New Zealand instead."""
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
         source("https://manitoba.example/permit", "Brady Road Landfill", values=[value("operator", "City of Winnipeg"), value("opening_year", "1973")]),
         source("https://stats.example/table", "Brady Road", values=[value("facility_status", "Active", "2024")], source_type="Government statistics"),
@@ -165,9 +213,12 @@ def test_a_value_an_auto_approved_source_contradicts_is_flagged_with_which_loads
         source("https://manitoba.example/notice", "Brady Road", "49.8120, -97.2004", values=[value("facility_status", "Inactive", "2024")]),
     ]})
     flags = {row["source_url"]: row["flags"] for row in site_review(run_dir)}
-    assert flags["https://news.example/brady"] == "an auto-approved Tier 1 source gives operator = City of Winnipeg, which loads instead"
+    assert flags["https://news.example/brady"] == "a Tier 1 source here gives operator = City of Winnipeg; if both are approved, that one loads"
     assert flags["https://manitoba.example/notice"] == (
-        "more than 5 km from our site\napproving replaces an auto-approved Tier 2 source's facility_status = Active (2024)"
+        "more than 5 km from our site\na Tier 2 source here gives facility_status = Active (2024); if both are approved, this one loads"
+    )
+    assert flags["https://stats.example/table"] == (
+        "a Tier 1 source here gives facility_status = Inactive (2024); if both are approved, that one loads"
     )
 
 
@@ -221,8 +272,7 @@ def test_a_not_a_waste_facility_verdict_is_flagged_and_says_when_the_site_was_fo
         source("https://a.example", "Alpha Quarry", values=[value("facility_type", NOT_A_WASTE_FACILITY), value("operator", "Quarry Co")]),
         source("https://b.example", "Alpha", values=[value("closing_year", "1998")]),
     ]})
-    [row] = site_review(run_dir)
-    assert row["source_url"] == "https://a.example"
+    [row] = [row for row in site_review(run_dir) if row["source_url"] == "https://a.example"]
     assert row["flags"] == (
         f"says {NOT_A_WASTE_FACILITY}, but this run also found closing_year = 1998: is it a closed landfill "
         "misread as never a waste site?"

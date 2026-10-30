@@ -1,23 +1,30 @@
-"""Load what is approved: the auto-approved site-source pairs, and the pairs SMEs approve on Site_Review.
+"""Load what SMEs approve on Site_Review: the site-source pairs, and the key values under them.
 
-Step 4 of the approve-sources plan (docs/plans/2026-10-21-approve-sources-site-by-site.md). Every
-value the search found is in found_values.csv, under the site-source pair (review_id) its status was
-decided for. accept-reviews reads the SMEs' decisions back from the reviewed workbook's Site_Review
-tab, by review_id, and applies each to its pair's values:
+Step 4 of the approve-sources plan (docs/plans/2026-10-21-approve-sources-site-by-site.md), as the
+key-values plan (docs/plans/2026-10-26-smes-check-key-values.md) changed it. Every value the search
+found is in found_values.csv, under the site-source pair (review_id) its status was decided for.
+accept-reviews reads the SMEs' decisions back from the reviewed workbook's Site_Review tab: a source
+row's by review_id, and a value row's by review_id and check. Each source decision applies to its
+pair's values:
 
 | Decision | What loads |
 |---|---|
-| none, and the pair is auto-approved | Its values, at the site searched |
 | Correct site | Its values, at the site searched |
 | Different site, with other_site_id | Its values, at that site, where that site's fields are empty |
 | New site | Nothing. The source is listed in new_facility_candidates.csv, once |
 | Junk | Nothing |
-| none, and the pair is for SME review | Nothing yet |
+| none | Nothing yet |
 
-A pair's values are those that would load at the site searched, auto-approved or for SME review. A
-Different site also weighs again, at the other site, the values set aside only because they confirm
-or would change one we hold at the site searched, since that says nothing of the other site: the
-SME has said the source is about it. Only fills of empty fields load, there as anywhere.
+A key value of a Tier 3-5 pair (schema.VALUE_CHECKED_ATTRIBUTES) also needs its own row's decision:
+Correct loads it as found; Wrong with a corrected_value loads that instead; Wrong alone, or no
+decision, loads nothing. A corrected_value with no decision is read as Wrong. A Tier 1-2 pair's
+values are trusted as read.
+
+A pair's values are those that would load at the site searched. A Different site also weighs again,
+at the other site, the values set aside only because they confirm or would change one we hold at the
+site searched, since that says nothing of the other site: the SME has said the source is about it.
+A Tier 3-5 key value among those has no row of its own, so it doesn't load. Only fills of empty
+fields load, there as anywhere.
 
 Where the values accepted for one site, attribute and year (for a yearly attribute) disagree, one is
 picked (found_values.pick_values): the best tier, then the newest, then the value the most sources
@@ -39,11 +46,14 @@ from typing import Any
 
 from .arbitration import baseline_for, site_for_year
 from .costs import RUN_LOG_FILE
+from .arbitration import comparable, decision_key
+from .credibility import TIER_5, TIER_BY_LABEL
 from .found_values import (
     AUTO_APPROVED,
     EXCEPTION_KM,
     FOUND_VALUES_FILE,
     LOADABLE,
+    MAX_TRUSTED_TIER,
     SME_REVIEW,
     judged_on_our_value,
     pick_values,
@@ -51,28 +61,34 @@ from .found_values import (
 from .input_loader import SEED_NAME, load_sites, write_csv_records
 from .lists import FOUND_BY_SME, NEW_FACILITY_FILE, NEW_FACILITY_HEADERS, Site, SiteIndex, candidate_id, id_order, plain
 from .locate import haversine_km, seed_point, stated_location_text
+from .normalize_values import normalize_value
 from .payload import normalize_url
 from .prompt_builder import needs_contradiction_check
 from .schema import (
     ACCEPTED_VALUES_HEADERS,
+    CORRECT,
     CORRECT_SITE,
     DIFFERENT_SITE,
     FOUND_VALUES_HEADERS,
     GAP_FILL_ATTRIBUTES,
+    JUNK,
     NEW_SITE,
     NOT_A_WASTE_FACILITY,
     SITE_REVIEW_DECISIONS,
     SITE_REVIEW_EDITABLE,
+    VALUE_CHECKED_ATTRIBUTES,
+    VALUE_DECISIONS,
+    WRONG,
     is_blank,
     normalize_scalar,
 )
-from .site_review import SITE_REVIEW_SHEET, would_load
+from .site_review import SITE_REVIEW_SHEET, check_label, would_load
 
 
 ACCEPTED_VALUES_FILE = "accepted_values.csv"
 
-# accepted_values.csv's approved_by for a value from an auto-approved pair, and for an SME's
-# decision with no reviewer named.
+# accepted_values.csv's approved_by for a value from a pair auto-approved by a run arbitrated before
+# the key-values plan, and for an SME's decision with no reviewer named.
 AUTO = "auto"
 SME = "SME"
 # What found_values.csv's loaded says of a value accepted to load: written to accepted_values.csv,
@@ -82,8 +98,9 @@ NOT_LOADED = "no"
 # The status pick_values is asked to pick among: values accepted to load, wherever they load.
 ACCEPTED = "accepted"
 
-# The Site_Review columns read back: the pair, its site, and what the SME fills in.
-READ_COLUMNS = ["review_id", "site_id", *SITE_REVIEW_EDITABLE]
+# The Site_Review columns read back: the pair, which value a value row checks, its site, and what the
+# SME fills in.
+READ_COLUMNS = ["review_id", "check", "site_id", *SITE_REVIEW_EDITABLE]
 
 
 class ReviewError(ValueError):
@@ -187,6 +204,8 @@ def read_decisions(workbook: Path, site_ids: set[str]) -> dict[str, Decision]:
     decisions: dict[str, Decision] = {}
     problems: list[str] = []
     for number, record in read_site_review(workbook):
+        if record.get("check"):
+            continue  # a value row (read_value_decisions)
         review = record.get("review_id", "")
         typed, other = record.get("decision", ""), record.get("other_site_id", "")
         if not typed and not other:
@@ -230,6 +249,87 @@ def read_decisions(workbook: Path, site_ids: set[str]) -> dict[str, Decision]:
     return decisions
 
 
+@dataclass(frozen=True)
+class ValueDecision:
+    """An SME's decision on one key value, on its own Site_Review row under its pair."""
+
+    review_id: str
+    # Which value: check_label's "attribute" or "attribute (year)".
+    check: str
+    attribute: str
+    # Correct or Wrong.
+    decision: str
+    # What the SME typed in corrected_value, and what it comes to as our database holds it.
+    typed: str
+    corrected: str
+    row: int
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return self.review_id, self.check
+
+
+# The years a typed closing_year may be.
+YEARS = range(1800, 2101)
+
+
+def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]:
+    """The value rows' decisions on a reviewed workbook's Site_Review tab, by (review_id, check). A
+    row with neither a decision nor a corrected_value is left out: it isn't decided yet. A
+    corrected_value with no decision is read as Wrong, since a value typed instead says the found one
+    is wrong.
+
+    Raises ReviewError, naming every row at fault, where a decision isn't Correct or Wrong, or a
+    corrected_value isn't a value the attribute can take - converted, mapped and range-checked as the
+    search's own values are (normalize_values.py): not a number, a site type that isn't on the list,
+    an efficiency above 1, or a closing_year that isn't a year.
+    """
+    decisions: dict[tuple[str, str], ValueDecision] = {}
+    problems: list[str] = []
+    by_text = {_folded(decision): decision for decision in VALUE_DECISIONS}
+    for number, record in read_site_review(workbook):
+        check = record.get("check", "")
+        typed, corrected = record.get("decision", ""), record.get("corrected_value", "")
+        if not check or (not typed and not corrected):
+            continue
+        review = record.get("review_id", "")
+        attribute = check.split(" (", 1)[0]
+        where = f"{SITE_REVIEW_SHEET} row {number} ({check})"
+        decision = by_text.get(_folded(typed), "") if typed else WRONG
+        if not review:
+            problems.append(f"{where}: it is filled in but has no review_id, so it can't be matched to a value.")
+            continue
+        if not decision:
+            problems.append(f"{where}: {typed!r} is not a decision for a value. Pick {' or '.join(VALUE_DECISIONS)}.")
+            continue
+        value = ""
+        if corrected:
+            normal = normalize_value(attribute, corrected, "")
+            problem = "; ".join(normal.warnings) if not normal.usable else ""
+            if normal.usable and any("dropped" in warning for warning in normal.warnings):
+                problem = "; ".join(normal.warnings)
+            if normal.usable and attribute == "closing_year" and not (str(normal.value).isdigit() and int(normal.value) in YEARS):
+                problem = f"closing_year {corrected!r} is not a year"
+            if problem:
+                problems.append(f"{where}: corrected_value {corrected!r} can't be used: {problem.rstrip('.')}.")
+                continue
+            value = normalize_scalar(normal.value)
+        decisions[(review, check)] = ValueDecision(review, check, attribute, decision, corrected, value, number)
+    if problems:
+        raise ReviewError(
+            f"Some value decisions in {workbook} can't be read back. Correct these rows and run accept-reviews again:\n"
+            + "\n".join(f"  {problem}" for problem in problems)
+        )
+    return decisions
+
+
+def checked_value(row: dict[str, Any]) -> bool:
+    """Whether a found value is a key value from a Tier 3-5 pair, which loads only with an SME's
+    Correct, or corrected value, on its own row."""
+    tier = TIER_BY_LABEL.get(normalize_scalar(row.get("source_tier")), TIER_5)
+    return row.get("attribute_name") in VALUE_CHECKED_ATTRIBUTES and tier > MAX_TRUSTED_TIER and row.get("status") != AUTO_APPROVED
+
+
 # --- applying them -------------------------------------------------------------------------------
 @dataclass
 class Acceptance:
@@ -246,21 +346,34 @@ class Acceptance:
     undecided: int
     # Different site decisions applied that are worth a second look (other_site_warnings).
     warnings: list[str] = field(default_factory=list)
+    # Value rows' decisions on values found_values.csv doesn't have, as for `unmatched`.
+    unmatched_values: list[ValueDecision] = field(default_factory=list)
+    # Key values under an approved pair with no decision of their own yet.
+    undecided_values: int = 0
+    # Value decisions worth a second look (value_warnings).
+    value_warnings: list[str] = field(default_factory=list)
 
 
 def accept(
-    found: list[dict[str, Any]], decisions: dict[str, Decision], sites_by_id: dict[str, dict[str, Any]]
+    found: list[dict[str, Any]],
+    decisions: dict[str, Decision],
+    sites_by_id: dict[str, dict[str, Any]],
+    value_decisions: dict[tuple[str, str], ValueDecision] | None = None,
 ) -> Acceptance:
-    """Apply the decisions to found_values.csv's rows, filling in each row's sme_decision and loaded,
-    and pick the one value to load for each site, attribute and year. `found` is changed in place.
+    """Apply the decisions to found_values.csv's rows, filling in each row's sme_decision,
+    value_decision, corrected_value and loaded, and pick the one value to load for each site,
+    attribute and year. `found` is changed in place.
 
     loaded is "yes" for the value written to accepted_values.csv, "no" for a value accepted to load
     that lost to another, and blank for a value not accepted.
     """
+    value_decisions = value_decisions or {}
     pairs: dict[str, list[dict[str, Any]]] = {}
     accepted: list[dict[str, Any]] = []
+    matched: set[tuple[str, str]] = set()
+    undecided_values = 0
     for index, row in enumerate(found):
-        row["sme_decision"] = row["loaded"] = ""
+        row["sme_decision"] = row["loaded"] = row["value_decision"] = row["corrected_value"] = ""
         review = row.get("review_id", "")
         if not review:
             continue
@@ -268,9 +381,25 @@ def accept(
         decision = decisions.get(review)
         if decision is not None:
             row["sme_decision"] = decision.label
+        checked = checked_value(row)
+        # A key value has a row of its own only where it would load at the site searched.
+        on_its_row = value_decisions.get((review, check_label(row))) if checked and row["status"] in LOADABLE else None
+        if on_its_row is not None:
+            matched.add(on_its_row.key)
+            row["value_decision"], row["corrected_value"] = on_its_row.decision, on_its_row.typed
         loads_at = destination(row, decision, sites_by_id)
+        if loads_at and checked:
+            if on_its_row is None:
+                undecided_values += row["status"] in LOADABLE
+                loads_at = ""
+            elif on_its_row.decision == WRONG and not on_its_row.corrected:
+                loads_at = ""
         if loads_at:
-            accepted.append({**row, "site_id": loads_at, "status": ACCEPTED, "_found": index, "_decision": decision})
+            value = on_its_row.corrected if on_its_row is not None and on_its_row.decision == WRONG else row["value"]
+            accepted.append({
+                **row, "site_id": loads_at, "value": value, "status": ACCEPTED, "_found": index,
+                "_decision": decision, "_value_decision": on_its_row,
+            })
 
     picked = {id(row) for row in pick_values(accepted, statuses=(ACCEPTED,)).values()}
     values = []
@@ -291,7 +420,45 @@ def accept(
             1 for review, rows in pairs.items()
             if review not in decisions and any(row["status"] == SME_REVIEW for row in rows)
         ),
+        unmatched_values=[value for key, value in value_decisions.items() if key not in matched],
+        undecided_values=undecided_values,
+        value_warnings=value_warnings(value_decisions, matched, decisions, accepted),
     )
+
+
+def value_warnings(
+    value_decisions: dict[tuple[str, str], ValueDecision],
+    matched: set[tuple[str, str]],
+    decisions: dict[str, Decision],
+    accepted: list[dict[str, Any]],
+) -> list[str]:
+    """The value decisions worth a second look, though none stops accept-reviews: one under a source
+    that is Junk, New site or not decided, so it doesn't load (yet); a Correct with a corrected_value,
+    which is ignored; and two different values for one field both marked Correct, of which one loads."""
+    warnings = []
+    for value in sorted(value_decisions.values(), key=lambda value: value.row):
+        if value.key not in matched:
+            continue
+        where = f"{SITE_REVIEW_SHEET} row {value.row} ({value.check})"
+        pair = decisions.get(value.review_id)
+        if pair is None:
+            warnings.append(f"{where}: its source has no decision yet, so it loads nothing until it has one.")
+        elif pair.decision in (NEW_SITE, JUNK):
+            warnings.append(f"{where}: its source is {pair.decision}, so it loads nothing.")
+        if value.decision == CORRECT and value.typed:
+            warnings.append(f"{where}: it is marked Correct, so its corrected_value {value.typed!r} is ignored.")
+    by_field: dict[tuple[str, str, Any], list[dict[str, Any]]] = {}
+    for row in accepted:
+        if row["_value_decision"] is not None:
+            by_field.setdefault(decision_key(row["site_id"], row["attribute_name"], int(row["year"])), []).append(row)
+    for (site_id, attribute, _year), rows in by_field.items():
+        if len({comparable(row["value"], attribute) for row in rows}) > 1:
+            listed = ", ".join(f"row {row['_value_decision'].row} ({row['value']})" for row in rows)
+            warnings.append(
+                f"{SITE_REVIEW_SHEET}: different values for {attribute} at site {site_id} are all approved "
+                f"({listed}); the best tier, then the newest, loads."
+            )
+    return warnings
 
 
 def destination(row: dict[str, Any], decision: Decision | None, sites_by_id: dict[str, dict[str, Any]]) -> str:
@@ -506,16 +673,18 @@ def accept_reviews(run_dir: Path, workbook: Path) -> Acceptance:
     sites, _headers = load_sites(seed_path)
     sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
     decisions = read_decisions(workbook, set(sites_by_id))
+    value_decisions = read_value_decisions(workbook)
 
     with found_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         found = [dict(row) for row in reader]
         headers = list(reader.fieldnames or FOUND_VALUES_HEADERS)
-    acceptance = accept(found, decisions, sites_by_id)
+    acceptance = accept(found, decisions, sites_by_id, value_decisions)
     acceptance.warnings = other_site_warnings(decisions, found, sites_by_id, searched_sites(run_dir, found))
 
     write_csv_records(run_dir / ACCEPTED_VALUES_FILE, acceptance.values, ACCEPTED_VALUES_HEADERS)
-    write_csv_records(found_path, found, [*headers, *(h for h in ("sme_decision", "loaded") if h not in headers)])
+    written = ("sme_decision", "value_decision", "corrected_value", "loaded")
+    write_csv_records(found_path, found, [*headers, *(h for h in written if h not in headers)])
     added, listed = list_new_sites(run_dir, acceptance.new_sites, sites)
     print_acceptance(acceptance, decisions, found, Path(workbook), added, listed)
     return acceptance
@@ -547,12 +716,24 @@ def print_acceptance(
         )
         for warning in acceptance.warnings:
             print(f"  {warning}")
-    auto = sum(1 for row in acceptance.values if row["approved_by"] == AUTO)
-    sites = len({row["site_id"] for row in acceptance.values})
+    checked = Counter(row.get("value_decision") for row in found if row.get("value_decision"))
+    corrected = sum(1 for row in found if row.get("value_decision") == WRONG and row.get("corrected_value"))
     print(
-        f"Values to load: {len(acceptance.values)} for {sites} site(s), {auto} auto-approved and "
-        f"{len(acceptance.values) - auto} approved by an SME, in {ACCEPTED_VALUES_FILE}"
+        f"Key values decided: {sum(checked.values())} (Correct {checked[CORRECT]}, Wrong {checked[WRONG]}, "
+        f"{corrected} of them corrected); waiting under approved sources: {acceptance.undecided_values}"
     )
+    if acceptance.unmatched_values:
+        rows = ", ".join(str(value.row) for value in acceptance.unmatched_values)
+        print(
+            f"!! {len(acceptance.unmatched_values)} value decision(s) are on values {FOUND_VALUES_FILE} no "
+            f"longer has (Site_Review rows {rows}). They were not applied."
+        )
+    if acceptance.value_warnings:
+        print(f"!! {len(acceptance.value_warnings)} thing(s) to check in value decisions:")
+        for warning in acceptance.value_warnings:
+            print(f"  {warning}")
+    sites = len({row["site_id"] for row in acceptance.values})
+    print(f"Values to load: {len(acceptance.values)} for {sites} site(s), in {ACCEPTED_VALUES_FILE}")
     lost = sum(1 for row in found if row.get("loaded") == NOT_LOADED)
     if lost:
         print(f"Accepted values not loaded, as another was picked for the same site, attribute and year: {lost}")

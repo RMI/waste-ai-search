@@ -13,13 +13,24 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
 from .schema import (
+    BOOLEAN_TARGET_ATTRIBUTES,
     DEFINITION_VALUES,
     FIELD_TO_DEFINITION,
+    JUNK,
+    NEW_SITE,
     PARSE_WARNING_HEADERS,
     SITE_REVIEW_EDITABLE,
     SITE_REVIEW_HEADERS,
 )
-from .site_review import FAR_AWAY_FLAG, NOT_A_FACILITY_FLAG, SITE_REVIEW_SHEET
+from .site_review import (
+    CHECK_BELOW,
+    FAR_AWAY_FLAG,
+    KIND,
+    NOT_A_FACILITY_FLAG,
+    PLANNED_FLAG,
+    SITE_REVIEW_SHEET,
+    VALUE_ROW,
+)
 
 
 # Excel will not follow a hyperlink longer than this; the text stays, the link is not made.
@@ -90,6 +101,43 @@ def hyperlink_target(url: Any) -> str | None:
     return target if len(target) <= MAX_HYPERLINK_LENGTH else None
 
 
+# What a value row's source_url cell shows: its link opens the page at the value's quote.
+QUOTE_LINK_TEXT = "open the page at the quote"
+# A text fragment names the start and end of a long quote, so a quote the page wraps or spaces
+# differently in its middle is still found.
+FRAGMENT_WORDS = 4
+
+
+def quote_link(url: Any, passage: Any) -> str | None:
+    """A link that opens the page scrolled to the quote, highlighted: a text fragment
+    (#:~:text=start,end), which Chrome and Edge follow. A browser that doesn't, or a page the quote
+    isn't on, opens the page as usual. A PDF ignores it, so it gets the plain link."""
+    target = hyperlink_target(url)
+    words = str(passage or "").split()
+    if target is None or not words or urlsplit(target).path.lower().endswith(".pdf"):
+        return target
+
+    def part(text: str) -> str:
+        # "-", "," and "&" mean something in a text fragment, so they are escaped too.
+        return quote(text, safe="").replace("-", "%2D")
+
+    if len(words) <= 2 * FRAGMENT_WORDS:
+        fragment = part(" ".join(words))
+    else:
+        fragment = f"{part(' '.join(words[:FRAGMENT_WORDS]))},{part(' '.join(words[-FRAGMENT_WORDS:]))}"
+    base, _hash, existing = target.partition("#")
+    linked = f"{base}#{existing}:~:text={fragment}"
+    return linked if len(linked) <= MAX_HYPERLINK_LENGTH else target
+
+
+def map_link(point: Any) -> str | None:
+    """Google Maps at a "lat, lon" point."""
+    text = str(point or "").replace(" ", "")
+    if not text or text.count(",") != 1:
+        return None
+    return f"https://www.google.com/maps/search/?api=1&query={quote(text, safe=',.-')}"
+
+
 def style_sheet(ws) -> None:
     header_fill = PatternFill("solid", fgColor="1F4E78")
     for cell in ws[1]:
@@ -140,30 +188,32 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": SITE_REVIEW_SHEET,
         "purpose": (
-            "YOUR WORKLIST. Each row is a source the search found for one of our sites, whose values "
-            "would fill fields that are empty in our database for that site. The question for each row "
-            "is whether the source is about this site of ours. Rows are grouped by our site, with "
-            "flagged sources first. A Tier 1-2 source (a regulator, permit or operator; government "
-            "statistics, peer-reviewed or intergovernmental data) is approved without review and isn't "
-            "listed, unless the same page and name are cited for another site of ours, it places the "
-            "facility more than 5 km from ours, or it says the site is Not a Waste Facility. Your "
-            "decisions are read back from this tab."
+            "YOUR WORKLIST. Each source row is a web page the search found for one of our sites, whose "
+            "values would fill fields that are empty in our database for that site. The question for "
+            "each is whether the source is about this site of ours. Under a source of Tier 3-5 (news, "
+            "trade press, NGO reports, directories, blogs, or a page whose kind is unclear) come its "
+            "value rows (marked ↳): key values you also check against the page - site type, closure "
+            "year, incoming waste, area, gas collection, gas use and collection efficiency. A Tier 1-2 "
+            "source (a regulator, permit or operator; government statistics, peer-reviewed or "
+            "intergovernmental data) is trusted to have been read correctly, so it has no value rows. "
+            "Rows are grouped by our site, with flagged sources first. Your decisions are read back "
+            "from this tab."
         ),
         "sme_action": (
-            "Work top to bottom, one row at a time.\n"
+            "Work top to bottom. Click the - and + at the left of the sheet to fold value rows away or "
+            "open them.\n"
+            "FOR EACH SOURCE ROW:\n"
             "1. Our site: site_name is our database's name for it, machine-translated into English; "
-            "original_site_name is the same name before translation. Paste our_coordinates into Google "
-            "Maps to see where our database puts it.\n"
+            "original_site_name is the same name before translation. Click our_coordinates to see "
+            "where our database puts it on Google Maps.\n"
             "2. The source: open source_url. facility_name_in_source, source_address and "
             "stated_coordinates are the facility it describes, as the source writes them; "
             "facility_name_english is that name in English.\n"
-            "3. Paste source_coordinates, where the source places the facility, into Google Maps beside "
-            "our_coordinates. coordinates_from says what they come from: coordinates the source states, "
-            "a grid reference, or its address, placed on the building or only on the street (a street "
-            "point can be a kilometre or more off). distance_km is how far that is from our site. Where "
-            "source_coordinates is blank but the source states a location, location_note says why we "
-            "couldn't place it - too coarse, or its address and coordinates disagree - and distance_km, "
-            "if filled, is roughly how far it is.\n"
+            "3. Click source_coordinates to see where the source places the facility. coordinates_from "
+            "says what they come from: coordinates the source states, a grid reference, or its "
+            "address, placed on the building or only on the street (a street point can be a kilometre "
+            "or more off). distance_km is how far that is from our site. Where source_coordinates is "
+            "blank but the source states a location, location_note says why we couldn't place it.\n"
             "4. Read flags, shaded where there are any:\n"
             "- \"not found\" or \"only partly found on the page\": our automated check couldn't find "
             "the quote, or the address or coordinates, on the source's page. Look yourself: the check "
@@ -174,14 +224,12 @@ REVIEW_INSTRUCTIONS = [
             f"- \"{FAR_AWAY_FLAG}\": where the source places the facility, as in step 3.\n"
             f"- \"{NOT_A_FACILITY_FLAG}\": approving loads that verdict. Check the source says the "
             "site was never a waste site: a closed landfill still is one.\n"
-            "- \"an auto-approved source gives ..., which loads instead\": a source approved "
-            "automatically, which isn't on this tab, gives a different value for that field, and its "
-            "better tier wins, so approving this row won't load that line. \"approving replaces ...\" "
-            "is the other way round. If you think this row's value is right, say so in notes.\n"
+            "- \"a Tier N source here gives ...\": another source on this tab gives a different value "
+            "for the same field. One value loads per field, the best tier first; the flag says which "
+            "loads if both sources are approved.\n"
             "5. would_load is what approving loads for this site of ours: attribute = value, with the "
-            "year for a yearly attribute. One value loads per site, attribute and year, the best tier "
-            "first, so a line can lose to a better value approved for the same field; the flags say "
-            "where an auto-approved one would.\n"
+            f"year for a yearly attribute. A line marked {CHECK_BELOW} loads only once you mark its "
+            "value row Correct.\n"
             "6. Pick decision:\n"
             "- Correct site: the source is about this site of ours. Its values load here.\n"
             "- Different site: it is about another site of ours. Put that site's id in other_site_id, "
@@ -191,10 +239,23 @@ REVIEW_INSTRUCTIONS = [
             "- New site: it is about a landfill that isn't in our database. Nothing loads, and it is "
             "listed for ingestion as a new facility.\n"
             "- Junk: the source is no use - it isn't about one facility, or you can't tell which. "
-            "Nothing loads.\n"
+            "Nothing loads, and its value rows turn grey: skip them.\n"
+            "If a Tier 1-2 source misreads a value, say so in notes; its values still load.\n"
+            "FOR EACH VALUE ROW (↳) under a source that is Correct site or Different site:\n"
+            "7. would_load is the value; evidence is the quote from the page, the value as the page "
+            "writes it, and the search's note. source_url opens the page at the quote, highlighted "
+            "(Chrome and Edge; not PDFs).\n"
+            f"- \"{PLANNED_FLAG}\": the source gives a closure that hasn't happened yet. Mark it "
+            "Correct to keep it.\n"
+            "8. Pick decision: Correct if the page bears the value out, Wrong if not. If it is Wrong and "
+            "you know the right value, type it in corrected_value, in the unit would_load shows "
+            "(tonnes a year, square metres, a year, or a fraction from 0 to 1 for efficiency); site "
+            "type, gas collection and gas use offer a list. It loads instead. corrected_value is "
+            "optional: Wrong with it blank loads nothing.\n"
             "Nothing from a row loads while its decision is blank.\n"
-            "7. Put your name in reviewer, the date in reviewed_date, and anything worth knowing in "
+            "9. Put your name in reviewer, the date in reviewed_date, and anything worth knowing in "
             "notes.\n"
+            "Leave review_id and check as they are: your decisions are read back by them.\n"
             "An empty tab means nothing needs you."
         ),
         "editable": f"{', '.join(SITE_REVIEW_EDITABLE)} - nothing else",
@@ -204,15 +265,14 @@ REVIEW_INSTRUCTIONS = [
         "purpose": (
             "Every value the search found, one row per site, year, source and attribute. Every source "
             "is filed under the site that was searched, and status says what becomes of each value. "
-            "auto-approved: a Tier 1-2 source filling a field that is empty in our database. SME "
-            "review: a Tier 3-5 source filling an empty field, or a Tier 1-2 source with an exception - "
-            "the same page and facility name are cited for another of our sites, the source places the "
-            "facility more than 5 km from our site, or it says the site is Not a Waste Facility. These "
-            "load once the source is approved on Site_Review. not used: it confirms or would change a "
-            "value we hold, its link is dead, or it could not be converted or mapped. status_reason "
-            "says why. review_id names the site-source pair, as on Site_Review. Once your decisions "
-            "are read back, sme_decision gives the pair's decision, and loaded says whether the value "
-            "loads: yes, or no where another value was picked for the same site, attribute and year."
+            "SME review: it fills a field that is empty in our database, and loads once its source is "
+            "approved on Site_Review - a key value from a Tier 3-5 source (value_check required) only "
+            "once it is marked Correct too. not used: it confirms or would change a value we hold, its "
+            "link is dead, or it could not be converted or mapped. status_reason says why. review_id "
+            "names the site-source pair, as on Site_Review. Once your decisions are read back, "
+            "sme_decision gives the source's decision, value_decision and corrected_value a value "
+            "row's, and loaded says whether the value loads: yes, or no where another value was picked "
+            "for the same site, attribute and year."
         ),
         "sme_action": "Read only. Open it to see each value's quote, and why it has its status.",
         "editable": "nothing",
@@ -221,9 +281,9 @@ REVIEW_INSTRUCTIONS = [
         "tab_name": "(file) accepted_values.csv",
         "purpose": (
             "What loads into our database, once your decisions are read back: one value per site, "
-            "attribute and, for a yearly attribute, year, from the auto-approved sources and those you "
-            "approve. Where approved values disagree, the best tier wins, then the newest, then the "
-            "value most sources give. approved_by is auto, or the reviewer. For ingestion."
+            "attribute and, for a yearly attribute, year, from the sources you approve. Where approved "
+            "values disagree, the best tier wins, then the newest, then the value most sources give. "
+            "approved_by is the reviewer. For ingestion."
         ),
         "sme_action": "Read only.",
         "editable": "nothing",
@@ -277,6 +337,7 @@ def add_definitions(ws) -> None:
     """One column per vocabulary, used as the source for the dropdowns."""
     names = [
         "decision",
+        "value_decision",
         "source_tier",
         "facility_status",
         "facility_type",
@@ -298,47 +359,118 @@ def add_definitions(ws) -> None:
     style_sheet(ws)
 
 
-def add_validations(wb, ws) -> None:
-    """Attach dropdowns to the editable review columns only.
-
-    A dropdown on a pipeline-set column (tiers, flags) reads as an invitation to change it. Only a
-    listed choice is accepted, since a decision is read back as typed.
-    """
+def definition_range(wb, name: str) -> str:
+    """The Definitions cells listing one vocabulary, as a dropdown's source."""
     def_sheet = wb["Definitions"]
     columns = {def_sheet.cell(1, c).value: c for c in range(1, def_sheet.max_column + 1)}
+    letter = get_column_letter(columns[name])
+    return f"=Definitions!${letter}$2:${letter}${len(DEFINITION_VALUES[name]) + 1}"
+
+
+def dropdown(wb, name: str, header: str, strict: bool = True) -> DataValidation:
+    """A dropdown of one Definitions vocabulary. A strict one accepts only a listed choice, since a
+    decision is read back as typed."""
+    return DataValidation(
+        type="list", formula1=definition_range(wb, name), allow_blank=True, showDropDown=False,
+        showErrorMessage=strict, errorTitle=f"Pick a {header}",
+        error=f"Pick one of: {', '.join(DEFINITION_VALUES[name])}.",
+    )
+
+
+# The vocabulary a value row's corrected_value offers, by attribute. A list attribute (gas use) can
+# take several, so its dropdown also takes what is typed.
+CORRECTION_LISTS = {"facility_type": "facility_type", "gccs_energy_project_type": "gccs_energy_project_type"}
+LOOSE_LISTS = {"gccs_energy_project_type"}
+
+
+def add_validations(wb, ws, kinds: list[str] | None = None, attributes: list[str] | None = None) -> None:
+    """Attach dropdowns to the editable review columns only.
+
+    A dropdown on a pipeline-set column (tiers, flags) reads as an invitation to change it. On
+    Site_Review, `kinds` says what each data row is: a source row's decision offers the source
+    decisions, a value row's Correct or Wrong, and a value row's corrected_value the attribute's own
+    allowed values, by `attributes`.
+    """
     headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
     last_row = max(ws.max_row, 2)
+    if kinds is None:
+        for header, definition_name in FIELD_TO_DEFINITION.items():
+            if header in headers:
+                validation = dropdown(wb, definition_name, header)
+                ws.add_data_validation(validation)
+                target = get_column_letter(headers[header])
+                validation.add(f"{target}2:{target}{last_row}")
+        return
 
-    for header, definition_name in FIELD_TO_DEFINITION.items():
-        if header not in headers or definition_name not in columns:
-            continue
-        col = columns[definition_name]
-        letter = get_column_letter(col)
-        count = len(DEFINITION_VALUES[definition_name])
-        formula = f"=Definitions!${letter}$2:${letter}${count + 1}"
-        validation = DataValidation(
-            type="list", formula1=formula, allow_blank=True, showDropDown=False, showErrorMessage=True,
-            errorTitle=f"Pick a {header}", error=f"Pick one of: {', '.join(DEFINITION_VALUES[definition_name])}.",
-        )
+    decision = get_column_letter(headers["decision"])
+    corrected = get_column_letter(headers["corrected_value"])
+    by_list: dict[tuple[str, str], list[str]] = {}
+    for offset, kind in enumerate(kinds):
+        row = offset + 2
+        if kind == VALUE_ROW:
+            by_list.setdefault(("value_decision", "decision"), []).append(f"{decision}{row}")
+            attribute = (attributes or [])[offset]
+            name = CORRECTION_LISTS.get(attribute) or ("true_false" if attribute in BOOLEAN_TARGET_ATTRIBUTES else "")
+            if name:
+                by_list.setdefault((name, "corrected_value"), []).append(f"{corrected}{row}")
+        else:
+            by_list.setdefault(("decision", "decision"), []).append(f"{decision}{row}")
+    for (name, header), cells in by_list.items():
+        validation = dropdown(wb, name, header, strict=name not in LOOSE_LISTS)
         ws.add_data_validation(validation)
-        target = get_column_letter(headers[header])
-        validation.add(f"{target}2:{target}{last_row}")
+        for cell_range in runs(cells):
+            validation.add(cell_range)
 
 
-# A flags cell with anything in it: a reason to look at the pair twice.
+def runs(cells: list[str]) -> list[str]:
+    """Cells of one column, in row order, as ranges of consecutive rows: ["W2", "W3", "W5"] is
+    ["W2:W3", "W5"]."""
+    found: list[list[tuple[str, int]]] = []
+    for cell in cells:
+        column, row = cell.rstrip("0123456789"), int(cell[len(cell.rstrip("0123456789")):])
+        if found and found[-1][-1] == (column, row - 1):
+            found[-1].append((column, row))
+        else:
+            found.append([(column, row)])
+    return [f"{run[0][0]}{run[0][1]}" + (f":{run[-1][0]}{run[-1][1]}" if len(run) > 1 else "") for run in found]
+
+
+# A flags cell with anything in it: a reason to look at the row twice.
 FLAG_FILL = "F8CBAD"
+# A value row: pale, so it reads as part of the source above it.
+VALUE_ROW_FILL = "EEF3F8"
+# A value row whose source is Junk or New site: nothing on it loads.
+IGNORED_FONT = "A6A6A6"
+IGNORED_FILL = "EDEDED"
 # The rule drawn above the first pair of each of our sites, so a site's pairs read as one group.
 SITE_RULE = Border(top=Side(style="medium", color="1F4E78"))
 
 
 def add_conditionals(ws) -> None:
-    """Shade a flags cell that has a flag in it."""
+    """Shade a flags cell that has a flag in it, and grey out a value row once its source is marked
+    Junk or New site."""
     headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
     if "flags" not in headers:
         return
+    last = max(ws.max_row, 2)
+    # The grey comes first, so a value row nobody needs to check loses its flag shading too.
+    if {"review_id", "check", "decision"} <= set(headers):
+        review, check, decision = (get_column_letter(headers[name]) for name in ("review_id", "check", "decision"))
+        source_decided = (
+            f'COUNTIFS(${review}$2:${review}${last},${review}2,${check}$2:${check}${last},"",'
+            f'${decision}$2:${decision}${last},"{{}}")'
+        )
+        ignored = f'AND(${check}2<>"",{source_decided.format(JUNK)}+{source_decided.format(NEW_SITE)}>0)'
+        ws.conditional_formatting.add(
+            f"A2:{get_column_letter(ws.max_column)}{last}",
+            FormulaRule(
+                formula=[ignored], stopIfTrue=True,
+                font=Font(color=IGNORED_FONT), fill=PatternFill("solid", fgColor=IGNORED_FILL),
+            ),
+        )
     letter = get_column_letter(headers["flags"])
     ws.conditional_formatting.add(
-        f"{letter}2:{letter}{max(ws.max_row, 2)}",
+        f"{letter}2:{letter}{last}",
         FormulaRule(formula=[f'LEN(${letter}2)>0'], fill=PatternFill("solid", fgColor=FLAG_FILL)),
     )
 
@@ -357,6 +489,37 @@ def mark_sites(ws) -> None:
         previous = site_id
 
 
+def lay_out_site_review(ws, records: list[dict[str, Any]]) -> None:
+    """Site_Review's own layout: our site's id and name stay in view; a value row is shaded, folds
+    under its source, and links to the page at its quote; coordinates link to Google Maps."""
+    headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
+    ws.freeze_panes = "C2"
+    ws.sheet_properties.outlinePr.summaryBelow = False
+    fill = PatternFill("solid", fgColor=VALUE_ROW_FILL)
+    for offset, record in enumerate(records):
+        row = offset + 2
+        for header in ("our_coordinates", "source_coordinates"):
+            cell = ws.cell(row, headers[header])
+            target = map_link(cell.value)
+            if target:
+                cell.hyperlink = target
+                cell.style = "Hyperlink"
+        if record.get(KIND) != VALUE_ROW:
+            continue
+        ws.row_dimensions[row].outlineLevel = 1
+        for c in range(1, ws.max_column + 1):
+            ws.cell(row, c).fill = fill
+        title = ws.cell(row, headers["source_title"])
+        title.alignment = Alignment(vertical="top", wrap_text=True, indent=1)
+        link = ws.cell(row, headers["source_url"])
+        target = quote_link(record.get("source_url"), record.get("quote"))
+        link.value = QUOTE_LINK_TEXT if target else link.value
+        if target:
+            link.hyperlink = target
+            link.style = "Hyperlink"
+            link.fill = fill
+
+
 def write_review_workbook(
     path: Path,
     *,
@@ -364,7 +527,8 @@ def write_review_workbook(
     site_review: list[dict[str, Any]],
     parse_warnings: list[dict[str, Any]],
 ) -> Path:
-    """The SME-facing artifact: the site-source pairs an SME decides (site_review.py). Every value
+    """The SME-facing artifact: the site-source pairs an SME decides, and the key values under them
+    (site_review.py). Every value
     found, the sources and the lists for ingestion stay CSV sidecars: nothing in them requires a
     decision.
     """
@@ -386,9 +550,14 @@ def write_review_workbook(
     ws_defs = wb.create_sheet("Definitions")
     add_definitions(ws_defs)
 
-    add_validations(wb, ws_review)
+    add_validations(
+        wb, ws_review,
+        kinds=[record.get(KIND, "") for record in site_review],
+        attributes=[record.get("_attribute", "") for record in site_review],
+    )
     add_conditionals(ws_review)
     mark_sites(ws_review)
+    lay_out_site_review(ws_review, site_review)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
