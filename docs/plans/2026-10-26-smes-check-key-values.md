@@ -214,9 +214,12 @@ What it showed:
   got a Tier 1 state congress page about Tlapa de Comonfort's dump; Tlapa is about 60 km from our
   point. The
   agent called it "consistent with the site context area". Under the 21 October plan it would have
-  loaded unseen; here an SME sees it, but with no distance to go on. 417 of Mexico's 2,220 sites are
-  named just "BASURERO MUNICIPAL", and the unsearchable-name filter keeps them (it reads only
-  English generic names).
+  loaded unseen; here an SME sees it, but with no distance to go on. The test named its sites, so
+  it searched this one, but a batch run skips generic names (20 October). Even so, that skip knew
+  only English words, and would have searched all 417 of Mexico's sites named just "BASURERO
+  MUNICIPAL". Since 30 October it knows Spanish words too, as well as English words that only
+  describe a kind of site ("Municipal Landfill", "Open-Air Dump"), so batch 3 skips 667 of its 2,220
+  sites, not 8.
 - **Two of the four small sites found nothing.**
 
 ## Open questions

@@ -45,6 +45,8 @@ SKIPPED_SITES_FILE = "skipped_sites.csv"
 SKIPPED_SITES_HEADERS = ["site_id", "site_name", "original_site_name", "country_iso3", "name_class", "reason"]
 
 PLACEHOLDER_NAMES = {"openstreetmap landfill"}
+# A name that says the site has none, as 4 Mexican sites are named.
+NO_NAME_PHRASES = {"no name", "noname", "unnamed", "sin nombre"}
 # Text from OSM's fixme-style tags, e.g. "update the tag landuse after survey".
 SURVEY_NOTE_PHRASES = ("update the tag", "after survey", "fixme")
 URL = re.compile(r"(https?://|www\.)", re.IGNORECASE)
@@ -69,19 +71,22 @@ def name_reason(name: Any, original_name: Any = "") -> tuple[str, str]:
     it differs. The mining check reads both. Where the English name is empty or filler, a source
     spelling that is itself named keeps the site named: the translation lost a name the source
     recorded, and the agent searches that spelling first. The generic check reads only the English
-    name: it knows only English words, so it would pass a generic original such as `Полигон ТБО`
-    ("MSW landfill") as named.
+    name: it knows only English and Spanish words, so it would pass a generic original such as
+    `Полигон ТБО` ("MSW landfill") as named.
     """
     text = normalize_scalar(name)
     lowered = text.casefold()
-    if not text or lowered in PLACEHOLDER_NAMES:
+    if not text or lowered in PLACEHOLDER_NAMES or lowered in NO_NAME_PHRASES:
         original = normalize_scalar(original_name)
-        if original and name_class(original, original) == NAMED:
+        # The original is checked as a name of its own; one the same as the name adds nothing.
+        if original and original.casefold() != lowered and name_class(original, original) == NAMED:
             return NAMED, ""
     if not text:
         return NO_NAME, "empty name"
     if lowered in PLACEHOLDER_NAMES:
         return NO_NAME, "ingestion's filler for an unnamed OSM polygon"
+    if lowered in NO_NAME_PHRASES:
+        return NO_NAME, "says it has no name"
     if URL.search(text):
         return NOT_A_NAME, "a URL"
     if NUMBER.match(text):
@@ -95,7 +100,7 @@ def name_reason(name: Any, original_name: Any = "") -> tuple[str, str]:
     if is_generic_site_name(text):
         if text.lower().strip() in GENERIC_EXACT_NAMES:
             return GENERIC, "a listed generic phrase"
-        return GENERIC, "only words like landfill, dump, waste, garbage, rubbish, tip"
+        return GENERIC, "only words for a kind of site, such as landfill, dump, basurero, relleno sanitario, municipal"
     return NAMED, ""
 
 

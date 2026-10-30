@@ -165,6 +165,42 @@ def test_initials_and_route_codes_count_as_a_name(name, expected):
 
 
 @pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        # Mexico (batch 3) names most of its sites in Spanish; 417 are just "Basurero Municipal".
+        ("BASURERO MUNICIPAL", GENERIC),
+        ("Basurero Municpal", GENERIC),
+        ("Relleno Sanitario Intermunicipal Tipo D", GENERIC),
+        ("Tiradero Municipal a Cielo Abierto", GENERIC),
+        ("Sitio Controlado de Disposicion Final de Residuos Solidos Urbanos", GENERIC),
+        ("Tiradero sin nombre", GENERIC),
+        ("El Basurero", GENERIC),
+        # Words that only say what kind of site it is, in English.
+        ("Municipal Landfill", GENERIC),
+        ("Sanitary Landfill", GENERIC),
+        ("Controlled Landfill", GENERIC),
+        ("Open-Air Dump", GENERIC),
+        ("Final Disposal Site", GENERIC),
+        ("Unnamed open-air dump", GENERIC),
+        ("The Dump", GENERIC),
+        # Saying it has no name.
+        ("NO NAME", NO_NAME),
+        ("Sin nombre", NO_NAME),
+        # A word that says which site it is still makes it a name.
+        ("Relleno Sanitario de Moroleon", NAMED),
+        ("La Lagunita Municipal Garbage Dump", NAMED),
+        ("North Landfill", NAMED),
+        ("Kitchen Corner Trash Can", NAMED),
+        # A kind word alone, with no word for a waste site, is left alone.
+        ("Centro de Acopio", NAMED),
+        ("Municipal", NAMED),
+    ],
+)
+def test_spanish_and_descriptive_names_are_generic(name, expected):
+    assert name_class(name) == expected
+
+
+@pytest.mark.parametrize(
     ("name", "original", "expected"),
     [
         # The translation lost a name the source recorded; the agent searches the original first.
@@ -172,6 +208,9 @@ def test_initials_and_route_codes_count_as_a_name(name, expected):
         ("OpenStreetMap Landfill", "Hartland", NAMED),
         ("OpenStreetMap Landfill", "", NO_NAME),
         ("", "Отвал Северный", NO_NAME),  # the original is a spoil heap, so still skipped
+        ("NO NAME", "NO NAME", NO_NAME),  # the same spelling twice is still no name
+        ("NO NAME", "Basurero Municipal", NO_NAME),
+        ("NO NAME", "Relleno Sanitario de Moroleón", NAMED),
         # Known limitation: the generic check knows only English words, so it can't tell a
         # distinctive original from a generic one such as Полигон ТБО, and reads the English name.
         ("Solid Waste Landfill", "Полигон ТБО «Новосёлки»", GENERIC),

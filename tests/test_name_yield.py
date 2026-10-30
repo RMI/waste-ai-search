@@ -340,8 +340,10 @@ def test_the_script_measures_a_run_folder_and_writes_its_csvs(tmp_path, capsys):
         ("4000", "a bare number"),
         ("update the tag landuse after survey", "a survey note"),
         ("domestic landfill", "a listed generic phrase"),
-        ("Garbage dump", "only words like landfill, dump, waste, garbage, rubbish, tip"),
-        ("Municipal Landfill", ""),  # "municipal" counts as an identifying word: named
+        ("Garbage dump", "only words for a kind of site, such as landfill, dump, basurero, relleno sanitario, municipal"),
+        ("Municipal Landfill", "only words for a kind of site, such as landfill, dump, basurero, relleno sanitario, municipal"),
+        ("NO NAME", "says it has no name"),
+        ("Municipal Landfill North", ""),  # "north" says which one: named
     ],
 )
 def test_each_skippable_name_says_which_rule_it_tripped(name, reason):

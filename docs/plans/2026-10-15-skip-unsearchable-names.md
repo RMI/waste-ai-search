@@ -110,6 +110,12 @@ Open questions this raises:
    test can't tell that original from a generic one such as `Полигон ТБО`. An empty English name
    with a source spelling does count as named. Initials and route codes (`K & W Landfill`,
    `SR 85 Landfill`) count as a name too; at first they were classed as generic labels.
+   **Answered 30 October 2026 (Hugh): yes.** Words that only describe a kind of site (municipal,
+   sanitary, controlled, open-air, final disposal, …) no longer count as a name, and the test knows
+   Spanish words for Mexico (basurero, tiradero, relleno sanitario, a cielo abierto, …), where it
+   had skipped 8 of 2,220 sites while 417 are named just `Basurero Municipal`. A name saying it has
+   none (`NO NAME`, `Sin nombre`) is no name. Batch 3 now skips 667 sites; batches 1, 2, 4, 5 and
+   6 lose 2, 5, 11, 21 and 39 more.
 2. Is skipping about three quarters of Turkey and Russia right? Batch 1 included sites with no
    name (New Zealand had 44 in this list), so the measurement can show whether searching them
    found anything.

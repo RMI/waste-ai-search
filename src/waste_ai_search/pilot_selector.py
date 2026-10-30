@@ -33,6 +33,30 @@ GENERIC_TOKENS = {
     "waste",
     "rubbish",
     "tip",
+    "trash",
+    "disposal",
+    # Spanish, for Mexico (batch 3), where 417 sites are named just "Basurero Municipal".
+    "basurero", "basureros",
+    "tiradero", "tiraderos",
+    "relleno", "rellenos",
+    "vertedero", "vertederos",
+    "basura",
+    "residuos",
+    "disposicion", "disposición",
+}
+
+# Words that, beside a generic word, only say what kind of site it is ("Municipal Landfill",
+# "Relleno Sanitario Tipo C", "Tiradero a Cielo Abierto"), or that it has no name ("Unnamed
+# open-air dump", "Tiradero sin nombre"), and the longer articles that join them. They don't make a
+# name generic on their own: "Municipal" alone is still a name. Words for which site it is, such as
+# a direction or a place, are left out on purpose ("North Landfill", "Central Landfill").
+GENERIC_QUALIFIERS = {
+    "municipal", "municpal", "intermunicipal", "regional", "city", "public", "sanitary", "controlled",
+    "open", "air", "open-air", "final", "site", "solid",
+    "unnamed", "unknown", "without", "name",
+    "sanitario", "sanitaria", "controlado", "controlada", "cielo", "abierto", "sitio", "tipo",
+    "solidos", "sólidos", "urbanos", "rsu", "sin", "nombre",
+    "the", "del", "los", "las",
 }
 
 # Two-letter words that say nothing about which site it is: articles and prepositions (English,
@@ -60,7 +84,8 @@ def sort_key(row: dict[str, Any], salt: str = "default") -> tuple[int, str]:
 def informative_tokens(text: str) -> list[str]:
     """The words of a lowercased name that could say which site it is.
 
-    A word of three or more characters counts unless it is generic. A shorter one counts when it
+    A word of three or more characters counts unless it is generic or a generic qualifier
+    (GENERIC_QUALIFIERS). A shorter one counts when it
     looks like initials or a route code: two letters other than filler and roman numerals
     ("GB Landfill", "SR 85 Landfill"), or single letters joined by "&" ("K & W Landfill"). Short
     numbers ("Dump 1"), lone letters ("Landfill A") and roman numerals ("Landfill II") don't.
@@ -68,7 +93,7 @@ def informative_tokens(text: str) -> list[str]:
     words = [word.strip(".,;:()[]{}") for word in text.split()]
     informative = []
     for index, word in enumerate(words):
-        if not word or word in GENERIC_TOKENS:
+        if not word or word in GENERIC_TOKENS or word in GENERIC_QUALIFIERS:
             continue
         if len(word) > 2:
             informative.append(word)
