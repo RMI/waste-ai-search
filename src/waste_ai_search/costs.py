@@ -21,6 +21,10 @@ WEB_SEARCH_PER_1000 = 14.0
 MODEL_PRICES = {
     "gpt-5.4-mini": (0.75, 0.075, 4.50),
     "gpt-5.4": (2.50, 0.25, 15.00),
+    # GPT-5.6, from Microsoft's GA post (9 July 2026), Standard Global. Sol is $4 and $20 on an
+    # offer from 1 September to at least 30 November 2026; this is its list price.
+    "gpt-5.6-terra": (2.00, 0.20, 12.00),
+    "gpt-5.6-sol": (5.00, 0.50, 30.00),
 }
 
 TOKEN_COLUMNS = ["input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens"]
