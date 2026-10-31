@@ -1459,6 +1459,36 @@ it meets, ours and each source's `stated_state`, as Nominatim does ("N.L.", "Nue
 "Nuevo León" are all "Nuevo León"), in `state_names.json`; arbitration reads both, offline, to
 show `our_place` beside `source_place` on Site_Review and flag a source in another state.
 
+**Our other sites near each site.** Since 30 October 2026 each prompt also names our other sites
+in the same country that are within 15 km, or within 60 km and in the same municipality and state,
+nearest first. Las Varas, in Madera, gets "BASURERO NICOLAS BRAVO (Madera, 18 km away)" and two
+more. They come from the whole seed, so a site skipped for its generic name is named too, but as
+one: 'unnamed site, recorded as "BASURERO MUNICIPAL" (Madera, 31 km away)'. The ten nearest are
+named and the rest counted.
+
+- The 15 km is there because the geocoder names a site in a town by the town ("Texcoco de Mora")
+  and one outside it by its municipio ("Texcoco"), so the names alone miss some.
+- The 60 km is a cut-off for matching municipalities as well as for lookups: only our sites that
+  close have their places looked up (236 for the Mexico sample, against 841 within 150 km), so a
+  site farther off in one of the largest municipios is named only if it is within 15 km.
+- Our records under 1 km away go in `our_records_within_1_km`, the rest in
+  `our_other_sites_nearby`. Mexico's INEGI rows hold some dumps twice at the same point (8690 and
+  8689 are 3 m apart), and the prompt gives our point only to about 1 km. So the prompt says such a
+  record may be this site recorded twice, and a page about it may be cited for both, which is how
+  `possible_duplicates.csv` finds a site recorded twice.
+
+Every prompt also says that a town can have waste sites we don't hold, such as a new landfill that
+replaced an old dump. A page about the town's waste, another of its sites, or one of our other
+sites nearby is not about our site unless it also describes ours: its name, place or history. From
+such a page the agent uses only what it says about ours, and a generic phrase such as "basurero
+municipal" names no particular site. In test10-mex-sample2, the first search gave Las Varas two
+NADBank pages and a Chihuahua state government page about Madera's new landfill. None named Las
+Varas, and the second search declined pages like them.
+
+The rule adds about 390 characters to every prompt (Thunder Bay's is 18,794, under the size test's
+19,000). Where a site has others nearby, the first named adds about 175 more and each further one
+about 65.
+
 This is separate from the locate step's address geocoding, which places the addresses sources
 state (see [Locating each source](#locating-each-source)).
 

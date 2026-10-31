@@ -17,7 +17,7 @@ from typing import Any
 
 from .costs import RUN_LOG_FILE, TOKEN_COLUMNS, Usage, describe_run_cost, run_cost
 from .credibility import dropped_source_site
-from .geocoder import enrich_sites_from_cache, look_up_places, save_site_places, with_places
+from .geocoder import enrich_sites_from_cache, look_up_places, save_site_places, with_other_sites, with_places
 from .input_loader import resolve_sites, run_seed_path, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, check_urls
 from .page_text import PAGE_TEXT_DIR
@@ -356,6 +356,11 @@ def run_search(
     if config.use_geocode_cache:
         hits = sum(1 for site in selected if site.get("geocode_status") == "cache_hit")
         print(f"Geocode cache: {hits}/{len(selected)} sites enriched with admin context")
+    # Each prompt names our other sites near it, so the agent can tell them apart. Their places are
+    # looked up like our sites', and without the cache only their distance counts.
+    selected = with_other_sites(
+        selected, sites, config.geocode_cache if config.use_geocode_cache else None, geocoder
+    )
     save_site_places(config.run_dir, selected)
     agent = agent_identity(get_client(config))
 

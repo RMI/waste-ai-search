@@ -9,6 +9,7 @@ from .credibility import (
     trusted_baseline_coordinates,
     trusted_baseline_name,
 )
+from .geocoder import NEAR_KM, OTHER_SITES_FIELD, SAME_POINT_FIELD
 from .locate import prompt_point
 from .schema import (
     CONTRADICTION_CHECK_SOURCES,
@@ -346,6 +347,8 @@ def build_site_prompt(
             "municipality",
             "admin1",
             "admin2",
+            SAME_POINT_FIELD,
+            OTHER_SITES_FIELD,
         )
         if site.get(key)
     }
@@ -443,6 +446,19 @@ Names:
         trusted_baseline_coordinates(site) and not location_is_inexact(site),
     ))
     confirmation = f"\n  {confirmed} already confirmed by an authoritative source." if confirmed else ""
+    # A page about the town, or our other sites near this one where it has any
+    # (geocoder.with_other_sites). In test10-mex-sample2, Las Varas was given pages about Madera's
+    # new landfill (Hugh, 30 October).
+    not_this_one = (
+        f"the town's waste, another of its sites, or one of {OTHER_SITES_FIELD} (our other sites in this\n"
+        f"  municipality or within {NEAR_KM:g} km)"
+        if site.get(OTHER_SITES_FIELD) else "the town's waste or another of its sites"
+    )
+    same_point = (
+        f"\n  {SAME_POINT_FIELD} may be this facility recorded twice: a page about one of them may be\n"
+        "  about this one."
+        if site.get(SAME_POINT_FIELD) else ""
+    )
 
     # Only where status or the closing year is asked for: the gas follow-up wants neither, and
     # arbitration resolves whatever comes back, asked or not.
@@ -545,6 +561,10 @@ Definitions:
 {status_and_closure}Identity first:
 - Return only sources about THIS facility. Use the names, approximate coordinates,
   municipality and admin names in the site context to check that each source describes it.{confirmation}
+- A town can have waste sites we don't hold, such as a new landfill that replaced an old
+  dump. A page about {not_this_one} is not about this facility unless it also describes this
+  one: its name, place or history. From such a page use only what it says about this one. A
+  generic phrase such as "municipal dump" or "basurero municipal" names no particular site.{same_point}
 - If you cannot confirm you found this specific facility, return an empty sources list
   and explain why in search_notes. Do not return data for a different site.
 - From a page listing many facilities, such as a registry, use only this facility's entry.

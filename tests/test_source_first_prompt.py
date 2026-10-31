@@ -82,6 +82,42 @@ def test_neither_the_name_nor_the_location_is_asked_for_as_a_value():
         assert not set(attributes) & {"found_location", "found_facility_name"}, provenance
 
 
+def test_a_page_about_the_town_or_another_of_its_sites_is_not_about_this_one():
+    """In test10-mex-sample2 the first search gave Las Varas pages about Madera's new landfill,
+    which none named Las Varas, and the second declined them (Hugh, 30 October)."""
+    prompt = " ".join(prompt_for(THUNDER_BAY).split())
+    assert (
+        "A town can have waste sites we don't hold, such as a new landfill that replaced an old dump. A page "
+        "about the town's waste or another of its sites is not about this facility unless it also describes "
+        "this one: its name, place or history. From such a page use only what it says about this one. A "
+        'generic phrase such as "municipal dump" or "basurero municipal" names no particular site.'
+    ) in prompt
+    # Thunder Bay has none of our other sites near it, so the prompt names none.
+    assert "our_other_sites_nearby" not in prompt and "our_records_within_1_km" not in prompt
+
+
+def test_our_other_sites_nearby_come_under_the_same_rule():
+    """A page about one of them that describes this site too is still about this site."""
+    nearby = ["BASURERO NICOLAS BRAVO (Madera, 18 km away)", 'unnamed site, recorded as "BASURERO MUNICIPAL" (Madera, 31 km away)']
+    prompt = prompt_for({**THUNDER_BAY, "our_other_sites_nearby": nearby})
+    assert json.loads(section(prompt, "Site context"))["our_other_sites_nearby"] == nearby
+    assert (
+        "A page about the town's waste, another of its sites, or one of our_other_sites_nearby (our other sites "
+        "in this municipality or within 15 km) is not about this facility unless it also describes this one"
+    ) in " ".join(prompt.split())
+
+
+def test_our_records_within_1_km_may_be_this_site_recorded_twice():
+    twins = ["BASURERO SAN JUAN DEL RIO (San Juan del Río, under 1 km away)"]
+    prompt = prompt_for({**THUNDER_BAY, "our_records_within_1_km": twins})
+    assert json.loads(section(prompt, "Site context"))["our_records_within_1_km"] == twins
+    assert (
+        "our_records_within_1_km may be this facility recorded twice: a page about one of them may be about "
+        "this one."
+    ) in " ".join(prompt.split())
+    assert "our_other_sites_nearby" not in prompt
+
+
 def test_the_agent_returns_only_sources_about_this_site_as_in_batch_1():
     prompt = " ".join(prompt_for(THUNDER_BAY).split())
     assert "Identity first: - Return only sources about THIS facility." in prompt
@@ -181,8 +217,11 @@ def test_a_planned_closing_year_is_asked_for_and_marked():
     assert "Not a planned or expected closure" not in prompt
 
 def test_the_prompt_stays_compact():
-    """About as long as the attribute-first prompt it replaced (16.5k characters for this site)."""
-    assert len(prompt_for(THUNDER_BAY)) < 18_500
+    """About as long as the attribute-first prompt it replaced (16.5k characters for this site).
+    Raised from 18,500 to 19,000 on 30 October 2026 for the rule on a town's other sites (18,794
+    now). Thunder Bay has none of our sites near it: where a site has, the first named adds about
+    175 characters and each further one about 65, so ten add about 830."""
+    assert len(prompt_for(THUNDER_BAY)) < 19_000
     assert not re.search(r"\n{4,}", prompt_for(THUNDER_BAY))
 
 
