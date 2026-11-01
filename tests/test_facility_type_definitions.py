@@ -151,7 +151,23 @@ def test_the_prompt_prefers_newer_sources_especially_for_status():
     """A 2010 permit saying Active must not outweigh a 2023 closure notice."""
     from waste_ai_search.prompt_builder import ATTRIBUTE_GUIDANCE, build_site_prompt, requested_attributes
 
-    assert "base it on the most recent evidence you can find" in ATTRIBUTE_GUIDANCE["facility_status"]
+    assert "base it on the most recent source that shows whether the site still takes waste" in ATTRIBUTE_GUIDANCE["facility_status"]
     site = corroborated_site()
     prompt = build_site_prompt(site, requested_attributes(site))
     assert "- Prefer the most recent source." in prompt
+
+
+def test_status_comes_from_a_source_that_shows_whether_waste_still_arrives():
+    """In the 31 October Mexico tests, 12 statuses came from pages that never show it: fire reports,
+    a gas-chimney inauguration, a 2026 law's date line, a rehabilitation plan. At Martínez de la
+    Torre a 2025 fire would have loaded Active for a dump closed for good in 2020."""
+    from waste_ai_search.prompt_builder import ATTRIBUTE_GUIDANCE
+
+    text = ATTRIBUTE_GUIDANCE["facility_status"]
+    assert (
+        "base it on the most recent source that shows whether the site still takes waste - a closure notice, "
+        "council resolution, current opening hours or fees page, or news - not an older permit, inventory or "
+        "directory listing. A fire there does not show it: closed dumps burn too. Give that source's date in "
+        "value_date."
+    ) in text
+    assert "most recent evidence you can find" not in text

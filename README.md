@@ -915,8 +915,10 @@ and those only check that the source is about our site: they never replace ours.
 location an older cached response gave as a value is not loaded.
 
 **Newer sources win.** The agent is told to prefer the most recent source when sources disagree,
-and to base `facility_status` on the latest evidence it can find (a closure notice, current opening
-hours, recent news) rather than an older permit or directory listing. Arbitration follows the same
+and to base `facility_status` on the most recent source that shows whether the site still takes
+waste (a closure notice, current opening hours, news) rather than an older permit or directory
+listing. A fire doesn't show it, since closed dumps burn too: in the 31 October Mexico tests, 9
+statuses came from fire reports. Arbitration follows the same
 rule: where approved values for one site, attribute and year disagree, within a tier the newer
 `value_date` wins. Each year of a status is its own value now, so an older status loads at its own
 year rather than losing to a newer one.

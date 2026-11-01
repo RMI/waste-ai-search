@@ -88,11 +88,15 @@ FACILITY_TYPE_DEFINITIONS = (
 )
 
 ATTRIBUTE_GUIDANCE = {
+    # In the 31 October Mexico tests, 12 statuses came from pages that never show whether waste
+    # still arrives: fire reports, a gas-chimney inauguration, a law's date line, a plan. 'Shows',
+    # not 'says': Active from works pages that show the site in use was judged supported.
     "facility_status": (
         "Allowed values only: Active, Inactive. A closed or former site is Inactive. Status changes "
-        "over time, so base it on the most recent evidence you can find - a closure notice, council "
-        "resolution, current opening hours or fees page, or recent news - not an older permit, "
-        "inventory or directory listing. Give that evidence's date in value_date."
+        "over time, so base it on the most recent source that shows whether the site still takes "
+        "waste - a closure notice, council resolution, current opening hours or fees page, or news "
+        "- not an older permit, inventory or directory listing. A fire there does not show it: "
+        "closed dumps burn too. Give that source's date in value_date."
     ),
     "facility_type": (
         f"Allowed values only: {', '.join(FACILITY_TYPE_OFFERED)}."
