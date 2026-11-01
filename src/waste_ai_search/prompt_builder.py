@@ -417,9 +417,40 @@ def build_site_prompt(
     original_name = normalize_scalar(site.get("original_site_name"))
     language = normalize_scalar(site.get("source_language"))
     translated_source = bool(language) and language.lower() not in {"en", "eng", "english"}
+    # In the 31 October Mexico tests none of the 213 sources cited was in English and none printed
+    # decimal coordinates, yet the agents spent searches of their six on both: Terra searched
+    # English names at 43 of 50 sites, and Sol ran out of budget "before a separate English-name
+    # query". So a Spanish-language site is searched in Spanish, and our coordinates only check a
+    # source's place. Other languages keep searching in English until their batches are measured.
+    spanish = language.lower() == "es"
+    coordinates_for = "checking places" if spanish else "searching"
+    if spanish:
+        search_how = (
+            "Search\nin the local language, using the site's names, municipality and admin names. Use the\n"
+            "approximate coordinates only to check a source's place: pages almost never print them, so\n"
+            "never put them in a search."
+        )
+        if GCCS_ATTRIBUTES & set(attributes):
+            search_how += (
+                "\nGas-project records (UNFCCC CDM, Global Methane Initiative) are often in English:\n"
+                "search those in English."
+            )
+    else:
+        search_how = (
+            "Search\nin English and in the local language, using the site name, approximate coordinates,\n"
+            "municipality, and admin names."
+        )
 
     if original_name:
-        names_guidance = """
+        search_both = (
+            "- Don't spend searches on site_name: it is our own translation and no source uses\n"
+            "  it. Treat them as one facility with two names, never as two candidates: agreeing\n"
+            "  on the translated name alone is not identity confirmation."
+            if spanish else
+            "- Search both. Treat them as one facility with two names, never as two\n"
+            "  candidates: agreeing on the translated name alone is not identity confirmation."
+        )
+        names_guidance = f"""
 Names:
 - site_name has been machine-translated into English. It is often NOT what local
   sources call this facility, and searching it alone is the most common reason a
@@ -427,8 +458,7 @@ Names:
 - original_site_name is the name the source dataset actually recorded, in
   source_language. Search THIS name in the local language first - permits,
   municipal records and local news will use it, not the translation.
-- Search both. Treat them as one facility with two names, never as two
-  candidates: agreeing on the translated name alone is not identity confirmation.
+{search_both}
 - Give each source's own name for the facility as facility_name_in_source, exactly as
   that source spells it, in whatever script or language it uses. Do not translate it back.
 """
@@ -437,14 +467,20 @@ Names:
         # spelling to give. The source language is still known and still worth searching in.
         # The code is passed through rather than mapped to a language name: the corpus carries
         # 61 distinct ISO 639-1 codes and a hand-kept table of names would rot as sources arrive.
+        in_that_language = (
+            "- Search it in that language. Local permits, municipal records and news coverage\n"
+            "  are written in it, and are where this site is documented."
+            if spanish else
+            "- Search it in that language as well as in English. Local permits, municipal\n"
+            "  records and news coverage are written in it, and are where this site is\n"
+            "  documented."
+        )
         names_guidance = f"""
 Names:
 - site_name came from a source written in '{language}' (ISO 639-1) and was
   unchanged by translation, so it is also the source's own spelling. There is no
   second name to search.
-- Search it in that language as well as in English. Local permits, municipal
-  records and news coverage are written in it, and are where this site is
-  documented.
+{in_that_language}
 - Give each source's own name for the facility as facility_name_in_source, exactly as
   that source spells it, in whatever script or language it uses. Do not translate it back.
 """
@@ -578,9 +614,7 @@ Names:
     return f"""You are a waste-sector data discovery agent for WasteMAP.
 
 Task:
-Find source-backed data for this site, recorded as a waste disposal facility. Search
-in English and in the local language, using the site name, approximate coordinates,
-municipality, and admin names.
+Find source-backed data for this site, recorded as a waste disposal facility. {search_how}
 {search_budget(max_web_searches)}{names_guidance}
 Only the attributes listed below are wanted. Everything else about this facility is
 already known and must not be researched or returned.
@@ -619,7 +653,7 @@ What each source says about the facility:
   the site in, in full ("Nuevo León", not "N.L."); for a town alone, the state it is in. A
   source in another state than admin1 is very likely about a different facility.
 - Never work out an address or coordinates, never use the coordinates in the site context
-  (rounded to about 1 km, for searching only), and leave a field blank if the source gives
+  (rounded to about 1 km, for {coordinates_for} only), and leave a field blank if the source gives
   none.
 
 Source requirements:

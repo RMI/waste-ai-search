@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from waste_ai_search.prompt_builder import build_site_prompt
+from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
 from waste_ai_search.source_names import (
     RAW_NAME_SOURCES,
     _osm_tag_name,
@@ -115,7 +115,7 @@ def test_attach_matches_on_the_integer_facility_key():
 
 
 # --- the prompt ---------------------------------------------------------------------------
-def test_prompt_carries_both_names_and_says_to_search_both():
+def test_prompt_carries_both_names_as_one_facility():
     prompt = build_site_prompt(
         {
             "site_id": "44",
@@ -390,3 +390,74 @@ def test_load_takes_the_raw_row_whose_translation_is_the_chosen_name(monkeypatch
         ],
     })
     assert found[7]["original_site_name"] == "Lixao Itaresidue"
+
+
+# --- Spanish-language sites: searched in Spanish, never by coordinates -----------------------
+# In the 31 October Mexico tests none of the 213 sources cited was in English and none printed
+# decimal coordinates, yet Terra searched English names at 43 of 50 sites and put our coordinates
+# into searches at 21. 1,548 of batch 3's 1,553 sites are 'es'; other languages keep the old wording.
+def flat(site, attributes=("operator",)):
+    return " ".join(build_site_prompt(site, attributes=list(attributes)).split())
+
+
+def section(prompt, title):
+    return prompt.split(f"\n{title}:\n", 1)[1].split("\n\n", 1)[0]
+
+
+SPANISH_TASK = (
+    "Search in the local language, using the site's names, municipality and admin names. Use the approximate "
+    "coordinates only to check a source's place: pages almost never print them, so never put them in a search."
+)
+OLD_TASK = (
+    "Search in English and in the local language, using the site name, approximate coordinates, municipality, "
+    "and admin names."
+)
+GAS_IN_ENGLISH = (
+    "Gas-project records (UNFCCC CDM, Global Methane Initiative) are often in English: search those in English."
+)
+
+
+def test_a_spanish_site_is_searched_in_spanish_and_never_by_its_coordinates():
+    site = {"site_id": "3564", "site_name": "BASURERO MUNICIPAL DE SAN IGNACIO CERRO GORDO", "source_language": "es",
+            "country_iso3": "MEX", "latitude": "20.74182013", "longitude": "-102.5077198"}
+    prompt = flat(site)
+    assert SPANISH_TASK in prompt and OLD_TASK not in prompt
+    assert "Search it in that language. Local permits, municipal records and news coverage are written in it" in prompt
+    assert "as well as in English" not in prompt
+    # The coordinates in the site context only check a source's place.
+    assert "never use the coordinates in the site context (rounded to about 1 km, for checking places only)" in prompt
+    assert "for searching only" not in prompt
+
+
+def test_a_spanish_sites_translated_name_is_not_searched():
+    """Terra searched 'CUITECO GARBAGE DUMP' and 'GARBAGE DUMP A LA PICHUECA'."""
+    site = {"site_id": "9233", "site_name": "VERACRUZ SANITARY LANDFILL", "original_site_name": "RELLENO SANITARIO VERACRUZ",
+            "source_language": "es", "country_iso3": "MEX"}
+    names = " ".join(section(build_site_prompt(site, attributes=["operator"]), "Names").split())
+    assert (
+        "- Don't spend searches on site_name: it is our own translation and no source uses it. Treat them as one "
+        "facility with two names, never as two candidates: agreeing on the translated name alone is not identity "
+        "confirmation."
+    ) in names
+    assert "Search both." not in names
+
+
+def test_gas_project_records_are_still_searched_in_english():
+    """UNFCCC CDM and Global Methane Initiative documents are in English. Only where the gas
+    attributes are asked: 168 of batch 3's sites."""
+    site = {"site_id": "4005", "site_name": "RED RECOLECTOR SA. DE CV.", "source_language": "es", "country_iso3": "MEX",
+            "has_landfill_gas_collection": "TRUE"}
+    assert GAS_IN_ENGLISH in flat(site, requested_attributes(site))
+    assert GAS_IN_ENGLISH in flat(site, ["has_flare"])
+    assert GAS_IN_ENGLISH not in flat(site, ["facility_status", "has_landfill_gas_collection"])
+
+
+@pytest.mark.parametrize("language", ["pt", "de", ""])
+def test_other_languages_keep_searching_in_english_and_by_coordinates(language):
+    site = {"site_id": "17924", "site_name": "Burgenland Waste Association", "original_site_name": "Burgenlandischer Mullverband",
+            "source_language": language, "country_iso3": "AUT", "has_landfill_gas_collection": "TRUE"}
+    prompt = flat(site, ["operator", "has_flare"])
+    assert OLD_TASK in prompt and SPANISH_TASK not in prompt
+    assert "- Search both. Treat them as one facility with two names" in prompt
+    assert "(rounded to about 1 km, for searching only)" in prompt
+    assert GAS_IN_ENGLISH not in prompt

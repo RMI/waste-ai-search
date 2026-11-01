@@ -714,6 +714,15 @@ the full point in the prompt, the agent once credited our own OSM centroid to a 
 reverse-geocoded `formatted_address` is left out for the same reason. The search cap
 (`--max-web-searches`) is unchanged.
 
+**A Spanish-language site is searched in Spanish,** which is every Mexican site but five. Its
+prompt says to search its names, municipality and admin names in the local language, to spend no
+searches on `site_name`, our English translation, and to use our coordinates only to check a
+source's place, never in a search: pages almost never print them. Where the gas attributes are
+asked, gas-project records such as UNFCCC CDM's are still searched in English. In the 31 October
+Mexico tests none of the 213 sources cited was in English, yet Terra searched English names at 43 of
+50 sites and our coordinates at 21, with six searches a site. Other languages are still searched in
+English too, until their batches are measured.
+
 Only Brazil's seed has place names (SINIR's municipality and state). Every other site's are
 looked up from our coordinates when it is searched (see [Reverse Geocoding](#reverse-geocoding)),
 from 30 October 2026. Batches 1 and 2 were searched before that, with no town in the prompt.
@@ -1701,6 +1710,9 @@ independent facts, and the prompt branches on both:
 | Original differs from translation (7,992) | Both names; search the original in the local language first |
 | Translated source, name unchanged (4,458 non-English) | One name, but search it in the recorded ISO 639-1 language too |
 | English-language source (11,452) | One name, stated plainly as the source's own |
+
+For a Spanish-language site, neither the translation nor English is searched, except for
+gas-project records (see [What the agent returns](#what-the-agent-returns)).
 
 A facility whose original matches its translation is left blank rather than repeating the string —
 but its `source_language` is still recorded, because a Portuguese source that translated to itself
