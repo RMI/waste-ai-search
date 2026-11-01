@@ -216,12 +216,34 @@ def test_a_planned_closing_year_is_asked_for_and_marked():
     assert "return that year with planned = true; an actual closure is planned = false" in prompt
     assert "Not a planned or expected closure" not in prompt
 
+
+def test_a_closure_that_has_not_happened_or_did_not_last_does_not_count():
+    """In the 31 October Mexico tests, 15 statuses and closing years took a closure that had not
+    happened, or did not last, as done: Inactive from a closure programme Profepa approved, 2024
+    from "Para septiembre de 2024 quedará clausurado" with planned not set, 2006 from a replacement
+    landfill's opening, a 'clausura temporal' with 15 days to comply, 2018 from the article's date."""
+    prompt = " ".join(prompt_for(THUNDER_BAY).split())
+    assert (
+        "- A closure that is only ordered, recommended, planned, funded or expected, is temporary (clausura "
+        "temporal) or later reversed, or is a replacement site's opening does not make the site Inactive or give "
+        "an actual closing_year. closing_year is a year a source gives for the closure, never the article's own "
+        "date."
+    ) in prompt
+    assert "a council resolution, or a closure order that was carried out." in prompt
+    # Still a push to look for the year, but no longer for a year no source gives: 8 of the 13
+    # closing years flagged were worked out with none stated.
+    assert "A closed site's answer is incomplete until you have looked for its closure year." in prompt
+    assert "A closed site without a closure year is an incomplete answer" not in prompt
+    assert "Status and closure" not in prompt_for(THUNDER_BAY, ["opening_year"])
+
+
 def test_the_prompt_stays_compact():
     """About as long as the attribute-first prompt it replaced (16.5k characters for this site).
-    Raised from 18,500 to 19,000 on 30 October 2026 for the rule on a town's other sites (18,794
-    now). Thunder Bay has none of our sites near it: where a site has, the first named adds about
-    175 characters and each further one about 65, so ten add about 830."""
-    assert len(prompt_for(THUNDER_BAY)) < 19_000
+    Raised from 18,500 to 19,000 on 30 October 2026 for the rule on a town's other sites, and from
+    19,000 to 20,700 on 1 November 2026 for the rules added before batch 3. Thunder Bay has none of
+    our sites near it: where a site has, the first named adds about 175 characters and each further
+    one about 65, so ten add about 830."""
+    assert len(prompt_for(THUNDER_BAY)) < 20_700
     assert not re.search(r"\n{4,}", prompt_for(THUNDER_BAY))
 
 

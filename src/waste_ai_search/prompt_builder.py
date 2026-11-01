@@ -120,9 +120,9 @@ ATTRIBUTE_GUIDANCE = {
     "closing_year": (
         "Four-digit year the facility closed, meaning it stopped accepting waste. REQUIRED whenever "
         "the facility is closed or inactive - a closure date almost always exists in news coverage, "
-        "a council resolution, or a closure order. Search for it specifically. If the facility is "
-        "still open and a source gives the year it is planned or expected to close, return that "
-        "year with planned = true; an actual closure is planned = false."
+        "a council resolution, or a closure order that was carried out. Search for it specifically. "
+        "If the facility is still open and a source gives the year it is planned or expected to "
+        "close, return that year with planned = true; an actual closure is planned = false."
     ),
     "annual_incoming_waste_metric_tonnes": (
         "Waste actually accepted per year - not a permitted or licensed limit or a design "
@@ -467,8 +467,17 @@ Names:
         status_and_closure = (
             "Status and closure:\n"
             "- If your sources show the facility is closed, inactive, or no longer accepting waste, return\n"
-            "  facility_status = Inactive AND search for closing_year in the same pass. A closed site\n"
-            "  without a closure year is an incomplete answer.\n\n"
+            "  facility_status = Inactive AND search for closing_year in the same pass. A closed site's\n"
+            "  answer is incomplete until you have looked for its closure year.\n"
+            # In the 31 October Mexico tests, 15 statuses and closing years took a closure that had
+            # not happened, or did not last, as done: a closure programme Profepa approved, an
+            # agreement funding one, a replacement landfill's opening, a 'clausura temporal' with 15
+            # days to comply, the article's own date. That a source expects a year is planned = true
+            # is said in closing_year's guidance and the contract.
+            "- A closure that is only ordered, recommended, planned, funded or expected, is temporary\n"
+            "  (clausura temporal) or later reversed, or is a replacement site's opening does not make\n"
+            "  the site Inactive or give an actual closing_year. closing_year is a year a source gives\n"
+            "  for the closure, never the article's own date.\n\n"
         )
 
     closure_focus = ""

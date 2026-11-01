@@ -921,6 +921,14 @@ rule: where approved values for one site, attribute and year disagree, within a 
 `value_date` wins. Each year of a status is its own value now, so an older status loads at its own
 year rather than losing to a newer one.
 
+**A closure counts once it has happened.** A closure that is only ordered, recommended, planned,
+funded or expected, a temporary one (*clausura temporal*), one later reversed, or a replacement
+site's opening doesn't make a site Inactive or give it a closing year. `closing_year` is a year a
+source gives for the closure, never the article's own date, and the agent is told to look for it
+whenever it finds a site closed. In the 31 October Mexico tests, 15 statuses and closing years took
+such a closure as done, among them a closure programme Profepa had approved and a seal with 15 days
+to comply.
+
 **Gap-fill — requested only where that facility's baseline value is empty.**
 
 | Attribute | Type | Unit asked for | → standardized column |
