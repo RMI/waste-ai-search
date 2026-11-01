@@ -80,9 +80,26 @@ def test_coordinates_only_countries_are_not_asked_for_an_operator():
 
 
 def test_the_prompt_asks_for_the_operator_not_the_owner_or_regulator():
-    prompt = build_site_prompt(site(), attributes=requested_attributes(site()))
+    prompt = " ".join(build_site_prompt(site(), attributes=requested_attributes(site())).split())
     assert '"attribute_name": "operator"' in prompt
-    assert "not the owner, landlord or regulator" in prompt
+    assert (
+        "Not a body the source names only for owning, regulating, inspecting or visiting it, hauling waste to it, "
+        "building, cleaning up or closing it, or giving a figure."
+    ) in prompt
+
+
+def test_the_operator_is_the_body_the_source_says_runs_it_by_its_full_name():
+    """In the 31 October Mexico tests, 17 operators named a body the page mentions in another role -
+    leading a supervision tour, hauling waste, lending machinery for a clean-up, running the closure
+    project - or gave a description: 'empresa que opera el relleno sanitario', 'Autoridad Municipal'.
+    8 of them were labelled Direct. The name is still the source's own, as before."""
+    prompt = " ".join(build_site_prompt(site(), attributes=["operator"]).split())
+    assert (
+        "The organisation the source says runs the facility day to day - a company, municipality, utility or "
+        "public agency - by its full name as the source writes it, never a description ('la empresa', "
+        "'autoridad municipal')."
+    ) in prompt
+    assert "Text only; if a concession changed hands, give the operator for the source's value_date." in prompt
 
 
 def test_a_found_operator_is_listed_as_text_with_its_source_and_tier():

@@ -111,11 +111,16 @@ ATTRIBUTE_GUIDANCE = {
         "ordered, required, planned or proposed, and not vents that only let gas escape. Yes, No, "
         "or Unknown."
     ),
+    # In the 31 October Mexico tests, 17 operators named a body the page mentions in another role,
+    # such as leading a supervision tour or lending machinery for a clean-up, or gave a description:
+    # 'empresa que opera el relleno sanitario', 'Autoridad Municipal'.
     "operator": (
-        "The organisation that runs the facility day to day - a company, municipality, utility "
-        "or public agency - as the source names it. If the source distinguishes them, give the "
-        "operator, not the owner, landlord or regulator. Text only; if a concession changed hands, "
-        "give the operator for the source's value_date."
+        "The organisation the source says runs the facility day to day - a company, municipality, "
+        "utility or public agency - by its full name as the source writes it, never a description "
+        "('la empresa', 'autoridad municipal'). Not a body the source names only for owning, "
+        "regulating, inspecting or visiting it, hauling waste to it, building, cleaning up or "
+        "closing it, or giving a figure. Text only; if a concession changed hands, give the "
+        "operator for the source's value_date."
     ),
     "opening_year": (
         "Four-digit year the facility first accepted waste. Not the date of a permit or licence, "

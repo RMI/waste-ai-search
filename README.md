@@ -931,6 +931,12 @@ whenever it finds a site closed. In the 31 October Mexico tests, 15 statuses and
 such a closure as done, among them a closure programme Profepa had approved and a seal with 15 days
 to comply.
 
+**The operator is the body a source says runs the site,** by its full name as the source writes it,
+never a description ("la empresa", "autoridad municipal"). A body the source names only for owning,
+regulating, inspecting or visiting the site, hauling waste to it, building, cleaning up or closing
+it, or giving a figure is not its operator: in the 31 October Mexico tests, 12 operators were such
+bodies, among them the police at a fire and a town lending machinery for a clean-up.
+
 **Gap-fill — requested only where that facility's baseline value is empty.**
 
 | Attribute | Type | Unit asked for | → standardized column |
