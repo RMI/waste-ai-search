@@ -655,12 +655,13 @@ Value requirements:
   words, ranges in prose, or unit text.
 - Gas capture attributes only apply if the facility actually has a gas collection system. If it
   does not, omit them rather than returning zeros.
-- Return only actual figures and dates: what the facility is, did or does. Leave out
-  planned, proposed, permitted or licensed, design and projected numbers - a permitted
-  capacity or annual limit is not waste received, and a design capacity is not waste in place.
-  Never return a future year, except a planned closing_year (planned = true). If a source
-  gives only such a figure, leave the attribute out and mention the figure in
-  evidence_summary. (A gas project's status may still be Planned or Under Construction.)
+- Return only actual figures, dates and features: what the facility is, has, did or does.
+  Leave out planned, proposed, ordered or required, permitted or licensed, design and
+  projected ones - a permitted capacity or annual limit is not waste received, and a design
+  capacity is not waste in place. Never return a future year, except a planned closing_year
+  (planned = true). If a source gives only such a figure, leave the attribute out and mention
+  the figure in evidence_summary. (A gas project's status may still be Planned or Under
+  Construction.)
 - Label anything not directly stated by the source as value_basis = Inferred.
 - Put uncertain or unsourced findings in unverified_leads, not in values.
 - If nothing is found, return an empty sources list and explain in search_notes.

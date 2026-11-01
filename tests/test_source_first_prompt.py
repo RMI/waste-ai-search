@@ -206,12 +206,17 @@ def test_the_search_cap_and_map_site_guidance_are_unchanged():
     assert "wastebook.co.uk copies the Environment Agency register" in prompt
 
 
-def test_only_actual_figures_and_dates_are_asked_for():
+def test_only_actual_figures_dates_and_features_are_asked_for():
     """In the 10-site tests most wrong values from the right facility were planned, permitted or
     design figures read as actual - a licensed 217,000 t/yr at a site that never took waste - and
-    permit dates read as opening years."""
+    permit dates read as opening years. In the 31 October Mexico tests, features a regulator ordered
+    or a proposed project described were read as the site's own: Sanitary Landfill from monitoring
+    wells Profepa ordered, a flare from a proposed CDM project's design."""
     prompt = " ".join(prompt_for(THUNDER_BAY).split())
-    assert "Return only actual figures and dates" in prompt
+    assert (
+        "Return only actual figures, dates and features: what the facility is, has, did or does. Leave out "
+        "planned, proposed, ordered or required, permitted or licensed, design and projected ones"
+    ) in prompt
     assert "a permitted capacity or annual limit is not waste received" in prompt
     assert "A gas project's status may still be Planned or Under Construction" in prompt
     assert "closed or is expected to close" not in prompt
