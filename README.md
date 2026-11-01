@@ -1027,6 +1027,12 @@ Bold entries are the spec's own conversion table. Three deliberate refusals: an 
 refused because the spec's formula needs a methane fraction the source did not give; and a value
 whose unit cannot be identified is refused rather than assumed.
 
+Units written in Spanish, Portuguese, French, Italian or German are read as their English names,
+accents aside: "toneladas por día", "metros cuadrados", "Hectáreas", "Tonnen pro Jahr", "t/a",
+"tonnellate all'anno". Until 31 October 2026 they were refused, which dropped Pro Limpieza's area
+and waste in place in every Mexico test run. "ton" counts as tonnes only beside words in one of
+those languages ("ton/día"), where it means the metric tonne; an English "tons" stays ambiguous.
+
 Allowed categorical values come from the **live Postgres enums** — regenerate with
 `scripts/generate_enums.py`. Anything outside them maps to NULL with a parse warning rather than
 being forced into a wrong category.

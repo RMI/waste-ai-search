@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -512,8 +513,50 @@ def detect_unit_text(value: str, unit: str) -> str:
     return text if UNIT_WORD_PATTERN.search(text) else ""
 
 
+# Units as sources in other languages write them, put into English so the patterns here read them.
+# In the Mexico tests "toneladas", "metros cuadrados" and "Hectáreas" were dropped as unsupported
+# units (30 October 2026). Spanish, Portuguese, French, Italian and German, for batches 3 to 5; read
+# with accents taken off. Order matters: square and cubic metres before metres.
+_FOREIGN_UNITS = [
+    (r"\b(?:toneladas?|tonnellat[ae]|tonnen)(?:\s+metricas?)?\b", "tonnes"),
+    (r"\b(?:kilogramos?|quilogramas?|kilogrammes?|kilogramm[ei]?)\b", "kg"),
+    (r"\b(?:kilometros?|quilometros?|kilometres?|chilometri)\s+(?:cuadrados?|quadrados?|carres?|quadrati)\b"
+     r"|\bquadratkilometer\b", "square kilometers"),
+    (r"\b(?:metros?|metres?|metri)\s+(?:cuadrados?|quadrados?|carres?|quadrati)\b|\bquadratmeter\b", "square meters"),
+    (r"\b(?:metros?|metres?|metri)\s+(?:cubicos?|cubes?|cubi)\b|\bkubikmeter\b", "cubic meters"),
+    (r"\b(?:hectareas?|ettar[io]|hektar(?:en|e)?)\b", "hectares"),
+    (r"\b(?:metros?|metri)\b", "meters"),
+    # German "t/a" is tonnes a year.
+    (r"\bt\s*/\s*a\b", "t/year"),
+]
+# "por día", "par jour", "al giorno", "pro Tag", "/día", "diarias": a time denominator.
+_PER = r"\s*(?:\b(?:por|par|pro|al|all')\s*|/\s*)"
+_FOREIGN_PERIODS = [
+    (_PER + r"(?:dia|jour|giorno|tag)\b|\s*\b(?:diari[ao]s?|quotidien(?:ne)?s?|giornalier[ei]|taglich)\b", "/day"),
+    (_PER + r"(?:semana|semaine|settimana|woche)\b|\s*\b(?:semanal(?:es)?|hebdomadaires?|settimanal[ei]|wochentlich)\b", "/week"),
+    (_PER + r"(?:mes|mois|mese|monat)\b|\s*\b(?:mensual(?:es)?|mensuel(?:le)?s?|mensil[ei]|monatlich)\b", "/month"),
+    (_PER + r"(?:ano|an|anno|jahr)\b|\s*\b(?:anual(?:es)?|annuel(?:le)?s?|annu[ei]|jahrlich)\b", "/year"),
+    (_PER + r"(?:hora|heure|ora|stunde)\b", "/hour"),
+]
+
+
+def _in_english(text: str) -> str:
+    """A unit written in another language, in English. "ton" counts as tonnes only beside words in
+    one of those languages ("ton/día"), where it means the metric tonne; an English "tons" stays
+    ambiguous."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in decomposed if not unicodedata.combining(c))
+    foreign = 0
+    for pattern, english in (*_FOREIGN_UNITS, *_FOREIGN_PERIODS):
+        text, count = re.subn(pattern, english, text)
+        foreign += count
+    if foreign:
+        text = re.sub(r"\btons?\b", "tonnes", text)
+    return text
+
+
 def normalize_unit_text(value: str) -> str:
-    text = value.lower().strip()
+    text = _in_english(value.lower().strip())
     # Gas-flow abbreviations bundle the volume scale and the time denominator into one token, so
     # split them out or the per-day factor is silently lost. MMCFD is the spec's own example.
     text = re.sub(r"\bmmscfd\b|\bmmcfd\b", "mmcf/day", text)

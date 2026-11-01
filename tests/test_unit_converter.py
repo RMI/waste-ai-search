@@ -49,3 +49,44 @@ def test_converts_distance_miles_to_km():
     assert result.unit == "km"
     assert "Converted from miles" in result.note
     assert result.warning == ""
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value", "unit", "expected", "canonical"),
+    [
+        # As the agent wrote them in the Mexico tests (30 October 2026), each dropped as unsupported.
+        ("waste_in_place_metric_tonnes", "2500000", "toneladas", "2500000", "metric tonnes"),
+        ("area_square_meters", "280000", "metros cuadrados", "280000", "square meters"),
+        ("area_square_meters", "28", "Hectáreas", "280000", "square meters"),
+        # Other ways Spanish sources write them.
+        ("waste_in_place_metric_tonnes", "2500000", "toneladas métricas", "2500000", "metric tonnes"),
+        ("area_square_meters", "1.5", "kilómetros cuadrados", "1500000", "square meters"),
+        ("annual_incoming_waste_metric_tonnes", "1300", "toneladas por día", "474500", "metric tonnes/year"),
+        ("annual_incoming_waste_metric_tonnes", "1300", "toneladas diarias", "474500", "metric tonnes/year"),
+        ("annual_incoming_waste_metric_tonnes", "1300", "ton/día", "474500", "metric tonnes/year"),
+        ("annual_incoming_waste_metric_tonnes", "474500", "toneladas al año", "474500", "metric tonnes/year"),
+        ("annual_incoming_waste_metric_tonnes", "40000", "toneladas mensuales", "480000", "metric tonnes/year"),
+        ("waste_depth", "15", "metros", "15", "meters"),
+        # Batches 4 and 5: German, Italian and French.
+        ("annual_incoming_waste_metric_tonnes", "120000", "Tonnen pro Jahr", "120000", "metric tonnes/year"),
+        ("annual_incoming_waste_metric_tonnes", "120000", "t/a", "120000", "metric tonnes/year"),
+        ("annual_incoming_waste_metric_tonnes", "120000", "tonnellate all'anno", "120000", "metric tonnes/year"),
+        ("annual_incoming_waste_metric_tonnes", "300", "tonnes par jour", "109500", "metric tonnes/year"),
+        ("area_square_meters", "12", "ettari", "120000", "square meters"),
+        ("area_square_meters", "12", "Hektar", "120000", "square meters"),
+        ("area_square_meters", "5000", "mètres carrés", "5000", "square meters"),
+        ("area_square_meters", "5000", "Quadratmeter", "5000", "square meters"),
+    ],
+)
+def test_units_written_in_other_languages_are_read(attribute, value, unit, expected, canonical):
+    result = convert_attribute_value(attribute, value, unit)
+    assert (result.value, result.unit, result.warning) == (expected, canonical, "")
+
+
+def test_an_english_ton_stays_ambiguous_but_a_spanish_one_is_the_metric_tonne():
+    """Mexican sources write "ton/día" for toneladas; an English "tons" may be short tons."""
+    assert "Ambiguous unit" in convert_attribute_value("annual_incoming_waste_metric_tonnes", "1300", "tons/day").warning
+    assert convert_attribute_value("annual_incoming_waste_metric_tonnes", "1300", "ton/día").value == "474500"
