@@ -69,6 +69,11 @@ FACILITY_TYPE_DEFINITIONS = (
     "Compaction, soil cover and restricted access occur at BOTH controlled dumpsites and sanitary "
     "landfills, so none of them distinguishes the two. What decides it is engineered containment: "
     "a liner, leachate collection and groundwater monitoring. "
+    # In the 31 October Mexico tests, Sol gave Controlled Dumpsite 7 times from a fence, compaction or
+    # criticism, and 6 were wrong. The two types are named so a 'tiradero a cielo abierto' page can
+    # still give Dumpsite.
+    "If no source says whether it has them, choose neither Controlled Dumpsite nor Sanitary "
+    "Landfill: leave facility_type out. "
     "Classify from what sources say about the facility's engineering and operation, NEVER from "
     "words in its name. Names are often regulatory terms or literal translations: Catalan "
     "'dipòsit controlat' and Spanish 'vertedero controlado' can describe a fully engineered "
@@ -215,13 +220,14 @@ LANDFILL_DIRECTIVE_ISO3 = {
 
 # Appended to facility_type's guidance for sites in those countries (WP-531). Existing landfills
 # had until 16 July 2009 to meet the Directive or close, so the prior covers sites that accepted
-# waste after that; an older closed site may never have been engineered.
+# waste after that; an older closed site may never have been engineered. The prior holds where no
+# source describes the engineering, which would otherwise leave facility_type out.
 LANDFILL_DIRECTIVE_GUIDANCE = (
     " This site is in a country bound by the EU Landfill Directive (1999/31/EC), which requires "
     "every landfill accepting non-hazardous waste to have a liner and leachate management. A "
     "landfill that accepted waste after July 2009 is therefore a Sanitary Landfill unless a source "
-    "says it lacks that engineering; in this country that includes every landfill reporting to "
-    "E-PRTR. A site that "
+    "says it lacks that engineering, even where no source describes it; in this country that "
+    "includes every landfill reporting to E-PRTR. A site that "
     "closed before July 2009 may predate these requirements; classify it from its described "
     "engineering instead."
 )

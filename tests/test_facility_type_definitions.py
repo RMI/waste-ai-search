@@ -109,6 +109,25 @@ def test_the_definitions_say_what_does_not_distinguish_the_types():
     assert "What decides it is engineered containment" in text
 
 
+def test_with_no_word_on_containment_neither_engineered_type_is_chosen():
+    """In the 31 October Mexico tests Sol gave Controlled Dumpsite 7 times from a fence, compaction or
+    criticism, and 6 were wrong. Dumpsite from a 'tiradero a cielo abierto' page must stay possible,
+    so only the two types containment decides between are named."""
+    text = guidance(corroborated_site(country_iso3="MEX"))
+    assert (
+        "What decides it is engineered containment: a liner, leachate collection and groundwater monitoring. "
+        "If no source says whether it has them, choose neither Controlled Dumpsite nor Sanitary Landfill: leave "
+        "facility_type out."
+    ) in text
+    assert "If no source says whether it has them" in guidance(unconfirmed_site())
+
+
+def test_the_directive_prior_holds_where_no_source_describes_the_engineering():
+    """Otherwise an EU landfill no source describes would be left out rather than typed by the prior."""
+    text = guidance(corroborated_site())  # ESP
+    assert "a Sanitary Landfill unless a source says it lacks that engineering, even where no source describes it;" in text
+
+
 def test_an_eu_site_gets_the_landfill_directive_prior():
     text = guidance(corroborated_site())  # ESP
     assert "EU Landfill Directive (1999/31/EC)" in text

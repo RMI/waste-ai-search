@@ -937,6 +937,14 @@ regulating, inspecting or visiting the site, hauling waste to it, building, clea
 it, or giving a figure is not its operator: in the 31 October Mexico tests, 12 operators were such
 bodies, among them the police at a fire and a town lending machinery for a clean-up.
 
+**Containment decides between a sanitary landfill and a controlled dumpsite.** Compaction, soil
+cover and restricted access occur at both, so where no source says whether a site has a liner,
+leachate collection or groundwater monitoring, the agent chooses neither and leaves `facility_type`
+out. A page describing an open dump can still give `Dumpsite`. In a country bound by the EU
+Landfill Directive, a landfill that took waste after July 2009 is still a Sanitary Landfill unless a
+source says it lacks that engineering. In the 31 October Mexico tests, Sol gave Controlled Dumpsite 7
+times from a fence, compaction or criticism, and 6 were wrong.
+
 **Gap-fill — requested only where that facility's baseline value is empty.**
 
 | Attribute | Type | Unit asked for | → standardized column |
