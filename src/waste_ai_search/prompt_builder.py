@@ -107,7 +107,13 @@ ATTRIBUTE_GUIDANCE = {
         f"Allowed values only: {', '.join(FACILITY_TYPE_OFFERED)}."
         + FACILITY_TYPE_DEFINITIONS
     ),
-    "cover_types": "Array. Allowed members only: clay cover, organic cover, sand cover, other soil mixture.",
+    # In the 31 October Mexico tests, a cell's figure or cover was taken for the whole site's: 6,000 m2
+    # of a new cell's geomembrane as the area, and tepetate on a COVID clinical-waste cell as the
+    # cover. Not the type: Sanitary Landfill read from the cell in use was judged supported 4 times.
+    "cover_types": (
+        "Array. Allowed members only: clay cover, organic cover, sand cover, other soil mixture. "
+        "The cover used across the site, not one cell's."
+    ),
     # In test10-mex-sample2-run2 an order to "implement ... biogas management" at Naucalpan was
     # read as Yes, which set off the gas follow-up search (Hugh, 30 October).
     "has_landfill_gas_collection": (
@@ -157,7 +163,8 @@ ATTRIBUTE_GUIDANCE = {
     "area_square_meters": (
         "Surface area of the landfill footprint containing waste. Report the source's original "
         "unit - hectares, acres, square feet, square kilometres or square metres - and the "
-        "pipeline converts. This is the waste footprint, not the whole property or parcel."
+        "pipeline converts. This is the waste footprint, not the whole property or parcel, nor one "
+        "cell or extension."
     ),
     "waste_depth": (
         "Average depth of waste. Report the NUMBER and the source's original unit (feet or "

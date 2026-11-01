@@ -947,6 +947,10 @@ Landfill Directive, a landfill that took waste after July 2009 is still a Sanita
 source says it lacks that engineering. In the 31 October Mexico tests, Sol gave Controlled Dumpsite 7
 times from a fence, compaction or criticism, and 6 were wrong.
 
+**One cell's area or cover is not the site's.** `area_square_meters` is the waste footprint, not
+the whole property, nor one cell or extension, and `cover_types` the cover used across the site: in
+the tests, a new cell's 6,000 m² of geomembrane was given as a site's area.
+
 **Gap-fill — requested only where that facility's baseline value is empty.**
 
 | Attribute | Type | Unit asked for | → standardized column |

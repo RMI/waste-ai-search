@@ -219,6 +219,18 @@ def test_only_actual_figures_and_dates_are_asked_for():
     assert "not a permitted or licensed limit or a design capacity" in prompt
 
 
+def test_one_cells_area_or_cover_is_not_the_whole_sites():
+    """In the 31 October Mexico tests, 6,000 m2 of a new cell's geomembrane was given as the site's
+    area, and tepetate used only on a COVID clinical-waste cell as its cover. Figures and cover
+    only: Sanitary Landfill read from the cell in use was judged supported 4 times."""
+    targets = {target["attribute_name"]: target["guidance"] for target in json.loads(section(prompt_for(THUNDER_BAY), "Target attributes"))}
+    assert targets["area_square_meters"].endswith(
+        "This is the waste footprint, not the whole property or parcel, nor one cell or extension."
+    )
+    assert targets["cover_types"].endswith("other soil mixture. The cover used across the site, not one cell's.")
+    assert "one cell" not in targets["facility_type"]
+
+
 def test_a_planned_closing_year_is_asked_for_and_marked():
     """Hugh keeps expected closures such as Moose Jaw's 2028 (key-values plan): the agent returns
     them marked planned, and SMEs check them from a Tier 3-5 source. No other future year."""
