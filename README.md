@@ -696,7 +696,9 @@ and the values it gives (build step 4 of
   A source in another state than ours is flagged on Site_Review.
 - These six fields only check that the source is about our site (see
   [Locating each source](#locating-each-source)). They never replace our name or location.
-- Each value keeps the fields arbitration has always read.
+- Each value keeps the fields arbitration has always read. Its `value_date` is the date the value
+  is true for: a figure's own year, never a target year, else the source's date. A yearly value
+  loads under that year.
 
 **The agent decides whether a source is about this site,** as batch 1's prompt had it. It returns
 only sources about this facility, using the names and rounded coordinates the prompt gives it to

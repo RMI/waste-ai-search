@@ -528,7 +528,13 @@ Names:
                         "unit": "Source's original unit, or blank",
                         "value_basis": "Direct / Inferred / Conflicting / Not found",
                         "confidence_score": "High / Medium / Low / Excluded candidate",
-                        "value_date": "YYYY-MM-DD, YYYY-MM, or YYYY",
+                        # A yearly value loads under the year value_date starts with: in the 31
+                        # October Mexico tests, 55 t a day from a 2022-2024 plan was dated by the
+                        # article, and a project's status by its target year.
+                        "value_date": (
+                            "The date the value is true for (a figure's own year, never a target year; "
+                            "else the source's date): YYYY-MM-DD, YYYY-MM, or YYYY"
+                        ),
                         "evidence_summary": "Short source-backed explanation",
                         "search_terms_used": "Search terms and languages used",
                         "quoted_evidence_short": "A short passage copied word for word from the source, in its own language",

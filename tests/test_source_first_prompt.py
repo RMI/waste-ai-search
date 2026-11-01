@@ -60,6 +60,17 @@ def test_the_contract_is_sources_first():
     assert "stated_location" not in prompt_for(THUNDER_BAY)
 
 
+def test_value_date_is_the_date_the_value_is_true_for():
+    """A yearly value loads under the year its value_date starts with. In the 31 October Mexico
+    tests, 20,075 t a year from a 2022-2024 municipal plan was dated 2024-06-30, the article's date,
+    and a gas project's Planned status 2015, its target year, from a 2014 page."""
+    (source,) = contract(prompt_for(THUNDER_BAY))["sources"]
+    assert source["values"][0]["value_date"] == (
+        "The date the value is true for (a figure's own year, never a target year; else the source's date): "
+        "YYYY-MM-DD, YYYY-MM, or YYYY"
+    )
+
+
 def test_our_coordinates_are_rounded_to_about_a_kilometre_with_the_place_names():
     prompt = prompt_for(THUNDER_BAY)
     context = json.loads(section(prompt, "Site context"))
