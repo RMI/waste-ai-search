@@ -353,6 +353,18 @@ Brandon MB" is never sent, while "5405 Mapleward Road" is. The words are landfil
 station, centre, depot, park or grounds after waste, refuse, recycling, transfer, disposal and the
 like.
 
+**An address is sent with the source's own town and state.** The agent gives the town and state each
+source puts the facility in (`stated_municipality`, `stated_state`), and each is added to the
+address where it doesn't already name it, accents and case aside, the state as the run's
+`state_names.json` writes it. Site 4853's "colonia El Zarco", in Yautepec, Morelos, is sent as
+"colonia El Zarco, Yautepec, Morelos": sent bare, it was matched to a street of that name in Estado
+de México, 66.55 km away, and four pages the judges called ours were flagged as more than 5 km from
+our site. A place counts as named by a part that is it or a later part that holds it, not by the
+first part, since a street is often named after a state, as Calle Morelos is. An address still in
+one part, with no town or state, isn't sent: a geocoder would take any place of that name. And
+Nominatim says which state each match is in: one in another state than the source's isn't used.
+The locate step and arbitration both read `state_names.json`, so both look up the same text.
+
 **A PO box is where post goes, not where the site is.** A PO box, `Box 219`, `C.P.`, case postale,
 private or locked bag, `PMB`, `BP` and the like is taken out of an address, and what is left is
 sent only if it still has a civic number or names a road: "29786 Rte. 2 PO Box 253 Wellington PE"
@@ -392,13 +404,14 @@ configured". Choose one with `WASTE_AI_SEARCH_GEOCODER` in `.env`, or with `--ge
 | Geocoder | Settings | How a match is read |
 |---|---|---|
 | `azure-maps` | `AZURE_MAPS_SUBSCRIPTION_KEY`, or `AZURE_MAPS_CLIENT_ID` to sign in with Entra ID (`az login`) | [Get Geocoding](https://learn.microsoft.com/en-us/rest/api/maps/search/get-geocoding?view=rest-maps-2026-01-01), api-version 2026-01-01. An address matched to its rooftop or parcel is `rooftop`; an interpolated address, a block or an intersection is `street`. A match it had to broaden (`UpHierarchy`), an ambiguous one, or Low confidence is not used. The account is IT's to create. |
-| `nominatim` | `NOMINATIM_URL` (the public instance if blank) and `NOMINATIM_USER_AGENT` (default `waste-ai-search (RMI)`, which names the application, never a person) | OpenStreetMap's geocoder, at most one request a second. An address point or building is `rooftop`; a minor road, or a house number Nominatim interpolated along its street (`place=house` on a way), is `street`, as with Azure Maps. A major road (motorway, trunk, primary, secondary) is not used. A mapped feature that carries the address, such as the landfill itself, is not used: it would be OSM's own point. Enough for the live test. |
+| `nominatim` | `NOMINATIM_URL` (the public instance if blank) and `NOMINATIM_USER_AGENT` (default `waste-ai-search (RMI)`, which names the application, never a person) | OpenStreetMap's geocoder, at most one request a second. An address point or building is `rooftop`; a minor road, or a house number Nominatim interpolated along its street (`place=house` on a way), is `street`, as with Azure Maps. A major road (motorway, trunk, primary, secondary) is not used. A mapped feature that carries the address, such as the landfill itself, is not used: it would be OSM's own point. A match in another state than the source's is not used. Enough for the live test. |
 | `none` | | Addresses stay unlocated. |
 
 ### `source_locations.json`
 
-Every answer is kept in `source_locations.json` in the run folder, keyed by the stated text and its
-country, never by site. So an address is looked up once however many sources state it, and a
+Every answer is kept in `source_locations.json` in the run folder, keyed by the text located (an
+address as sent, with its town and state) and its country, never by site, with the state a geocoded
+match is in. So an address is looked up once however many sources state it, and a
 resumed search or the follow-up pass looks up only what is new. An address kept as "no geocoder
 configured" is looked up once a geocoder is set; a failed lookup is not kept, and is tried again
 next time. Any other answer is kept, so to look addresses up again with another geocoder, delete

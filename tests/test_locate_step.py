@@ -199,3 +199,35 @@ def test_a_geocoder_configured_wrongly_stops_the_search_before_anything_is_paid_
     with pytest.raises(ValueError, match="AZURE_MAPS_SUBSCRIPTION_KEY"):
         search.run_search(config)
     assert called == []
+
+
+def test_an_address_is_located_with_its_town_and_state_and_arbitration_reads_it_back(tmp_path, monkeypatch):
+    """The locate step names the source's state as Nominatim does, and so does arbitration, from the
+    run's state_names.json: both look up "colonia El Zarco, Yautepec, Morelos"."""
+    class Nominatim(FakeGeocoder):
+        def geocode(self, address, iso2):
+            self.calls.append((address, iso2))
+            return GeocodeMatch(18.9046, -99.0612, "street", "highway=residential on way, rank 26", "Morelos")
+
+        def state(self, text, iso2):  # noqa: ARG002
+            return {"Mor.": "Morelos", "Morelos": "Morelos"}.get(text, "")
+
+    zarco = source("https://diariodemorelos.example/yautepec", address="colonia El Zarco",
+                   stated_municipality="Yautepec", stated_state="Mor.")
+    path = tmp_path / "seed.csv"
+    path.write_text(
+        "site_id,internal_facility_id,site_name,country_iso3,latitude,longitude,admin1,contributing_data_sources,reference_year\n"
+        "4853,4853,Ojo Seco Municipal Open-Air Dump,MEX,18.91608333,-99.06905556,Morelos,osm_2022,2022\n",
+        encoding="utf-8",
+    )
+    geocoder = Nominatim()
+    monkeypatch.setattr(search, "get_client", lambda _config: Client(response(zarco)))
+    monkeypatch.setattr(search, "make_geocoder", lambda name: geocoder)
+    config = PipelineConfig(input_csv=path, run_dir=tmp_path / "run", run_id="run", site_delay_seconds=0)
+    search.run_search(config)
+    assert geocoder.calls == [("colonia El Zarco, Yautepec, Morelos", "MX")]
+
+    run_arbitration(config)
+    [row] = list(csv.DictReader((config.run_dir / "found_values.csv").open(encoding="utf-8-sig")))
+    assert (row["coordinates_from"], row["location_note"]) == ("address (street)", "")
+    assert float(row["distance_km"]) < 5

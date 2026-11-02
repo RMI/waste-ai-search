@@ -20,6 +20,7 @@ from waste_ai_search.locate import (
     MAJOR_ROAD,
     MAJOR_ROAD_REASON,
     NO_GEOCODER,
+    NO_PLACE_REASON,
     NONE,
     NOT_LOCATED,
     ROOFTOP,
@@ -49,6 +50,7 @@ from waste_ai_search.locate import (
     stated_coordinates,
     stated_location_text,
     states_location,
+    with_place,
 )
 
 
@@ -251,7 +253,7 @@ def test_an_older_responses_location_is_read_by_its_kinds():
 
     geocoder = FakeGeocoder({
         "Gate Road": GeocodeMatch(48.4500, -89.3700, ROOFTOP, ""),
-        "Mapleward Road east of Thunder Bay": GeocodeMatch(48.40, -89.20, STREET, ""),
+        "Mapleward Road east of Thunder Bay, Ontario": GeocodeMatch(48.40, -89.20, STREET, ""),
     })
     both = old("48.4410, -89.3690 | Gate Road", "coordinates | street address")
     assert (both["stated_coordinates"], both["stated_address"]) == ("48.4410, -89.3690", "Gate Road")
@@ -259,7 +261,7 @@ def test_an_older_responses_location_is_read_by_its_kinds():
     # Labels were never reliable: coordinates labelled an address, or not at all, still count.
     assert locate_source(old("48.4410, -89.3690", "street address"), SITE).basis == COORDINATES
     assert locate_source(old("48.4410, -89.3690", ""), SITE).basis == COORDINATES
-    place = locate_source(old("Mapleward Road east of Thunder Bay", "place description"), SITE, {}, geocoder, live=True)
+    place = locate_source(old("Mapleward Road east of Thunder Bay, Ontario", "place description"), SITE, {}, geocoder, live=True)
     assert place.basis == STREET
     assert locate_source(old("Not stated", "none"), SITE).reason == "no location stated"
 
@@ -287,7 +289,7 @@ def test_a_rooftop_address_is_a_location_and_a_street_one_matches_only():
     assert street.basis == STREET
     town = locate_source(source(address="Winnipeg, MB"), SITE, {}, geocoder, live=True)
     assert (town.basis, town.reason) == (NONE, "geocoded only coarser than a street, so not used")
-    missing = locate_source(source(address="Nowhere Lane"), SITE, {}, geocoder, live=True)
+    missing = locate_source(source(address="Nowhere Lane, Winnipeg, MB"), SITE, {}, geocoder, live=True)
     assert (missing.basis, missing.reason) == (NONE, "the geocoder found no match")
     assert {country for _address, country in geocoder.calls} == {"CA"}
 
@@ -305,17 +307,17 @@ def test_an_address_is_geocoded_once_per_country():
 
 def test_an_address_cached_without_a_geocoder_is_tried_again_once_there_is_one():
     cache = {}
-    stated = source(address="1 Tip Road")
+    stated = source(address="1 Tip Road, Thunder Bay")
     locate_source(stated, SITE, cache, None, live=True)
-    geocoder = FakeGeocoder({"1 Tip Road": GeocodeMatch(48.44, -89.37, ROOFTOP, "")})
+    geocoder = FakeGeocoder({"1 Tip Road, Thunder Bay": GeocodeMatch(48.44, -89.37, ROOFTOP, "")})
     assert locate_source(stated, SITE, cache, geocoder, live=True).basis == ROOFTOP
 
 
 def test_a_failed_lookup_is_not_cached():
     cache = {}
     with pytest.raises(GeocoderError):
-        locate_source(source(address="1 Tip Road"), SITE, cache, FakeGeocoder(error=TimeoutError("slow")), live=True)
-    assert cache_key("1 Tip Road", "CAN") not in cache
+        locate_source(source(address="1 Tip Road, Thunder Bay"), SITE, cache, FakeGeocoder(error=TimeoutError("slow")), live=True)
+    assert cache_key("1 Tip Road, Thunder Bay", "CAN") not in cache
 
 
 def test_po_boxes_and_facility_names_are_never_sent():
@@ -450,24 +452,24 @@ def test_an_address_found_as_written_is_not_sent_again():
 
 def test_coordinates_win_over_an_address_unless_it_lands_more_than_2_km_away():
     geocoder = FakeGeocoder({
-        "Gate Road": GeocodeMatch(48.4500, -89.3700, ROOFTOP, ""),   # about 1 km away
-        "Head Office": GeocodeMatch(48.3800, -89.2500, ROOFTOP, ""),  # about 11 km away
+        "Gate Road, Thunder Bay": GeocodeMatch(48.4500, -89.3700, ROOFTOP, ""),   # about 1 km away
+        "Head Office, Thunder Bay": GeocodeMatch(48.3800, -89.2500, ROOFTOP, ""),  # about 11 km away
     })
-    close = locate_source(source("48.4410, -89.3690", "Gate Road"), SITE, {}, geocoder, live=True)
+    close = locate_source(source("48.4410, -89.3690", "Gate Road, Thunder Bay"), SITE, {}, geocoder, live=True)
     assert (close.basis, close.value()) == (COORDINATES, "48.441, -89.369")
-    far = locate_source(source("48.4410, -89.3690", "Head Office"), SITE, {}, geocoder, live=True)
+    far = locate_source(source("48.4410, -89.3690", "Head Office, Thunder Bay"), SITE, {}, geocoder, live=True)
     assert far.basis == NONE and far.reason.startswith("doubtful: its address lands")
 
 
 def test_a_located_address_beats_coarse_coordinates():
-    geocoder = FakeGeocoder({"Gate Road": GeocodeMatch(48.4500, -89.3700, ROOFTOP, "")})
-    located = locate_source(source("48.4, -89.4", "Gate Road"), SITE, {}, geocoder, live=True)
+    geocoder = FakeGeocoder({"Gate Road, Thunder Bay": GeocodeMatch(48.4500, -89.3700, ROOFTOP, "")})
+    located = locate_source(source("48.4, -89.4", "Gate Road, Thunder Bay"), SITE, {}, geocoder, live=True)
     assert located.basis == ROOFTOP
 
 
 def test_copied_coordinates_leave_the_address():
-    geocoder = FakeGeocoder({"Gate Road": GeocodeMatch(48.4500, -89.3700, ROOFTOP, "")})
-    stated = source("48.84, -87.43", "Gate Road")  # the prompt's point
+    geocoder = FakeGeocoder({"Gate Road, Thunder Bay": GeocodeMatch(48.4500, -89.3700, ROOFTOP, "")})
+    stated = source("48.84, -87.43", "Gate Road, Thunder Bay")  # the prompt's point
     assert locate_source(stated, SITE, {}, geocoder, live=True).basis == ROOFTOP
 
 
@@ -716,9 +718,9 @@ def test_in_prose_the_first_precise_pair_is_the_location():
 
 def test_a_leading_name_is_taken_off_whatever_its_case():
     geocoder = FakeGeocoder()
-    stated = source(address="BRADY ROAD LANDFILL - 1777 Brady Road", facility_name_english="Brady Road Landfill")
+    stated = source(address="BRADY ROAD LANDFILL - 1777 Brady Road, Winnipeg", facility_name_english="Brady Road Landfill")
     locate_source(stated, SITE, {}, geocoder, live=True)
-    assert geocoder.calls == [("1777 Brady Road", "CA")]
+    assert geocoder.calls == [("1777 Brady Road, Winnipeg", "CA")]
 
 
 def test_saving_leaves_no_temporary_file(tmp_path):
@@ -925,11 +927,11 @@ def test_our_own_names_are_never_geocoded_either():
         assert "facility's name" in located.reason
     # A name the source gives as a found_facility_name value counts too.
     valued = source(
-        address="Mapleward Landfill, 5405 Mapleward Road",
+        address="Mapleward Landfill, 5405 Mapleward Road, Thunder Bay",
         values=[{"attribute_name": "found_facility_name", "value": "Mapleward Landfill"}],
     )
     locate_source(valued, SITE, {}, geocoder, live=True)
-    assert geocoder.calls == [("5405 Mapleward Road", "CA")]
+    assert geocoder.calls == [("5405 Mapleward Road, Thunder Bay", "CA")]
 
 
 def test_a_leading_name_spelled_with_an_ampersand_is_taken_off():
@@ -972,7 +974,7 @@ def test_an_address_with_no_civic_number_ending_in_a_facility_word_is_a_name(sta
 @pytest.mark.parametrize(
     "stated",
     [
-        "5405 Mapleward Road Landfill",          # a civic number: an address after all
+        "5405 Mapleward Road Landfill, Thunder Bay",  # a civic number: an address after all
         "Unit 3, 12 Tip Lane",                   # a facility word that is not at the end
         "1777 Brady Road, Winnipeg MB",
         "Mapleward Road, Thunder Bay",
@@ -983,3 +985,107 @@ def test_an_address_with_a_civic_number_or_no_facility_word_at_its_end_is_sent(s
     geocoder = FakeGeocoder()
     locate_source(source(address=stated), SITE, {}, geocoder, live=True)
     assert len(geocoder.calls) == 1
+
+
+# --- an address goes with the source's own town and state (#21) ------------------------------------
+OJO_SECO = {"site_id": "4853", "site_name": "Ojo Seco Municipal Open-Air Dump", "country_iso3": "MEX",
+            "latitude": "18.91608333", "longitude": "-99.06905556"}
+# The run's state names (state_names.json), as Nominatim writes them.
+STATES = {
+    cache_key(text, "MEX"): {"text": text, "country": "MEX", "name": name, "geocoder": "nominatim"}
+    for text, name in (("Morelos", "Morelos"), ("Mor.", "Morelos"), ("Edo. Méx.", "Estado de México"))
+}
+
+
+def test_an_address_is_sent_with_the_town_and_state_the_source_gives():
+    """Site 4853 (Ojo Seco, Yautepec, Morelos): Terra and Sol gave "colonia El Zarco", in Yautepec,
+    Morelos. Sent bare, Nominatim matched a street of that name in Estado de México, 66.55 km away,
+    and four pages the judges called ours were flagged more than 5 km from our site."""
+    zarco = source(address="colonia El Zarco", stated_municipality="Yautepec", stated_state="Mor.")
+    geocoder = FakeGeocoder({
+        "colonia El Zarco": GeocodeMatch(19.5128796, -99.0219246, STREET, "highway=residential on way, rank 26", "Estado de México"),
+        "colonia El Zarco, Yautepec, Morelos": GeocodeMatch(18.9046, -99.0612, STREET, "highway=residential on way, rank 26", "Morelos"),
+    })
+    cache = {}
+    located = locate_source(zarco, OJO_SECO, cache, geocoder, live=True, states=STATES)
+    # The state as the run's state names write it, not as the source abbreviates it.
+    assert geocoder.calls == [("colonia El Zarco, Yautepec, Morelos", "MX")]
+    assert located.basis == STREET and haversine_km(*located.point, 18.91608333, -99.06905556) < 5
+    assert cache[cache_key("colonia El Zarco, Yautepec, Morelos", "MEX")]["state"] == "Morelos"
+
+
+@pytest.mark.parametrize(("stated", "town", "state", "sent"), [
+    ("Av. Juárez 100, CUERNAVACA, Morelos", "Cuernavaca", "Morelos", "Av. Juárez 100, CUERNAVACA, Morelos"),
+    ("Camino Real 5, Querétaro", "Queretaro", "Querétaro", "Camino Real 5, Querétaro"),
+    ("Libramiento Norte 3, Yautepec de Zaragoza", "Yautepec", "Morelos", "Libramiento Norte 3, Yautepec de Zaragoza, Morelos"),
+    # A street named after the state doesn't name the state.
+    ("Calle Morelos 3, Cuautla", "Cuautla", "Morelos", "Calle Morelos 3, Cuautla, Morelos"),
+    ("Yautepec, Morelos", "Yautepec", "Morelos", "Yautepec, Morelos"),
+])
+def test_a_town_or_state_the_address_already_names_isnt_added_again(stated, town, state, sent):
+    assert with_place(stated, town, state) == sent
+    assert with_place("", town, state) == ""
+
+
+def test_an_address_of_one_part_with_no_town_or_state_isnt_sent():
+    """Round 2's other bare texts: "San Sebastián" matched a mountain, and "carretera Las Lumbreras"
+    landed 0.63 km from the site only by luck."""
+    geocoder = FakeGeocoder()
+    for stated in ("San Sebastián", "carretera Las Lumbreras"):
+        located = locate_source(source(address=stated), OJO_SECO, {}, geocoder, live=True, states=STATES)
+        assert (located.basis, located.reason) == (NONE, NO_PLACE_REASON)
+    assert geocoder.calls == []
+    # Its plainer form, where it has a place after all, still is.
+    locate_source(source(address="765 33rd Street East in Brandon"), SITE, {}, geocoder, live=True)
+    assert geocoder.calls == [("765 33rd Street East, Brandon", "CA")]
+
+
+def test_a_match_in_another_state_than_the_sources_isnt_used():
+    """Nominatim's address details give the state each match is in, at no extra request."""
+    cache = {}
+    elsewhere = GeocodeMatch(19.5129, -99.0219, STREET, "highway=residential on way, rank 26", "Estado de México")
+    geocoder = FakeGeocoder({"colonia El Zarco, Yautepec, Morelos": elsewhere})
+    zarco = source(address="colonia El Zarco", stated_municipality="Yautepec", stated_state="Morelos")
+    located = locate_source(zarco, OJO_SECO, cache, geocoder, live=True, states=STATES)
+    assert (located.basis, located.reason) == (NONE, "the geocoder put it in Estado de México, not Morelos as the source says, so not used")
+    # Arbitration reads the same answer back and refuses it the same way.
+    assert locate_source(zarco, OJO_SECO, cache, states=STATES).reason == located.reason
+    # An answer kept before matches had a state isn't refused, nor is one where the source's state
+    # isn't known as the geocoder names it.
+    old = {k: {key: value for key, value in entry.items() if key != "state"} for k, entry in cache.items()}
+    assert locate_source(zarco, OJO_SECO, old, states=STATES).basis == STREET
+    unknown = source(address="colonia El Zarco, Yautepec", stated_state="Morelia")
+    geocoder = FakeGeocoder({"colonia El Zarco, Yautepec, Morelia": elsewhere})
+    assert locate_source(unknown, OJO_SECO, {}, geocoder, live=True, states=STATES).basis == STREET
+
+
+def test_a_plainer_form_gets_the_same_town_and_state_and_a_kilometre_marker_still_isnt_sent():
+    geocoder = FakeGeocoder({"Calle Libramiento 12, Yautepec, Morelos": GeocodeMatch(18.90, -99.06, STREET, "", "Morelos")})
+    plainer = source(address="Calle Libramiento 12 at the end of the road", stated_municipality="Yautepec", stated_state="Morelos")
+    assert locate_source(plainer, OJO_SECO, {}, geocoder, live=True, states=STATES).basis == STREET
+    assert [address for address, _country in geocoder.calls] == [
+        "Calle Libramiento 12 at the end of the road, Yautepec, Morelos", "Calle Libramiento 12, Yautepec, Morelos",
+    ]
+    marker = source(address="Carretera Yautepec-Tlayacapan km 4", stated_municipality="Yautepec", stated_state="Morelos")
+    assert locate_source(marker, OJO_SECO, {}, geocoder, live=True, states=STATES).reason == ALONG_A_ROAD_REASON
+    assert len(geocoder.calls) == 2
+
+
+def test_the_locate_step_and_arbitration_look_up_the_same_text():
+    """Both read the run's state names, so the state the locate step sent is the one arbitration
+    looks for. Without them, arbitration would look for "Edo. Méx." and find nothing."""
+    toluca = {**OJO_SECO, "site_id": "1", "latitude": "19.29", "longitude": "-99.65"}
+    stated = source(address="Ejido San Diego", stated_municipality="Toluca", stated_state="Edo. Méx.")
+    geocoder = FakeGeocoder({"Ejido San Diego, Toluca, Estado de México": GeocodeMatch(19.30, -99.64, STREET, "", "Estado de México")})
+    cache = {}
+    live = locate_source(stated, toluca, cache, geocoder, live=True, states=STATES)
+    assert list(cache) == [cache_key("Ejido San Diego, Toluca, Estado de México", "MEX")]
+    assert locate_source(stated, toluca, cache, states=STATES) == live
+    assert locate_source(stated, toluca, cache).reason == NOT_LOCATED
+
+
+def test_a_nominatim_match_keeps_the_state_it_is_in():
+    result = {"lat": "19.5128796", "lon": "-99.0219246", "category": "highway", "type": "residential", "osm_type": "way",
+              "place_rank": 26, "address": {"road": "El Zarco", "county": "Ecatepec de Morelos", "state": "Estado de México"}}
+    assert nominatim_match(result).state == "Estado de México"
+    assert nominatim_match({**result, "address": {}}).state == ""

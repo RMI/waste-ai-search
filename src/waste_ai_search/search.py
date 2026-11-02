@@ -298,7 +298,7 @@ def locate_run(
                 if dropped_source_site(source.get("url")) or not states_location(source):
                     continue
                 try:
-                    located.append(locate_source(source, site, cache, geocoder, live=True))
+                    located.append(locate_source(source, site, cache, geocoder, live=True, states=states))
                 except GeocoderError as exc:
                     failures.append(str(exc))
                     continue

@@ -33,6 +33,10 @@ where most of our sites came from, so it would hand us our own point back. Only 
 is sent, with any leading facility name taken off, and never text that has no civic number and a
 part ending in a word for a waste site ("Mapleward Road Landfill, Thunder Bay, ON"), which is a
 name too.
+
+An address is sent with the town and state the source gives (with_place), so a geocoder doesn't
+take a namesake in another town; one with neither isn't sent, and a match in another state than
+the source's isn't used.
 """
 from __future__ import annotations
 
@@ -132,6 +136,9 @@ ALONG_A_ROAD = re.compile(
     re.IGNORECASE,
 )
 ALONG_A_ROAD_REASON = "a kilometre marker or a distance can't be placed: a geocoder finds only the road or the town"
+# An address is sent with the town and state the source puts the facility in (with_place). One that
+# is still a single part has neither, so a geocoder would take whatever place of that name it finds.
+NO_PLACE_REASON = "an address with no town or state could be anywhere in the country, so it isn't sent"
 
 
 @dataclass
@@ -149,6 +156,8 @@ class Located:
     # For a doubtful source, which has no point: its coordinates and its address, each with how far
     # off it may be (rough_points).
     doubtful_points: tuple[tuple[float, float, float], ...] = ()
+    # For a geocoded address, the state the geocoder put it in, where it says (Nominatim does).
+    state: str = ""
 
     @property
     def point(self) -> tuple[float, float] | None:
@@ -673,6 +682,8 @@ class GeocodeMatch:
     precision: str
     # What the geocoder said about the match, kept in source_locations.json.
     match: str
+    # The state, province or region the match is in, as the geocoder names it; "" where it doesn't say.
+    state: str = ""
 
 
 class Geocoder(Protocol):
@@ -888,7 +899,8 @@ def nominatim_place(address: dict[str, Any]) -> dict[str, str]:
 
 
 def nominatim_match(result: dict[str, Any]) -> GeocodeMatch | None:
-    """Read one Nominatim result: an address point or building is rooftop, a road is street.
+    """Read one Nominatim result: an address point or building is rooftop, a road is street, and the
+    state it is in.
 
     A house number Nominatim interpolated along its street comes back as place=house too, but on
     the interpolation line, a way, so it counts as street, as Azure Maps' interpolated addresses
@@ -914,7 +926,9 @@ def nominatim_match(result: dict[str, Any]) -> GeocodeMatch | None:
         precision = STREET if on_way else ROOFTOP
     elif category == "highway":
         precision = MAJOR_ROAD if kind.removesuffix("_link") in MAJOR_ROADS else STREET
-    return GeocodeMatch(lat, lon, precision, described)
+    # The state it is in, from the address details asked for with it, at no extra request.
+    state = nominatim_place(result.get("address") or {}).get("admin1", "")
+    return GeocodeMatch(lat, lon, precision, described, state)
 
 
 def _env(name: str) -> str:
@@ -975,6 +989,11 @@ def iso2(iso3: Any) -> str:
 def _plain(text: Any) -> str:
     """Words only, in one case, with "&" read as "and"."""
     return re.sub(r"[\W_]+", " ", normalize_scalar(text).casefold().replace("&", " and ")).strip()
+
+
+def _bare(text: Any) -> str:
+    """Words only, in one case, without accents: "Nuevo León" is "nuevo leon"."""
+    return "".join(c for c in unicodedata.normalize("NFKD", _plain(text)) if not unicodedata.combining(c))
 
 
 def _leading_name(name: str) -> re.Pattern:
@@ -1051,6 +1070,30 @@ _LOT = re.compile(r"^(?:lots?|units?|suites?|parcels?|plots?|blocks?)\s+\S", re.
 _LOCAL_GOVERNMENT = re.compile(r"^(?:city|town|village|township|municipality|borough)\s+of\s+", re.IGNORECASE)
 
 
+def with_place(text: str, municipality: str, state: str) -> str:
+    """An address with the town and the state the source puts the facility in, each added where the
+    text doesn't already name it, accents and case aside: "colonia El Zarco" is sent as "colonia El
+    Zarco, Yautepec, Morelos". Sent bare, it was matched to a street of that name 66 km away, in
+    another state. A place is named by a part that is it, or that a later part holds: the first part
+    is the street or place itself, which is often named after a state, as Calle Morelos is. "" stays
+    "".
+    """
+    parts = [_bare(part) for part in re.split(r"[,;]", text) if _bare(part)]
+    placed = text
+    for place in (municipality, state):
+        bare = _bare(place)
+        named = any(part == bare or (index and f" {bare} " in f" {part} ") for index, part in enumerate(parts))
+        if text and bare and not named:
+            placed = f"{placed}, {place}"
+            parts.append(bare)
+    return placed
+
+
+def _one_part(text: str) -> bool:
+    """Whether an address is a single part, with no town or state after a comma."""
+    return len([part for part in re.split(r"[,;]", text) if part.strip()]) < 2
+
+
 def plainer_address(text: str, names: list[str]) -> str:
     """The address without the words around it that keep a geocoder from finding it, or "" when
     there are none, or taking them out leaves no street with its place.
@@ -1125,6 +1168,9 @@ def _record(cache: dict[str, dict[str, Any]], text: str, iso3: Any, located: Loc
         "geocoder": located.geocoder,
         "match": match,
     }
+    if located.state:
+        # Where the geocoder put it, so a match in another state than the source's isn't used.
+        entry["state"] = located.state
     earlier = cache.get(key) or {}
     same = all(earlier.get(field) == value for field, value in entry.items())
     entry["located_at"] = earlier.get("located_at") if same and earlier.get("located_at") else date.today().isoformat()
@@ -1138,6 +1184,7 @@ def _from_entry(entry: dict[str, Any]) -> Located:
         normalize_scalar(entry.get("basis")) or NONE,
         normalize_scalar(entry.get("reason")),
         normalize_scalar(entry.get("geocoder")),
+        state=normalize_scalar(entry.get("state")),
     )
 
 
@@ -1173,10 +1220,11 @@ def geocode_address(
         if found is None:
             located, match = Located(reason="the geocoder found no match", geocoder=geocoder.name), ""
         elif found.precision in (ROOFTOP, STREET):
-            located, match = Located(found.latitude, found.longitude, found.precision, "", geocoder.name), found.match
+            located = Located(found.latitude, found.longitude, found.precision, "", geocoder.name, state=found.state)
+            match = found.match
         else:
             reason = MAJOR_ROAD_REASON if found.precision == MAJOR_ROAD else "geocoded only coarser than a street, so not used"
-            located = Located(found.latitude, found.longitude, NONE, reason, geocoder.name)
+            located = Located(found.latitude, found.longitude, NONE, reason, geocoder.name, state=found.state)
             match = found.match
     if cache is not None:
         _record(cache, address, iso3, located, match)
@@ -1218,10 +1266,19 @@ def canonical_state(
 def same_state(ours: str, theirs: str) -> bool:
     """Whether two states' names, as canonical_state gives them, are one state, accents aside: a
     seed's own state may be written without them."""
-    def bare(text: str) -> str:
-        return "".join(c for c in unicodedata.normalize("NFKD", _plain(text)) if not unicodedata.combining(c))
+    return _bare(ours) == _bare(theirs)
 
-    return bare(ours) == bare(theirs)
+
+def _in_state(located: Located, state: str) -> Located:
+    """A geocoded address the geocoder put in another state than the source's is a namesake there,
+    and isn't used. Only where both states are known: an answer kept before the geocoder's state was
+    has none."""
+    if located.basis in MATCHING_BASES and located.state and state and not same_state(located.state, state):
+        return Located(
+            reason=f"the geocoder put it in {located.state}, not {state} as the source says, so not used",
+            geocoder=located.geocoder,
+        )
+    return located
 
 
 # --- one source --------------------------------------------------------------------------------
@@ -1280,6 +1337,7 @@ def locate_source(
     cache: dict[str, dict[str, Any]] | None = None,
     geocoder: Geocoder | None = None,
     live: bool = False,
+    states: dict[str, dict[str, Any]] | None = None,
 ) -> Located:
     """Where one source puts the facility, after the guards. `site` is the site searched.
 
@@ -1287,10 +1345,17 @@ def locate_source(
     nothing but coordinates: the agent does not always fill the right field. Any other address is
     looked up in `cache`, and only a `live` call (the locate step) asks `geocoder` for one that
     isn't there, and records every part it reads in `cache`.
+
+    An address goes with the town and state the source puts the facility in (with_place), the state
+    named as `states`, the run's state_names.json, names it. The locate step and arbitration both
+    pass it, so both look up the same text. A match the geocoder put in another state isn't used.
     """
     if not states_location(source):
         return Located(reason="no location stated")
     iso3 = normalize_scalar(site.get("country_iso3")).upper()
+    municipality = _stated(source, "stated_municipality")
+    known_state = canonical_state(_stated(source, "stated_state"), iso3, states, None, live=False)
+    state = known_state or _stated(source, "stated_state")
     # Every name the facility goes by, the source's and ours: none of them is ever geocoded.
     names = [
         source.get("facility_name_in_source"),
@@ -1330,17 +1395,21 @@ def locate_source(
         elif not sent or names_a_facility(sent):
             tried = Located(reason="the stated location is the facility's name, which is never geocoded")
         else:
-            # Text with a kilometre marker or a distance is never sent, but its plainer form, with
-            # the directions taken out, may be: "4 Sand Dam Road, North Bay".
-            if ALONG_A_ROAD.search(sent):
+            placed = with_place(sent, municipality, state)
+            # Text with a kilometre marker or a distance is never sent, nor one with no town or
+            # state, but its plainer form, with the directions taken out, may be: "4 Sand Dam Road,
+            # North Bay".
+            if ALONG_A_ROAD.search(placed):
                 tried = Located(reason=ALONG_A_ROAD_REASON)
                 if live and cache is not None:
-                    _record(cache, sent, iso3, tried)
+                    _record(cache, placed, iso3, tried)
+            elif _one_part(placed):
+                tried = Located(reason=NO_PLACE_REASON)
             else:
-                tried = geocode_address(sent, iso3, cache, geocoder, live)
-            plainer = plainer_address(sent, names) if tried.basis not in MATCHING_BASES else ""
+                tried = _in_state(geocode_address(placed, iso3, cache, geocoder, live), known_state)
+            plainer = with_place(plainer_address(placed, names), municipality, state) if tried.basis not in MATCHING_BASES else ""
             if plainer and not ALONG_A_ROAD.search(plainer):
-                retried = geocode_address(plainer, iso3, cache, geocoder, live)
+                retried = _in_state(geocode_address(plainer, iso3, cache, geocoder, live), known_state)
                 if retried.basis in MATCHING_BASES:
                     tried = retried
         # A later address takes over from one that placed nothing, such as a mailing address.

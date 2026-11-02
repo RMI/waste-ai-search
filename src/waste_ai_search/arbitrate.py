@@ -100,6 +100,7 @@ def extract_evidence(
     link_results: dict[str, LinkResult] | None = None,
     keep_broken_links: bool = False,
     locations: dict[str, dict[str, Any]] | None = None,
+    states: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Turn one cached response, of either shape, into evidence: every value its sources give.
 
@@ -119,7 +120,8 @@ def extract_evidence(
     source's name and location only check that it is about the site searched.
 
     Each source's stated location is read into a point (locate.py), with geocoded addresses taken
-    from `locations`, the run's source_locations.json; nothing here reaches the network. Every row
+    from `locations`, the run's source_locations.json, as the locate step sent them with the state
+    `states` (state_names.json) names; nothing here reaches the network. Every row
     of a source carries the facility it describes and that point, and its number in the response
     (source_index), by which found_values.py pairs it with the site searched.
     """
@@ -145,7 +147,7 @@ def extract_evidence(
             only_dropped.update(names)
         else:
             kept_attributes.update(names)
-            located[source_index] = locate_source(source, site, locations)
+            located[source_index] = locate_source(source, site, locations, states=states)
 
     def link_for(source: dict[str, Any]) -> tuple[str, str, bool, LinkResult | None]:
         """The URL to file a source under, its link verdict, and whether the link is dead."""
@@ -641,6 +643,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         _by_attribute, site_evidence, site_sources, warnings = extract_evidence(
             site, payload, config.run_id, config.dataset_version, access_date,
             link_results=link_results, keep_broken_links=config.keep_broken_links, locations=locations,
+            states=states,
         )
         for row in site_sources:
             row[STATE_NAME] = canonical_state(row.get("stated_state"), site.get("country_iso3"), states, None, live=False)
