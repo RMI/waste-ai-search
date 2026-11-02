@@ -187,6 +187,9 @@ def test_the_readme_walks_an_sme_through_a_row_in_plain_words(tmp_path):
     assert "If you can't tell which, leave decision blank" in steps
     # Incoming waste counts municipal waste only, as the standardized spec asks (30 October).
     assert "Incoming waste is municipal waste only: mark rubble, soil or tailings Wrong, or type just the municipal part in corrected_value." in " ".join(steps.split())
+    # A page naming our site only by its town is ours unless it mentions a replacement or another
+    # place, as the agent is told (Hugh, 1 November).
+    assert "A page naming it only by its town is ours unless it mentions a replacement or another place." in " ".join(steps.split())
     # Short enough to be read.
     assert len(purpose.split()) + len(steps.split()) < 500
 

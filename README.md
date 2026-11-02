@@ -1403,6 +1403,7 @@ approving it would do.
 | `source_coordinates`, `coordinates_from`, `distance_km`, `location_note` | Where the source places the facility, as `lat, lon`: paste it into Google Maps beside `our_coordinates`. `coordinates_from` says what it came from: coordinates the source states, a grid reference, or its address placed on the building or only on the street. A street point can be a kilometre or more off. `distance_km` is how far it is from our site. Where the source states a location but `source_coordinates` is blank, `location_note` says why (too coarse, its address and coordinates disagree, copied from the prompt, a postcode centroid), and `distance_km`, if filled, is roughly how far it is. |
 | `flags` | Why the row needs a second look, shaded where there are any (see below). |
 | `would_load` | What approving loads for this site of ours, one line per value: `attribute = value`, with the year for a yearly attribute, such as `facility_status = Active (2024)`. One value loads per site, attribute and year, so a line can lose to a better-tier value for the same field: the flags say where another source's would. |
+| `evidence` | On a source row, the agent's notes on the page's values, each once: where a page names our site only by its town, the agent says so here. On a ↳ row, the quote, the value as the page writes it where that differs, and the agent's note. |
 | `review_id`, `check` | Hidden, at the end. The pair's id, and on a ↳ row which value it checks: your decisions are read back by them. |
 
 | Flag | What to do |
@@ -1441,6 +1442,9 @@ Pick `decision` from its dropdown:
 - **If it is about another of our sites but you can't tell which,** leave `decision` blank and say so
   in `notes`. A Different site with no `other_site_id` can't be read back.
 - **A renamed site is fine.** The question is whether it is the same facility, not the same name.
+- **A page may name the site only by its town** ("basurero municipal de Tolcayuca"). It is ours
+  unless it mentions a replacement or another place, as the agent is told; `evidence` says where the
+  agent took a page on that basis, and a flag says where the town the page names isn't ours.
 - **The same page under two sites** is decided under each on its own: Correct site under one, and
   Different site or Junk under the other, say.
 

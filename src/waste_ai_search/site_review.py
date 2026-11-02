@@ -150,7 +150,7 @@ def site_review_rows(
             "our_place": place_text(sites_by_id.get(pair.site_id, {})),
             "flags": "\n".join(dict.fromkeys(flags)),
             "would_load": would_load(waiting),
-            "evidence": "",
+            "evidence": agent_notes(waiting),
             "quote": "",
             **{column: "" for column in SITE_REVIEW_EDITABLE},
         })
@@ -193,6 +193,14 @@ def value_record(row: dict[str, Any], loading: dict[tuple[str, str, Any], list[d
         "_attribute": row["attribute_name"],
     })
     return record
+
+
+def agent_notes(rows: list[dict[str, Any]]) -> str:
+    """What the agent said of a page's values, each note once, for its source row, where an SME
+    decides whether the page is ours: the agent says there when a page names our site only by its
+    town (prompt_builder's identity rule; Hugh, 1 November)."""
+    notes = dict.fromkeys(normalize_scalar(row.get("agent_note")) for row in rows)
+    return "\n".join(f"Agent: {note}" for note in notes if note)
 
 
 def evidence(row: dict[str, Any]) -> str:

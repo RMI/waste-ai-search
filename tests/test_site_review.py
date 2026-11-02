@@ -160,6 +160,21 @@ def test_an_inferred_operator_has_a_row_of_its_own_under_a_tier_1_pair_too(tmp_p
     assert operator["evidence"] == "“It says so.”\nAgent: A municipal dump."
 
 
+def test_a_source_row_gives_the_agents_notes_once_each(tmp_path):
+    """Where an SME decides whether the page is ours, the agent's notes on its values, each once:
+    the agent says there when a page names our site only by its town (prompt_builder)."""
+    town_only = "The page names the site only by its place: the municipal dump of Brady."
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://news.example/brady", "Basurero municipal de Brady", source_type="News report", values=[
+            {**value("facility_status", "Active"), "evidence_summary": town_only},
+            {**value("operator", "City of Winnipeg"), "evidence_summary": town_only},
+            {**value("closing_year", "2045"), "evidence_summary": "Expected to close."},
+        ]),
+    ]})
+    page = site_review(run_dir)[0]
+    assert page["evidence"] == f"Agent: {town_only}\nAgent: Expected to close."
+
+
 def test_our_sites_come_in_id_order_with_flagged_pairs_first(tmp_path):
     """Under each of our sites, a pair with a flag comes before one without, whatever order the
     search cited them in; sites are in number order, not text order."""
