@@ -1740,6 +1740,11 @@ independent facts, and the prompt branches on both:
 For a Spanish-language site, neither the translation nor English is searched, except for
 gas-project records (see [What the agent returns](#what-the-agent-returns)).
 
+Every prompt also says our recorded name may be misspelt or garbled, and asks the agent to try
+close spellings before it concludes a site is undocumented. At 5099, "RELLENO SANITARIO EL ASALTO",
+Terra's six searches were all for El Asalto and found nothing; Sol tried El Salto, and found the one
+page judged ours.
+
 A facility whose original matches its translation is left blank rather than repeating the string —
 but its `source_language` is still recorded, because a Portuguese source that translated to itself
 still needs searching in Portuguese.

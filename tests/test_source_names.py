@@ -542,3 +542,24 @@ def test_legal_forms_and_operators_are_found_in_any_spelling(name):
 )
 def test_a_bare_intermunicipal_or_a_lookalike_is_not_an_operators_name(name):
     assert operator_named({"site_name": name, "original_site_name": name}) == ""
+
+
+# --- a misspelt name ------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "site",
+    [
+        {"site_id": "5099", "site_name": "EL ASALTO LANDFILL", "original_site_name": "RELLENO SANITARIO EL ASALTO",
+         "source_language": "es", "country_iso3": "MEX"},
+        {"site_id": "2210", "site_name": "Lixao Municipal", "source_language": "pt", "country_iso3": "BRA"},
+        {"site_id": "7", "site_name": "Greenview Landfill", "country_iso3": "CAN"},
+    ],
+)
+def test_close_spellings_are_tried_before_a_site_is_called_undocumented(site):
+    """At 5099 Terra's six searches were all for 'El Asalto' and found nothing; only Sol tried the
+    likely variant 'El Salto', and found the one page judged ours. INEGI names carry slips like it
+    ('SITIO DE DISPOSICON FINAL')."""
+    names = " ".join(section(build_site_prompt(site, ["operator"]), "Names").split())
+    assert (
+        "- Our recorded name may be misspelt or garbled: if it finds nothing, try close spellings (El Salto for "
+        "El Asalto) before concluding the site is undocumented."
+    ) in names

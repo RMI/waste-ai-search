@@ -526,6 +526,12 @@ Names:
             "  sources use. A source about it may name another operator: let the municipality, state\n"
             "  and our other sites decide.\n"
         )
+    # At 5099 'RELLENO SANITARIO EL ASALTO', Terra's six searches were all for 'El Asalto' and found
+    # nothing; only Sol tried 'El Salto', and found the one page judged ours.
+    names_guidance += (
+        "- Our recorded name may be misspelt or garbled: if it finds nothing, try close spellings\n"
+        "  (El Salto for El Asalto) before concluding the site is undocumented.\n"
+    )
 
     # Batch 1's identity rule. Not asked is not the same as trusted: nothing about identity is asked
     # now, so only a Tier 1-2 provenance lets the prompt call our name or coordinates confirmed. An
