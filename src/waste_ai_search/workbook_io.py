@@ -207,7 +207,7 @@ REVIEW_INSTRUCTIONS = [
             "1. Click our_coordinates to see our site on Google Maps.\n"
             "2. Click source_url: is it about our site? Compare the name it uses "
             "(facility_name_in_source) with ours (site_name), and its town and state (source_place) "
-            "with ours (our_place). link_status says why, if we couldn't read it.\n"
+            "with ours (our_place). If we couldn't read it, link_status says why.\n"
             "3. If the page says where the site is, source_coordinates shows it on the map and "
             "distance_km how far it is from ours. A point from a street address (coordinates_from) "
             "can be a kilometre or more off.\n"

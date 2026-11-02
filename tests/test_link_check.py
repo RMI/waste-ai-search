@@ -575,4 +575,4 @@ def test_the_workbook_readme_says_what_link_status_tells_an_sme():
     from waste_ai_search.workbook_io import REVIEW_INSTRUCTIONS
 
     [site_review] = [tab for tab in REVIEW_INSTRUCTIONS if tab["tab_name"] == "Site_Review"]
-    assert "link_status says why, if we couldn't read it." in site_review["sme_action"]
+    assert "If we couldn't read it, link_status says why." in site_review["sme_action"]
