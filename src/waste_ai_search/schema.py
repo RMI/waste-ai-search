@@ -578,10 +578,9 @@ FOUND_VALUES_HEADERS = [
     # TRUE for an incoming waste amount the source says is mainly other waste, which isn't used.
     "planned", "not_municipal",
     # review_id is the site-source pair whose status this is. value_check is "required" for a key
-    # value from a Tier 3-5 pair, or an operator the agent marked Inferred or Conflicting from any pair,
-    # which an SME checks on its own row; accept-reviews fills the rest:
-    # the pair's decision, the value's (Correct or Wrong) and any value the SME typed instead, and
-    # whether it loads.
+    # value from a Tier 3-5 pair, or an operator the agent marked Inferred or Conflicting from any
+    # pair, which an SME checks on its own row; accept-reviews fills the rest: the pair's decision, the
+    # value's (Correct or Wrong) and any value the SME typed instead, and whether it loads.
     "review_id", "status", "status_reason", "value_check",
     "sme_decision", "value_decision", "corrected_value", "loaded",
 ]
