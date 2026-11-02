@@ -164,11 +164,17 @@ def test_our_records_within_1_km_may_be_this_site_recorded_twice():
     twins = ["BASURERO SAN JUAN DEL RIO (San Juan del Río, under 1 km away)"]
     prompt = prompt_for({**THUNDER_BAY, "our_records_within_1_km": twins})
     assert json.loads(section(prompt, "Site context"))["our_records_within_1_km"] == twins
+    flat = " ".join(prompt.split())
     assert (
         "our_records_within_1_km may be this facility recorded twice: a page about one of them may be about "
         "this one."
-    ) in " ".join(prompt.split())
+    ) in flat
     assert "our_other_sites_nearby" not in prompt
+    # We hold them, so the town rule doesn't say we hold no other site nearby (8690 and 9278).
+    assert (
+        "or about the town's dump, as we hold no other site nearby except those in our_records_within_1_km, "
+        "describes this one unless it speaks of a replacement or another location"
+    ) in flat
 
 
 def test_the_agent_returns_only_sources_about_this_site_as_in_batch_1():

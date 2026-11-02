@@ -559,10 +559,13 @@ Names:
     # one about the dump of the place ours is named after (Hugh, 1 November). In the 31 October
     # Mexico tests 34 of the 84 pages judged ours named the site only by its town, and Terra and Sol
     # declined some, such as San Ignacio Cerro Gordo's, where we hold no other site nearby.
-    towns_dump = (
-        f" where\n  {OTHER_SITES_FIELD} lists none of our sites in that town"
-        if site.get(OTHER_SITES_FIELD) else ", as we hold no other site nearby"
-    )
+    if site.get(OTHER_SITES_FIELD):
+        towns_dump = f" where\n  {OTHER_SITES_FIELD} lists none of our sites in that town"
+    elif site.get(SAME_POINT_FIELD):
+        # Those may be this site recorded twice, but we do hold them (8690 and 9278 in batch 3).
+        towns_dump = f", as we hold\n  no other site nearby except those in {SAME_POINT_FIELD}"
+    else:
+        towns_dump = ", as we hold no other site nearby"
     same_point = (
         f"\n  {SAME_POINT_FIELD} may be this facility recorded twice: a page about one of them may be\n"
         "  about this one."
