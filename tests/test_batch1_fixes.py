@@ -181,6 +181,36 @@ def test_zero_retries_still_makes_one_attempt():
     assert client.search_site({}, "prompt") == {"attributes": []}
 
 
+def test_an_answer_the_content_filter_stopped_is_said_and_not_retried():
+    """Batch 3: Azure's filter stopped the answer at 2479 Cerro Bastón after the agent read news of the
+    town's dump, every time; four tries paid four times for nothing."""
+    from types import SimpleNamespace
+
+    from waste_ai_search.foundry_client import AzureFoundryAgentClient, ContentFiltered, FoundryClientConfig
+
+    stopped = SimpleNamespace(
+        status="incomplete", incomplete_details=SimpleNamespace(reason="content_filter"), model="gpt-5.6-terra",
+        output=[], output_text="I'm sorry, but I cannot assist with that request.", usage=None,
+    )
+    calls = []
+
+    class Responses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return stopped
+
+    openai = SimpleNamespace(conversations=SimpleNamespace(create=lambda: SimpleNamespace(id="c")), responses=Responses())
+    openai.with_options = lambda **kwargs: openai
+    client = AzureFoundryAgentClient.__new__(AzureFoundryAgentClient)
+    client.config = FoundryClientConfig(agent_name="a", max_retries=4)
+    client.project_client = SimpleNamespace(
+        agents=SimpleNamespace(), get_openai_client=lambda agent_name: openai,
+    )
+    with pytest.raises(ContentFiltered, match="content filter"):
+        client.search_site({}, "prompt")
+    assert len(calls) == 1
+
+
 def test_a_rate_limited_call_waits_out_the_minute_before_its_retry():
     """Batch 3's first run had most sites refused (429) and retried two seconds later, into the same
     minute's limit."""

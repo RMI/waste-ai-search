@@ -11,6 +11,12 @@ from typing import Any, Protocol
 from .costs import Usage
 
 
+class ContentFiltered(RuntimeError):
+    """Azure's content filter stopped the agent's answer part-way: on batch 3's Mexican sites, after
+    it read news of the town's dump (2479 Cerro Bastón: "I'm sorry, but I cannot assist with that
+    request."). The same pages stop it again, so it isn't retried."""
+
+
 class FoundryClient(Protocol):
     def search_site(self, site: dict[str, Any], prompt: str) -> dict[str, Any]:
         """Run a source-backed waste-site search and return a JSON-like payload."""
@@ -101,7 +107,7 @@ class AzureFoundryAgentClient:
             except Exception as exc:  # noqa: BLE001 - preserve retries around SDK/network calls
                 last_error = exc
                 delay = retry_delay(exc, attempt)
-                if attempt >= attempts:
+                if attempt >= attempts or isinstance(exc, ContentFiltered):
                     break
                 # A retry that cannot finish in time would only add billed queries.
                 if deadline is not None and time.monotonic() + delay >= deadline:
@@ -190,6 +196,12 @@ class AzureFoundryAgentClient:
             self.usage = Usage()
         self.usage.add(response)
         self.model = str(getattr(response, "model", "") or getattr(self, "model", ""))
+        reason = getattr(getattr(response, "incomplete_details", None), "reason", "")
+        if reason == "content_filter":
+            raise ContentFiltered(
+                "Azure's content filter stopped the agent's answer, probably over a page it read; "
+                f"{count_web_searches(response)} web searches were made."
+            )
         text = getattr(response, "output_text", "")
         if text:
             return text
