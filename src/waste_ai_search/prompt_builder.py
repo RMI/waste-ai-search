@@ -278,11 +278,12 @@ def looks_inactive(site: dict[str, Any]) -> bool:
 # PROCESAMIENTO DE DESECHOS ANAHUAC' (SIMEPRODE), gpt-5.4 and Terra found only the company and
 # returned nothing; Sol searched for the landfill at that place and found pages judged ours. A bare
 # 'Intermunicipal' is not one: 19 of the 21 batch-3 names with one, such as 'RELLENO SANITARIO
-# INTERMUNICIPAL DE ATLIXCO', are the site's own. Of the other two, 3543's 'SISTEMA
-# INTERMUNICIPAL' is caught, and 10668's 'JUNTA INTERMUNICIPAL' (JIORESA) is not.
+# INTERMUNICIPAL DE ATLIXCO', are the site's own. The other two are bodies that run a landfill:
+# 3543's 'SISTEMA INTERMUNICIPAL' and 10668's 'JUNTA INTERMUNICIPAL' (JIORESA, the board that runs
+# the landfill). A bare 'Junta' is not one either: 294's 'LA JUNTA' is a town.
 OPERATOR_NAME_MARKERS = re.compile(
     r"\b(?:S ?A ?DE ?C ?V|SOCIEDAD ANONIMA|S ?DE ?R ?L|SIMEPRODE|PROMOTORA|PROACTIVA|TECMED"
-    r"|SISTEMA INTEGRAL PARA EL MANEJO|SISTEMA INTERMUNICIPAL)\b"
+    r"|SISTEMA INTEGRAL PARA EL MANEJO|SISTEMA INTERMUNICIPAL|JUNTA INTERMUNICIPAL)\b"
 )
 
 

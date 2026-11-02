@@ -762,12 +762,12 @@ the site searched (see [Filing and approving each source](#filing-and-approving-
 
 **A site named after its operator is searched for by its place.** Where our name has a legal form
 (S.A. de C.V., Sociedad Anónima, S. de R.L.) or an operator's name (SIMEPRODE, Promotora,
-Proactiva, TECMED, Sistema Integral para el Manejo, Sistema Intermunicipal), accents and case aside,
+Proactiva, TECMED, Sistema Integral para el Manejo, Sistema or Junta Intermunicipal), accents and case aside,
 the prompt says it looks like an operator's name, which may run sites elsewhere, and asks for the
 landfill or dump at this place under the names local sources use. A source about it may name
 another operator: the municipality, state and our other sites decide. Such a name is never called
 confirmed. A bare "Intermunicipal" doesn't count: "Relleno Sanitario Intermunicipal de Atlixco" is a
-site's own name. 38 of batch 3's 1,553 prompts get this, 15 of them among the 64 sites taking
+site's own name. 39 of batch 3's 1,553 prompts get this, 15 of them among the 64 sites taking
 100,000 t a year or more. In the 31 October Mexico tests, gpt-5.4 and Terra found only the company
 at 4005 "RED RECOLECTOR SA. DE CV." and returned nothing, while Sol found the landfill there, La
 Estación, in pages naming other operators.

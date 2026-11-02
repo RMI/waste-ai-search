@@ -545,6 +545,7 @@ def test_an_operators_name_is_never_called_confirmed():
         "Grupo Contadero S. A. de C. V.", "PROMOTORA AMBIENTAL DE LA LAGUNA SOCIEDAD ANÓNIMA DE CAPITAL VARIABLE",
         "Servicios Ambientales S. de R.L.", "RELLENO SANITARIO A CARGO DE TECMED,", "Proactiva Medio Ambiente",
         "SISTEMA INTERMUNICIPAL DE MANEJO DE RESIDUOS SOLIDOS SIMAR", "simeprode",
+        "JUNTA INTERMUNICIPAL PARA LA OPERACION DE RELLENO SANITARIO (JIORESA)",
     ],
 )
 def test_legal_forms_and_operators_are_found_in_any_spelling(name):
@@ -552,7 +553,9 @@ def test_legal_forms_and_operators_are_found_in_any_spelling(name):
 
 
 @pytest.mark.parametrize(
-    "name", ["RELLENO SANITARIO INTERMUNICIPAL DE ATLIXCO", "Casa de Cvetkovic", "Sistema Integral de Aseo", "Grupo SA"]
+    "name",
+    ["RELLENO SANITARIO INTERMUNICIPAL DE ATLIXCO", "Casa de Cvetkovic", "Sistema Integral de Aseo", "Grupo SA",
+     "LA JUNTA LANDFILL"],
 )
 def test_a_bare_intermunicipal_or_a_lookalike_is_not_an_operators_name(name):
     assert operator_named({"site_name": name, "original_site_name": name}) == ""
