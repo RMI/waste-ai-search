@@ -277,8 +277,9 @@ def looks_inactive(site: dict[str, Any]) -> bool:
 # 4005 'RED RECOLECTOR SA. DE CV.' and 5339 'SISTEMA INTEGRAL PARA EL MANEJO ECOLOGICO Y
 # PROCESAMIENTO DE DESECHOS ANAHUAC' (SIMEPRODE), gpt-5.4 and Terra found only the company and
 # returned nothing; Sol searched for the landfill at that place and found pages judged ours. A bare
-# 'Intermunicipal' is not one: 20 of the 21 batch-3 names with one, such as 'RELLENO SANITARIO
-# INTERMUNICIPAL DE ATLIXCO', are the site's own.
+# 'Intermunicipal' is not one: 19 of the 21 batch-3 names with one, such as 'RELLENO SANITARIO
+# INTERMUNICIPAL DE ATLIXCO', are the site's own. Of the other two, 3543's 'SISTEMA
+# INTERMUNICIPAL' is caught, and 10668's 'JUNTA INTERMUNICIPAL' (JIORESA) is not.
 OPERATOR_NAME_MARKERS = re.compile(
     r"\b(?:S ?A ?DE ?C ?V|SOCIEDAD ANONIMA|S ?DE ?R ?L|SIMEPRODE|PROMOTORA|PROACTIVA|TECMED"
     r"|SISTEMA INTEGRAL PARA EL MANEJO|SISTEMA INTERMUNICIPAL)\b"
@@ -402,10 +403,11 @@ def build_site_prompt(
         )
         if site.get(key)
     }
-    # Our coordinates, rounded to about 1 km: enough to search with, and nothing worth copying. In
-    # batch 1, with the full point in the prompt, the agent credited our own OSM centroid to a
-    # registry. The street address a reverse geocode gives would leak the point just as well, so
-    # formatted_address is left out too.
+    # Our coordinates, rounded to about 1 km: enough to check a source's place with (and, outside
+    # Spanish-language sites, to search with), and nothing worth copying. In batch 1, with the full
+    # point in the prompt, the agent credited our own OSM centroid to a registry. The street
+    # address a reverse geocode gives would leak the point just as well, so formatted_address is
+    # left out too.
     point = prompt_point(site)
     if point is not None:
         site_context["latitude"], site_context["longitude"] = point
@@ -445,11 +447,13 @@ def build_site_prompt(
     original_name = normalize_scalar(site.get("original_site_name"))
     language = normalize_scalar(site.get("source_language"))
     translated_source = bool(language) and language.lower() not in {"en", "eng", "english"}
-    # In the 31 October Mexico tests none of the 213 sources cited was in English and none printed
-    # decimal coordinates, yet the agents spent searches of their six on both: Terra searched
-    # English names at 43 of 50 sites, and Sol ran out of budget "before a separate English-name
-    # query". So a Spanish-language site is searched in Spanish, and our coordinates only check a
-    # source's place. Other languages keep searching in English until their batches are measured.
+    # In the 31 October Mexico tests none of the 213 sources cited was in English but one bilingual
+    # PDF, and none printed decimal coordinates, yet the agents spent searches of their six on both:
+    # Terra searched English names at 43 of 50 sites, and Sol ran out of budget "before a separate
+    # English-name query". So a Spanish-language site is searched in Spanish, and our coordinates
+    # only check a source's place. That is every 'es' site, Spain's 249 (batch 5) and Latin
+    # America's 191 (the last batch) included, though only Mexico was measured. Other languages
+    # keep searching in English until their batches are measured.
     spanish = language.lower() == "es"
     coordinates_for = "checking places" if spanish else "searching"
     if spanish:

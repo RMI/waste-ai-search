@@ -393,9 +393,10 @@ def test_load_takes_the_raw_row_whose_translation_is_the_chosen_name(monkeypatch
 
 
 # --- Spanish-language sites: searched in Spanish, never by coordinates -----------------------
-# In the 31 October Mexico tests none of the 213 sources cited was in English and none printed
-# decimal coordinates, yet Terra searched English names at 43 of 50 sites and put our coordinates
-# into searches at 21. 1,548 of batch 3's 1,553 sites are 'es'; other languages keep the old wording.
+# In the 31 October Mexico tests none of the 213 sources cited was in English but one bilingual PDF,
+# and none printed decimal coordinates, yet Terra searched English names at 43 of 50 sites and put
+# our coordinates into searches at 21. 1,548 of batch 3's 1,553 sites are 'es'; other languages
+# keep the old wording.
 def flat(site, attributes=("operator",)):
     return " ".join(build_site_prompt(site, attributes=list(attributes)).split())
 

@@ -728,19 +728,22 @@ at 4005 "RED RECOLECTOR SA. DE CV." and returned nothing, while Sol found the la
 Estación, in pages naming other operators.
 
 **The prompt gives our coordinates rounded to 2 decimals (about 1 km),** with the municipality
-and admin names where the seed has them: enough to search with, and nothing worth copying. With
+and admin names where the seed has them: enough to check a source's place with (and, outside
+Spanish-language sites, to search with), and nothing worth copying. With
 the full point in the prompt, the agent once credited our own OSM centroid to a registry. The
 reverse-geocoded `formatted_address` is left out for the same reason. The search cap
 (`--max-web-searches`) is unchanged.
 
-**A Spanish-language site is searched in Spanish,** which is every Mexican site but five. Its
-prompt says to search its names, municipality and admin names in the local language, to spend no
-searches on `site_name`, our English translation, and to use our coordinates only to check a
-source's place, never in a search: pages almost never print them. Where the gas attributes are
-asked, gas-project records such as UNFCCC CDM's are still searched in English. In the 31 October
-Mexico tests none of the 213 sources cited was in English, yet Terra searched English names at 43 of
-50 sites and our coordinates at 21, with six searches a site. Other languages are still searched in
-English too, until their batches are measured.
+**A Spanish-language site is searched in Spanish.** That is every site whose `source_language` is
+`es`: every Mexican site but five, and also Spain's 249 (batch 5) and 191 in Latin America (the
+last batch), though only Mexico was measured. Its prompt says to search its names, municipality and
+admin names in the local language, where we hold the original name to spend no searches on
+`site_name`, our English translation, and to use our coordinates only to check a source's place,
+never in a search: pages almost never print them. Where the gas attributes are asked, gas-project
+records such as UNFCCC CDM's are still searched in English. In the 31 October Mexico tests none of
+the 213 sources cited was in English but one bilingual PDF, yet Terra searched English names at 43
+of 50 sites and our coordinates at 21, with six searches a site. Other languages are still searched
+in English too, until their batches are measured.
 
 Only Brazil's seed has place names (SINIR's municipality and state). Every other site's are
 looked up from our coordinates when it is searched (see [Reverse Geocoding](#reverse-geocoding)),
