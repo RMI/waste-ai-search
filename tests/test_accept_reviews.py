@@ -240,6 +240,24 @@ def test_a_tier_3_key_value_with_no_row_of_its_own_doesnt_load_at_a_different_si
     assert [(r["site_id"], r["attribute_name"]) for r in accepted(run_dir)] == [("900", "operator")]
 
 
+def test_a_planned_closing_year_that_has_passed_isnt_weighed_again_at_a_different_site(tmp_path):
+    """A plan to close by a year now past says nothing of whether either site closed, so it isn't used
+    even where it matches the year we hold. Read as confirming ours, a Different site would weigh it
+    again at the other site, where a Tier 1 source's closing year loads unchecked."""
+    passed = str(datetime.now().year - 2)
+    permit = source("https://manitoba.example/permit", "Brady Road Landfill", source_type="Regulator", values=[
+        value("operator", "City of Winnipeg"), {**value("closing_year", passed), "planned": True},
+    ])
+    run_dir = arbitrate(tmp_path, [{**BRADY, "closing_year": passed}, seed("900", "domestic landfill", 50.10, -97.20)],
+                        {"13413": [permit]})
+    [closing] = [r for r in found(run_dir) if r["attribute_name"] == "closing_year"]
+    assert closing["status"] == NOT_USED
+    assert closing["status_reason"].startswith("A planned closure date that has passed")
+    decide(run_dir, {permit["url"]: {"decision": DIFFERENT_SITE, "other_site_id": "900"}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert [(r["site_id"], r["attribute_name"]) for r in accepted(run_dir)] == [("900", "operator")]
+
+
 @pytest.mark.parametrize("source_type, tier", [("Regulator", "Tier 1"), ("News report", "Tier 3")])
 def test_an_inferred_operator_loads_only_once_its_own_row_is_correct_whatever_the_tier(tmp_path, source_type, tier):
     """The agent marked the operator Inferred, so it has a row of its own under a Tier 1 source as under

@@ -462,9 +462,11 @@ found for it fills an empty field.
 gives as planned or expected (`planned`). Where that year is before the run's, the plan can't say
 whether the site closed: in October 2024 Milenio reported that El Huixmí would stop taking waste that
 December, and it was still taking waste in October 2026. An actual closure has to come from a
-source that reports one. A planned year still to come is used like any other closing year, flagged
-planned on its ↳ row. `accepted_values.csv` has no column to say it is planned, so ingestion reads it
-as the year the site closes.
+source that reports one. Such a year isn't used even where it matches ours, so a Different site
+doesn't weigh it again at the other site. A planned year still to come is used like any other
+closing year: from a Tier 3–5 source it is flagged planned on its ↳ row, and from a Tier 1–2 source
+it loads with its page, unmarked. `accepted_values.csv` has no column to say it is planned, so
+ingestion reads it as the year the site closes.
 
 **Three exceptions send a Tier 1–2 pair to an SME:**
 
