@@ -680,7 +680,11 @@ and the values it gives (build step 4 of
       ]
     }
   ],
-  "unverified_leads": [],
+  "unverified_leads": [
+    {"url": "https://... or blank", "attribute_name": "...", "value": "...", "unit": "",
+     "value_date": "...", "quoted_evidence_short": "...",
+     "why_unverified": "identity / value rule / page not readable", "lead_summary": "..."}
+  ],
   "search_notes": "..."
 }
 ```
@@ -699,6 +703,9 @@ and the values it gives (build step 4 of
 - Each value keeps the fields arbitration has always read. Its `value_date` is the date the value
   is true for: a figure's own year, never a target year, else the source's date. A yearly value
   loads under that year.
+- `unverified_leads` holds what the agent found but couldn't use, each in the one shape above:
+  a page it couldn't tie to our site, a value a rule leaves out, or a page it couldn't read. The
+  list may be empty. In the 31 October Mexico tests, without a shape, 174 leads came back in 23.
 
 **The agent decides whether a source is about this site,** as batch 1's prompt had it. It returns
 only sources about this facility, using the names and rounded coordinates the prompt gives it to

@@ -60,6 +60,22 @@ def test_the_contract_is_sources_first():
     assert "stated_location" not in prompt_for(THUNDER_BAY)
 
 
+def test_a_lead_has_one_shape():
+    """In the 31 October Mexico tests 174 leads came back in 23 shapes (candidate_value, reason,
+    finding, supporting_url...), and 157 lost their value and note in found_values.csv. The contract
+    gives one shape, and the code that reads leads relies on these keys."""
+    (lead,) = contract(prompt_for(THUNDER_BAY))["unverified_leads"]
+    assert list(lead) == [
+        "url", "attribute_name", "value", "unit", "value_date", "quoted_evidence_short", "why_unverified", "lead_summary",
+    ]
+    assert lead["why_unverified"] == "identity / value rule / page not readable"
+    # The template's one entry is a shape, not a lead to return.
+    assert (
+        "Put uncertain or unsourced findings in unverified_leads, not in values: one entry each, or an empty list "
+        "if there are none."
+    ) in " ".join(prompt_for(THUNDER_BAY).split())
+
+
 def test_value_date_is_the_date_the_value_is_true_for():
     """A yearly value loads under the year its value_date starts with. In the 31 October Mexico
     tests, 20,075 t a year from a 2022-2024 municipal plan was dated 2024-06-30, the article's date,

@@ -630,7 +630,20 @@ Names:
                 ],
             }
         ],
-        "unverified_leads": [],
+        # One shape for a lead: in the 31 October Mexico tests 174 leads came back in 23 shapes, and
+        # 157 lost their value and note in found_values.csv.
+        "unverified_leads": [
+            {
+                "url": "https://... or blank",
+                "attribute_name": "or blank",
+                "value": "",
+                "unit": "",
+                "value_date": "",
+                "quoted_evidence_short": "",
+                "why_unverified": "identity / value rule / page not readable",
+                "lead_summary": "",
+            }
+        ],
         "search_notes": "Languages, search terms, and gaps.",
     }
 
@@ -743,7 +756,8 @@ Value requirements:
   the figure in evidence_summary. (A gas project's status may still be Planned or Under
   Construction.)
 - Label anything not directly stated by the source as value_basis = Inferred.
-- Put uncertain or unsourced findings in unverified_leads, not in values.
+- Put uncertain or unsourced findings in unverified_leads, not in values: one entry each,
+  or an empty list if there are none.
 - If nothing is found, return an empty sources list and explain in search_notes.
 
 Output requirements:
