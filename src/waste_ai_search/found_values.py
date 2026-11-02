@@ -15,7 +15,8 @@ three of our sites is three pairs, each decided on its own, and each loads only 
 
 Nothing is approved automatically. A Tier 1-2 pair's values are trusted as read, so they load with
 its match; a key value (schema.VALUE_CHECKED_ATTRIBUTES) from a Tier 3-5 pair is also checked by an
-SME on its own row, and value_check says so ("required").
+SME on its own row, and so is an operator the agent marked Inferred or Conflicting, whatever its
+pair's tier. value_check says so ("required").
 
 What once sent a Tier 1-2 pair to SMEs is now a warning on its row (Pair.exceptions):
 
@@ -66,8 +67,15 @@ LOADABLE = (AUTO_APPROVED, SME_REVIEW)
 # intergovernmental data. Their values are trusted as read: they load with their pair's match, with
 # no value check (key-values plan, rule 3).
 MAX_TRUSTED_TIER = TIER_2
-# value_check for a key value from a Tier 3-5 pair: an SME checks it on its own Site_Review row.
+# value_check for a value an SME checks on its own Site_Review row (needs_value_check).
 CHECK_REQUIRED = "required"
+# Checked on its own row whatever its pair's tier where the agent itself marked it Inferred or
+# Conflicting (Hugh, 1 November 2026). On pages judged ours in the Mexico tests, Terra's Direct values
+# were wrong 1 time in 49 and its Inferred ones 9 in 35; Sol's 2 in 60 and 17 in 55. An operator
+# inferred from a "municipal" dump, or from who owns the land, was wrong at 7864 and 9188, and
+# government pages that load as read gave such values too.
+DOUBTED_CHECKED_ATTRIBUTES = ["operator"]
+DOUBTED_BASES = {"inferred", "conflicting"}
 # Batch 1's location check: a source placing the facility further than this from our coordinates
 # may be about another facility, so an SME looks, whatever its tier.
 EXCEPTION_KM = 5.0
@@ -115,6 +123,15 @@ def review_id(site_id: str, page: str, name: str) -> str:
     same name, so a decision recorded against it can be read back after arbitrating again."""
     digest = hashlib.sha256(f"{page}|{name}".encode("utf-8")).hexdigest()[:12]
     return f"WAIREV-{site_id}-{digest}"
+
+
+def needs_value_check(attribute: str, tier: int, value_basis: Any) -> bool:
+    """Whether an SME checks a value on its own Site_Review row, as well as its pair's match: a key
+    value (schema.VALUE_CHECKED_ATTRIBUTES) from a Tier 3-5 pair, or an operator the agent marked
+    Inferred or Conflicting, from a pair of any tier."""
+    if attribute in VALUE_CHECKED_ATTRIBUTES and tier > MAX_TRUSTED_TIER:
+        return True
+    return attribute in DOUBTED_CHECKED_ATTRIBUTES and normalize_scalar(value_basis).casefold() in DOUBTED_BASES
 
 
 def _km(km: float) -> str:
@@ -216,9 +233,9 @@ class Pair:
         """Whether the pair's values are trusted as read: a Tier 1-2 source."""
         return self.tier <= MAX_TRUSTED_TIER
 
-    def value_check(self, attribute: str) -> str:
-        """CHECK_REQUIRED for a key value of a Tier 3-5 pair, else blank."""
-        return CHECK_REQUIRED if attribute in VALUE_CHECKED_ATTRIBUTES and not self.trusted else ""
+    def value_check(self, attribute: str, value_basis: Any = "") -> str:
+        """CHECK_REQUIRED for a value an SME checks on its own row (needs_value_check), else blank."""
+        return CHECK_REQUIRED if needs_value_check(attribute, self.tier, value_basis) else ""
 
     def reason(self) -> str:
         """Why the pair's fills go to an SME, in words: its tier, and its warnings."""
@@ -326,7 +343,7 @@ def found_row(
     site_then, note = site_for_year(site, attribute, year)
     ours = baseline_for(site_then, attribute)
     status, reason, why = status_of(row, attribute, value, ours, pair, site)
-    check = pair.value_check(attribute) if status == SME_REVIEW else ""
+    check = pair.value_check(attribute, row.get("value_basis")) if status == SME_REVIEW else ""
     if note:
         reason = f"{reason} {note}"
     location = pair.location

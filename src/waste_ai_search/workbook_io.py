@@ -195,12 +195,11 @@ REVIEW_INSTRUCTIONS = [
         "tab_name": SITE_REVIEW_SHEET,
         "purpose": (
             "YOUR WORKLIST. Each row is a web page the search found for one of our sites. Your main "
-            "job is to say whether the page is really about that site. Pages from low-tier sources "
-            "(Tier 3-5) also have indented rows (↳) under them, one for each important value the page "
-            "gives: site type, closure year, incoming waste, area, gas collection and collection "
-            "efficiency. Check those too. Pages from high-tier sources (Tier 1-2) have no "
-            "↳ rows: we trust their values. Under each site, pages with a flag (a possible problem we "
-            "spotted) come first."
+            "job is to say whether the page is really about that site. Indented rows (↳) are values to "
+            "check too: from low-tier pages (Tier 3-5), site type, closure year, incoming waste, area, "
+            "gas collection and collection efficiency; from any page, an operator the search wasn't "
+            "sure of. We trust the other values of high-tier pages (Tier 1-2). Under each site, pages "
+            "with a flag (a possible problem we spotted) come first."
         ),
         "sme_action": (
             "Work down the sheet. The - and + at the far left hide or show the ↳ rows.\n"
@@ -250,8 +249,9 @@ REVIEW_INSTRUCTIONS = [
             "Every value the search found, one row per site, year, source and attribute. Every source "
             "is filed under the site that was searched, and status says what becomes of each value. "
             "SME review: it fills a field that is empty in our database, and loads once its source is "
-            "approved on Site_Review - a key value from a Tier 3-5 source (value_check required) only "
-            "once it is marked Correct too. not used: it confirms or would change a value we hold, its "
+            "approved on Site_Review - a key value from a Tier 3-5 source, or an operator the search "
+            "inferred (value_check required), only once it is marked Correct too. not used: it "
+            "confirms or would change a value we hold, its "
             "link is dead, or it could not be converted or mapped. status_reason says why. review_id "
             "names the site-source pair, as on Site_Review. Once your decisions are read back, "
             "sme_decision gives the source's decision, value_decision and corrected_value a value "

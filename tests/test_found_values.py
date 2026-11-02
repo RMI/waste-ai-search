@@ -131,6 +131,29 @@ def test_every_fill_goes_to_an_sme_and_a_tier_3_to_5_key_value_is_checked_on_its
     assert AUTO_APPROVED not in {row["status"] for row in rows(run_dir)}
 
 
+def test_an_operator_the_agent_inferred_is_checked_on_its_own_row_whatever_the_tier(tmp_path):
+    """On pages judged ours in the Mexico tests, Terra's Inferred values were wrong 9 times in 35 and
+    Sol's 17 in 55, against 1 in 49 and 2 in 60 of their Direct ones; an operator inferred from a
+    "municipal" dump was wrong at 7864. So an operator the agent marked Inferred or Conflicting gets a
+    row of its own, under a Tier 1 source too. A Direct one, and an inferred status, don't."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://manitoba.example/permit", "Brady Road Landfill", values=[
+            value("operator", "City of Winnipeg", value_basis="Inferred"), value("facility_status", "Active", value_basis="Inferred"),
+        ]),
+        source("https://news.example/brady", "Brady Road", source_type="News report",
+               values=[value("operator", "Waste Connections", value_basis="Conflicting")]),
+        source("https://news.example/other", "Brady Road", source_type="News report", values=[value("operator", "GFL")]),
+    ]})
+    checks = {(row["source_url"], row["attribute_name"]): (row["source_tier"], row["value_check"]) for row in rows(run_dir)}
+    assert checks == {
+        ("https://manitoba.example/permit", "operator"): ("Tier 1", "required"),
+        ("https://manitoba.example/permit", "facility_status"): ("Tier 1", ""),
+        ("https://news.example/brady", "operator"): ("Tier 3", "required"),
+        ("https://news.example/other", "operator"): ("Tier 3", ""),
+    }
+    assert run_config(run_dir)["values_to_check"] == 2
+
+
 def test_gas_use_is_not_a_key_value_but_gas_collection_is(tmp_path):
     """Hugh dropped gas use on 30 October: its quotes were mostly a project title, so checking it
     added little. From a Tier 3 source it loads once the source is approved."""

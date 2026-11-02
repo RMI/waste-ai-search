@@ -1290,6 +1290,12 @@ sites, whose values would fill fields that are empty in our database for that si
 grouped by our site, in site id order, with a rule above each new site. Under each site, sources
 with flags come first, then the best tier. An empty tab means nothing needs you.
 
+**↳ rows.** Under a Tier 3–5 source, an indented ↳ row for each key value it would load: site type,
+closure year, incoming waste, area, gas collection and collection efficiency. Under a source of any
+tier, one for an operator the search worked out rather than read, or found sources disagreeing on
+(`value_basis` Inferred or Conflicting). Check each against the page and mark it Correct or Wrong: it
+loads only once marked Correct, and only with its source.
+
 A row is here because its source is:
 
 - **Tier 3–5:** news, a directory, or a source whose type couldn't be told; or

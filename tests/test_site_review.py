@@ -144,6 +144,22 @@ def test_a_tier_3_to_5_pair_has_a_row_for_each_key_value_and_a_tier_1_2_pair_non
     )
 
 
+def test_an_inferred_operator_has_a_row_of_its_own_under_a_tier_1_pair_too(tmp_path):
+    """The agent marked it Inferred, so an SME checks it against the page, whatever the tier."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://manitoba.example/permit", "Brady Road Landfill", values=[
+            {**value("operator", "City of Winnipeg"), "value_basis": "Inferred", "evidence_summary": "A municipal dump."},
+            value("opening_year", "1973"),
+        ]),
+    ]})
+    permit, operator = all_rows(run_dir)
+    assert (permit["check"], permit["would_load"]) == ("", "operator = City of Winnipeg (check independently)\nopening_year = 1973")
+    assert (operator["check"], operator["source_title"], operator["would_load"], operator["review_id"]) == (
+        "operator", "↳ check operator", "operator = City of Winnipeg", permit["review_id"],
+    )
+    assert operator["evidence"] == "“It says so.”\nAgent: A municipal dump."
+
+
 def test_our_sites_come_in_id_order_with_flagged_pairs_first(tmp_path):
     """Under each of our sites, a pair with a flag comes before one without, whatever order the
     search cited them in; sites are in number order, not text order."""

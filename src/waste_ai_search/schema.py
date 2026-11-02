@@ -578,7 +578,8 @@ FOUND_VALUES_HEADERS = [
     # TRUE for an incoming waste amount the source says is mainly other waste, which isn't used.
     "planned", "not_municipal",
     # review_id is the site-source pair whose status this is. value_check is "required" for a key
-    # value from a Tier 3-5 pair, which an SME checks on its own row; accept-reviews fills the rest:
+    # value from a Tier 3-5 pair, or an operator the agent marked Inferred or Conflicting from any pair,
+    # which an SME checks on its own row; accept-reviews fills the rest:
     # the pair's decision, the value's (Correct or Wrong) and any value the SME typed instead, and
     # whether it loads.
     "review_id", "status", "status_reason", "value_check",
@@ -596,7 +597,8 @@ ACCEPTED_VALUES_HEADERS = [
 ]
 
 # The Site_Review tab (site_review.py): one row per site-source pair with values that would load,
-# and under a Tier 3-5 pair one row per key value an SME checks. Left to right as an SME reads a row.
+# and under it one row per value an SME checks (found_values.needs_value_check). Left to right as an
+# SME reads a row.
 # What accept-reviews reads a Site_Review row back by: the pair, and on a value row which value it
 # checks.
 SITE_REVIEW_KEYS = ["review_id", "check"]

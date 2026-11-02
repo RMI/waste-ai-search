@@ -1,12 +1,14 @@
 """The Site_Review tab: every site-source pair an SME decides, under each of our sites, and under a
-Tier 3-5 pair the key values an SME checks against the page.
+pair the values an SME checks against the page.
 
 Step 3 of the approve-sources plan (docs/plans/2026-10-21-approve-sources-site-by-site.md), as the
 key-values plan (docs/plans/2026-10-26-smes-check-key-values.md) changed it. A person checks whether
 each source is about our site, whatever its tier: the tab has one row per site-source pair
 (found_values.py) with values that would load, grouped by our site, with the pairs that carry a flag
 first. A Tier 1-2 source's values are trusted as read. Under a Tier 3-5 pair comes one row per key
-value (schema.VALUE_CHECKED_ATTRIBUTES) it would load, for the SME to check against the page.
+value (schema.VALUE_CHECKED_ATTRIBUTES) it would load, for the SME to check against the page, and
+under a pair of any tier one for an operator the agent marked Inferred or Conflicting
+(found_values.needs_value_check).
 
 A source row shows our site, the source, what the source says of the facility it describes and
 where it places it, the flags, and what approving it would load. Its decision:

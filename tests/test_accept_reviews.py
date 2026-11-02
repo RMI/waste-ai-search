@@ -240,6 +240,42 @@ def test_a_tier_3_key_value_with_no_row_of_its_own_doesnt_load_at_a_different_si
     assert [(r["site_id"], r["attribute_name"]) for r in accepted(run_dir)] == [("900", "operator")]
 
 
+@pytest.mark.parametrize("source_type, tier", [("Regulator", "Tier 1"), ("News report", "Tier 3")])
+def test_an_inferred_operator_loads_only_once_its_own_row_is_correct_whatever_the_tier(tmp_path, source_type, tier):
+    """The agent marked the operator Inferred, so it has a row of its own under a Tier 1 source as under
+    a Tier 3 one: approving the source loads its other values, and the operator waits on its row. An
+    SME's Wrong there stops it loading."""
+    page = source("https://town.example/landfill", "Springfield Landfill", source_type=source_type, values=[
+        {**value("operator", "RM of Springfield"), "value_basis": "Inferred"}, value("facility_status", "Active"),
+    ])
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [page]})
+    decide(run_dir, {page["url"]: {"decision": CORRECT_SITE}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert [(r["attribute_name"], r["source_tier"]) for r in accepted(run_dir)] == [("facility_status", tier)]
+
+    decide(run_dir, {(page["url"], "operator"): {"decision": "Wrong"}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert [r["attribute_name"] for r in accepted(run_dir)] == ["facility_status"]
+    [operator] = [r for r in found(run_dir) if r["attribute_name"] == "operator"]
+    assert (operator["value_check"], operator["value_decision"], operator["loaded"]) == ("required", "Wrong", "")
+
+    decide(run_dir, {(page["url"], "operator"): {"decision": "Correct"}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert {r["attribute_name"]: r["value"] for r in accepted(run_dir)} == {"facility_status": "Active", "operator": "RM of Springfield"}
+
+
+def test_an_inferred_operator_weighed_again_at_a_different_site_has_no_row_so_doesnt_load():
+    """Set aside at the site searched because it would change our operator, it is weighed again at
+    the Different site, where its field is empty; but nothing has checked it there. A Direct one loads."""
+    def operator(review, basis):
+        return found_row(review, "operator", "RM of Springfield", tier="Tier 1", status=NOT_USED, value_basis=basis,
+                         status_reason="Would change our value, Town of Hartney: only fills of empty fields load.")
+
+    elsewhere = lambda *reviews: {review: Decision(review, "7", DIFFERENT_SITE, "8", "SME", "", "", 2) for review in reviews}
+    result = accept([operator("inferred", "Inferred"), operator("direct", "Direct")], elsewhere("inferred", "direct"), SITES)
+    assert [(row["review_id"], row["site_id"]) for row in result.values] == [("direct", "8")]
+
+
 def test_value_decisions_are_read_by_review_id_and_check(tmp_path):
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [NEWS]})
     decide(run_dir, {(NEWS["url"], "closing_year"): {"decision": " WRONG ", "corrected_value": "2041"}})

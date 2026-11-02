@@ -15,16 +15,17 @@ pair's values:
 | Junk | Nothing |
 | none | Nothing yet |
 
-A key value of a Tier 3-5 pair (schema.VALUE_CHECKED_ATTRIBUTES) also needs its own row's decision:
-Correct loads it as found; Wrong with a corrected_value loads that instead; Wrong alone, or no
-decision, loads nothing. A corrected_value with no decision is read as Wrong. A Tier 1-2 pair's
-values are trusted as read.
+A key value of a Tier 3-5 pair (schema.VALUE_CHECKED_ATTRIBUTES), and an operator the agent marked
+Inferred or Conflicting from a pair of any tier, also need their own row's decision: Correct loads
+the value as found; Wrong with a corrected_value loads that instead; Wrong alone, or no decision,
+loads nothing. A corrected_value with no decision is read as Wrong. A Tier 1-2 pair's other values
+are trusted as read.
 
 A pair's values are those that would load at the site searched. A Different site also weighs again,
 at the other site, the values set aside only because they confirm or would change one we hold at the
 site searched, since that says nothing of the other site: the SME has said the source is about it.
-A Tier 3-5 key value among those has no row of its own, so it doesn't load. Only fills of empty
-fields load, there as anywhere.
+A value among those that would need a row of its own has none, so it doesn't load. Only fills of
+empty fields load, there as anywhere.
 
 Where the values accepted for one site, attribute and year (for a yearly attribute) disagree, one is
 picked (found_values.pick_values): the best tier, then the newest, then the value the most sources
@@ -54,9 +55,9 @@ from .found_values import (
     EXCEPTION_KM,
     FOUND_VALUES_FILE,
     LOADABLE,
-    MAX_TRUSTED_TIER,
     SME_REVIEW,
     judged_on_our_value,
+    needs_value_check,
     pick_values,
 )
 from .input_loader import SEED_NAME, load_sites, write_csv_records
@@ -77,7 +78,6 @@ from .schema import (
     NOT_A_WASTE_FACILITY,
     SITE_REVIEW_DECISIONS,
     SITE_REVIEW_EDITABLE,
-    VALUE_CHECKED_ATTRIBUTES,
     VALUE_DECISIONS,
     WRONG,
     is_blank,
@@ -325,10 +325,12 @@ def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]
 
 
 def checked_value(row: dict[str, Any]) -> bool:
-    """Whether a found value is a key value from a Tier 3-5 pair, which loads only with an SME's
-    Correct, or corrected value, on its own row."""
+    """Whether a found value is one an SME checks on its own row (found_values.needs_value_check), so
+    loads only with an SME's Correct, or corrected value, there: a key value from a Tier 3-5 pair, or
+    an operator the agent marked Inferred or Conflicting. Worked out again from the row, rather than
+    read from its value_check, so a value weighed again under Different site needs one too."""
     tier = TIER_BY_LABEL.get(normalize_scalar(row.get("source_tier")), TIER_5)
-    return row.get("attribute_name") in VALUE_CHECKED_ATTRIBUTES and tier > MAX_TRUSTED_TIER and row.get("status") != AUTO_APPROVED
+    return needs_value_check(row.get("attribute_name"), tier, row.get("value_basis")) and row.get("status") != AUTO_APPROVED
 
 
 # --- applying them -------------------------------------------------------------------------------
@@ -383,7 +385,7 @@ def accept(
         if decision is not None:
             row["sme_decision"] = decision.label
         checked = checked_value(row)
-        # A key value has a row of its own only where it would load at the site searched.
+        # A checked value has a row of its own only where it would load at the site searched.
         on_its_row = value_decisions.get((review, check_label(row))) if checked and row["status"] in LOADABLE else None
         if on_its_row is not None:
             matched.add(on_its_row.key)
