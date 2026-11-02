@@ -708,6 +708,18 @@ alone is not confirmation. Where our name or coordinates came from a Tier 1–2 
 says they are already confirmed by an authoritative source. Every source it returns is filed under
 the site searched (see [Filing and approving each source](#filing-and-approving-each-source)).
 
+**A site named after its operator is searched for by its place.** Where our name has a legal form
+(S.A. de C.V., Sociedad Anónima, S. de R.L.) or an operator's name (SIMEPRODE, Promotora,
+Proactiva, TECMED, Sistema Integral para el Manejo, Sistema Intermunicipal), accents and case aside,
+the prompt says it looks like an operator's name, which may run sites elsewhere, and asks for the
+landfill or dump at this place under the names local sources use. A source about it may name
+another operator: the municipality, state and our other sites decide. Such a name is never called
+confirmed. A bare "Intermunicipal" doesn't count: "Relleno Sanitario Intermunicipal de Atlixco" is a
+site's own name. 38 of batch 3's 1,553 prompts get this, 15 of them among the 64 sites taking
+100,000 t a year or more. In the 31 October Mexico tests, gpt-5.4 and Terra found only the company
+at 4005 "RED RECOLECTOR SA. DE CV." and returned nothing, while Sol found the landfill there, La
+Estación, in pages naming other operators.
+
 **The prompt gives our coordinates rounded to 2 decimals (about 1 km),** with the municipality
 and admin names where the seed has them: enough to search with, and nothing worth copying. With
 the full point in the prompt, the agent once credited our own OSM centroid to a registry. The
@@ -826,7 +838,8 @@ too, and many of SINIR's names are generic labels such as `Dump`.
   coordinates it gives, which only check that it is about our site. Where our name or coordinates
   came from a Tier 1–2 source (the name for about 10,600 facilities, both coordinates for 4,063 of
   the 12,122 searchable sites: Mexico INEGI, E-PRTR, Canada GHGRP), the prompt says they are
-  already confirmed. Coordinates flagged inexact are never called confirmed.
+  already confirmed. Coordinates flagged inexact are never called confirmed, and nor is a name
+  that looks like an operator's (see [What the agent returns](#what-the-agent-returns)).
 - Metadata attributes are requested **only where that facility's baseline is empty**.
 - The seven `gccs_*` attributes are requested **only where gas collection is known present** —
   212 to 603 facilities each, not 13,000. See the two-pass note above for why this loses nothing.

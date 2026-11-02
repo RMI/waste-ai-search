@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
+from waste_ai_search.prompt_builder import build_site_prompt, operator_named, requested_attributes
 from waste_ai_search.source_names import (
     RAW_NAME_SOURCES,
     _osm_tag_name,
@@ -461,3 +461,84 @@ def test_other_languages_keep_searching_in_english_and_by_coordinates(language):
     assert "- Search both. Treat them as one facility with two names" in prompt
     assert "(rounded to about 1 km, for searching only)" in prompt
     assert GAS_IN_ENGLISH not in prompt
+
+
+# --- a name that is an operator's -----------------------------------------------------------
+# At 4005 and 5339, named after the company that runs them, gpt-5.4 and Terra found only the
+# company and returned nothing. Sol searched for the landfill at that place and found pages
+# judged ours, which name other operators. The rows are the seed's, with the fields the prompt reads.
+INEGI = "found_facility_name@mexico_inegi_2016; found_latitude@mexico_inegi_2016; found_longitude@mexico_inegi_2016"
+OPERATOR_NAMED = {
+    "4005": {"site_id": "4005", "site_name": "RED RECOLECTOR SA. DE CV.", "original_site_name": "",
+             "source_language": "es", "country_iso3": "MEX", "latitude": "19.167215", "longitude": "-99.586588",
+             "is_location_exact": "TRUE", "attribute_sources": INEGI},
+    "5339": {"site_id": "5339",
+             "site_name": "SISTEMA INTEGRAL PARA EL MANEJO ECOLOGICO Y PROCESAMIENTO DE DESECHOS ANAHUAC",
+             "original_site_name": "", "source_language": "es", "country_iso3": "MEX", "latitude": "27.26966667",
+             "longitude": "-100.0853333", "is_location_exact": "TRUE", "attribute_sources": INEGI},
+    "8146": {"site_id": "8146", "site_name": "FINAL DISPOSAL SITE PROMOTORA AMBIENTAL DE LA LAGUNA S.A. DE C.V.",
+             "original_site_name": "SITIO DE DISPOSICION FINAL PROMOTORA AMBIENTAL DE LA LAGUNA S.A. DE C.V.",
+             "source_language": "es", "country_iso3": "MEX", "latitude": "25.98393323", "longitude": "-109.02698709",
+             "is_location_exact": "TRUE", "attribute_sources": INEGI},
+}
+OWN_NAMES = {
+    "9233": {"site_id": "9233", "site_name": "VERACRUZ SANITARY LANDFILL", "original_site_name": "RELLENO SANITARIO VERACRUZ",
+             "source_language": "es", "country_iso3": "MEX", "latitude": "19.232865", "longitude": "-96.225432",
+             "is_location_exact": "TRUE", "attribute_sources": INEGI},
+    # A bare 'Intermunicipal' is the site's own name: 21 of batch 3's names have one.
+    "6592": {"site_id": "6592", "site_name": "HUEJOTZINGO INTERMUNICIPAL SANITARY LANDFILL",
+             "original_site_name": "RELLENO SANITARIO INTERMUNICIPAL DE HUEJOTZINGO", "source_language": "es",
+             "country_iso3": "MEX", "latitude": "19.1823381", "longitude": "-98.4268559", "is_location_exact": "TRUE",
+             "attribute_sources": INEGI},
+    "6469": {"site_id": "6469", "site_name": "RELLENO SANITARIO INTERMUNICIPAL AJALPAN", "original_site_name": "",
+             "source_language": "es", "country_iso3": "MEX", "latitude": "18.36825", "longitude": "-97.226544",
+             "is_location_exact": "TRUE", "attribute_sources": INEGI},
+}
+OPERATOR_BULLET = (
+    "looks like an operator's name (a company or agency), which may run sites elsewhere. Search for the landfill "
+    "or dump at this place under the names local sources use. A source about it may name another operator: let "
+    "the municipality, state and our other sites decide."
+)
+
+
+@pytest.mark.parametrize("site_id", sorted(OPERATOR_NAMED))
+def test_a_site_named_after_its_operator_is_searched_for_the_site_it_runs_here(site_id):
+    names = " ".join(section(build_site_prompt(OPERATOR_NAMED[site_id], ["operator"]), "Names").split())
+    # The name searched: original_site_name where we have one, else site_name.
+    field = "original_site_name" if OPERATOR_NAMED[site_id]["original_site_name"] else "site_name"
+    assert f"- {field} {OPERATOR_BULLET}" in names
+
+
+@pytest.mark.parametrize("site_id", sorted(OWN_NAMES))
+def test_a_sites_own_name_gets_no_operator_bullet(site_id):
+    assert "looks like an operator's name" not in build_site_prompt(OWN_NAMES[site_id], ["operator"])
+
+
+def test_an_operators_name_is_never_called_confirmed():
+    """INEGI's names are Tier 1, and 'The name and coordinates are already confirmed' pushed the
+    agent to match the company's name exactly. Only the coordinates are confirmed now."""
+    operator_named = " ".join(build_site_prompt(OPERATOR_NAMED["4005"], ["operator"]).split())
+    assert "The coordinates are already confirmed by an authoritative source." in operator_named
+    assert "The name and coordinates are" not in operator_named
+    own_name = " ".join(build_site_prompt(OWN_NAMES["9233"], ["operator"]).split())
+    assert "The name and coordinates are already confirmed by an authoritative source." in own_name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "RED RECOLECTOR SA. DE CV.", "WASTE CO MEXICO SA DE CV", "RELLENO SANITARIO SAN JUAN DEL RIO S.A DE .CV",
+        "Grupo Contadero S. A. de C. V.", "PROMOTORA AMBIENTAL DE LA LAGUNA SOCIEDAD ANÓNIMA DE CAPITAL VARIABLE",
+        "Servicios Ambientales S. de R.L.", "RELLENO SANITARIO A CARGO DE TECMED,", "Proactiva Medio Ambiente",
+        "SISTEMA INTERMUNICIPAL DE MANEJO DE RESIDUOS SOLIDOS SIMAR", "simeprode",
+    ],
+)
+def test_legal_forms_and_operators_are_found_in_any_spelling(name):
+    assert operator_named({"site_name": name}) == "site_name"
+
+
+@pytest.mark.parametrize(
+    "name", ["RELLENO SANITARIO INTERMUNICIPAL DE ATLIXCO", "Casa de Cvetkovic", "Sistema Integral de Aseo", "Grupo SA"]
+)
+def test_a_bare_intermunicipal_or_a_lookalike_is_not_an_operators_name(name):
+    assert operator_named({"site_name": name, "original_site_name": name}) == ""

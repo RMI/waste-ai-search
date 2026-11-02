@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from typing import Any
 
 from .credibility import (
@@ -269,6 +271,30 @@ def looks_inactive(site: dict[str, Any]) -> bool:
     return any(hint in name for hint in CLOSURE_NAME_HINTS)
 
 
+# Legal forms and operators' names, matched in a name without case, accents or punctuation. At
+# 4005 'RED RECOLECTOR SA. DE CV.' and 5339 'SISTEMA INTEGRAL PARA EL MANEJO ECOLOGICO Y
+# PROCESAMIENTO DE DESECHOS ANAHUAC' (SIMEPRODE), gpt-5.4 and Terra found only the company and
+# returned nothing; Sol searched for the landfill at that place and found pages judged ours. A bare
+# 'Intermunicipal' is not one: 20 of the 21 batch-3 names with one, such as 'RELLENO SANITARIO
+# INTERMUNICIPAL DE ATLIXCO', are the site's own.
+OPERATOR_NAME_MARKERS = re.compile(
+    r"\b(?:S ?A ?DE ?C ?V|SOCIEDAD ANONIMA|S ?DE ?R ?L|SIMEPRODE|PROMOTORA|PROACTIVA|TECMED"
+    r"|SISTEMA INTEGRAL PARA EL MANEJO|SISTEMA INTERMUNICIPAL)\b"
+)
+
+
+def operator_named(site: dict[str, Any]) -> str:
+    """Which of our names for this site looks like an operator's - a company or agency, which
+    may run sites elsewhere - rather than the site's own: original_site_name, the one searched,
+    else site_name, else blank."""
+    for field in ("original_site_name", "site_name"):
+        name = unicodedata.normalize("NFKD", normalize_scalar(site.get(field)))
+        plain = re.sub(r"[^A-Z0-9]+", " ", name.encode("ascii", "ignore").decode().upper())
+        if OPERATOR_NAME_MARKERS.search(" ".join(plain.split())):
+            return field
+    return ""
+
+
 def has_gas_collection(site: dict[str, Any]) -> bool:
     """Whether the baseline states this facility has a gas collection system.
 
@@ -492,15 +518,24 @@ Names:
 - Give each source's own name for the facility as facility_name_in_source, exactly as
   that source spells it, in whatever script or language it uses. Do not translate it back.
 """
+    operator_name = operator_named(site)
+    if operator_name:
+        names_guidance += (
+            f"- {operator_name} looks like an operator's name (a company or agency), which may run\n"
+            "  sites elsewhere. Search for the landfill or dump at this place under the names local\n"
+            "  sources use. A source about it may name another operator: let the municipality, state\n"
+            "  and our other sites decide.\n"
+        )
 
     # Batch 1's identity rule. Not asked is not the same as trusted: nothing about identity is asked
-    # now, so only a Tier 1-2 provenance lets the prompt call our name or coordinates confirmed.
+    # now, so only a Tier 1-2 provenance lets the prompt call our name or coordinates confirmed. An
+    # operator's name is never called confirmed, so the agent doesn't look for pages that use it.
     confirmed = {
         (True, True): "The name and coordinates are",
         (True, False): "The name is",
         (False, True): "The coordinates are",
     }.get((
-        trusted_baseline_name(site),
+        trusted_baseline_name(site) and not operator_name,
         trusted_baseline_coordinates(site) and not location_is_inexact(site),
     ))
     confirmation = f"\n  {confirmed} already confirmed by an authoritative source." if confirmed else ""
