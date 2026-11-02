@@ -166,9 +166,9 @@ respelling that works replaces it. Existing escapes are never decoded otherwise.
 with 45 seconds to answer rather than 15, each URL left Unverified by a timeout, a failed connection,
 a name that didn't resolve, a 429 or a server error, and keeps its new verdict and text. Never a 403:
 that site refuses automated readers on purpose. No headless browser is used either: these sites
-refuse those too, and one would resolve names itself, past the address check above. Of the 32 pages
-the October 2026 model tests couldn't read, 20 were 403s, 5 timeouts, 2 server errors, 1 a name that
-didn't resolve and 4 scanned PDFs.
+often refuse those too, and one would resolve names itself, past the address check above. Of the 32
+pages the October 2026 model tests couldn't read, 20 were 403s, 5 timeouts, 2 server errors, 1 a name
+that didn't resolve and 4 scanned PDFs.
 
 The fetching happens during **search**, which needs the network anyway; `arbitrate` only reads
 `link_check.json`, so it stays offline. A dead source's values are not used, but the same value from
@@ -419,9 +419,9 @@ the file first. It is saved as the step goes, so an interrupted run keeps what i
 
 Arbitration only reads it, so it stays offline. It parses coordinates and grid references itself,
 which needs no network, so a run's coordinates are read even before it is located; an address
-not yet looked up says "not located yet: run `locate --run-id`". So does each address of a run
-located before addresses went with their town and state, until `locate` runs again and looks it up
-once more. Blob storage carries the file like `link_check.json`.
+not yet looked up says "not located yet: run `locate --run-id`". An address whose text gains its
+town or state isn't in an older run's `source_locations.json` under its new text, so it says that
+too until `locate` runs again. Blob storage carries the file like `link_check.json`.
 
 ```bash
 uv run waste-ai-search locate --run-id <run_id>       # backfill an older run, then arbitrate
