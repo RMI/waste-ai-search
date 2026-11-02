@@ -1551,7 +1551,8 @@ still sets `AZURE_FOUNDRY_MAX_RETRIES=3` overrides the new default.
 
 Searches per attempt are capped at 6 (`--max-web-searches`, 0 = no cap). The cap is sent as the
 Responses API's `max_tool_calls`, which Foundry enforces; asking in the prompt alone was ignored. It
-caps searches, not queries — each search sends about 4 queries. Each retry gets a fresh cap, so a
+caps the web search tool's calls, a page opened as well as a search, not queries — each search sends
+about 4 queries. Each retry gets a fresh cap, so a
 site that uses all 4 attempts can make up to 24 searches. On the same 10 sites:
 
 | | No cap | Prompt only (12) | Cap of 6 |
@@ -1563,9 +1564,9 @@ site that uses all 4 attempts can make up to 24 searches. On the same 10 sites:
 Repeat runs of one site vary widely (one used 12, 30 and 39 queries), so treat the last two rows as
 noise-level.
 
-**What each search did is kept.** The cap counts every call of the web search tool: its searches,
-and the pages it opens or finds text in. The run log's `tool_calls` counts them, every attempt added
-up like `web_searches`. The response saved for each site lists them in order, in `_search_actions`:
+**What each search did is kept.** The run log's `tool_calls` counts each site's calls of the web
+search tool: its searches, and the pages it opened or found text in, every attempt added up like
+`web_searches`. The response saved for each site lists them in order, in `_search_actions`:
 each search with its queries, and each page with its URL and any text it looked for. Nothing reads
 them back. They show how often the cap binds, and which searches found the pages SMEs approve.
 
