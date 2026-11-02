@@ -331,6 +331,81 @@ def test_the_agents_unverified_leads_are_listed_as_not_used(tmp_path):
     assert {row["review_id"] for row in found} == {""}
 
 
+# Two of round 2's leads as the agent wrote them. Read by url, attribute_name, value and lead_summary
+# alone, Sol's lead at 4646 (the state regulator closing Maravatío's dump) lost its value, date, quote
+# and reason, and Terra's at 311 (a news report naming the dump at El Largo Maderal) all but its link.
+SOL_4646 = {
+    "attribute_name": "facility_status",
+    "candidate_value": "Inactive",
+    "value_date": "2025-07-16",
+    "url": "https://proam.michoacan.gob.mx/proam-clausura-basureros-de-panindicuaro-y-maravatio/",
+    "source_title": "Proam clausura basureros de Panindícuaro y Maravatío",
+    "publisher": "Procuraduría de Protección al Ambiente del Estado de Michoacán",
+    "source_type": "Regulator",
+    "reason_unverified": (
+        "The regulator reports closure of Maravatío's municipal waste-disposal site but identifies it only "
+        "generically as the locality's basurero. It does not name CMTIRS, state its address, or give "
+        "coordinates, so the identity rules do not permit assigning the closure conclusively to this facility."
+    ),
+    "quoted_evidence_short": "la Procuraduría de Protección al Ambiente (Proam), clausuró los basureros de ambas localidades",
+}
+TERRA_311 = {
+    "url": "https://chihuahua.quadratin.com.mx/principal/incautan-arsenal-cerca-de-basurero-de-el-largo-maderal/",
+    "source_title": "Incautan arsenal cerca de basurero de El Largo Maderal",
+    "publisher": "Quadratín Chihuahua",
+    "source_type": "News report",
+    "publication_date": "2025-06-15",
+    "reason": (
+        "The report identifies a \"basurero\" at Ejido El Largo Maderal, Municipio de Madera, Chihuahua, but "
+        "provides no evidence of its operational status, engineering, operator, opening or closure date, waste "
+        "quantity, footprint, depth, cover, or biocover."
+    ),
+}
+
+
+def test_a_lead_keeps_its_value_date_quote_note_and_reason_however_the_agent_named_them(tmp_path):
+    maravatio = seed("4646", "(CMTIRS) CENTRO MUNICIPAL PARA EL TRATAMIENTO INTEGRAL DE LOS RESIDUOS SOLIDOS", 19.9221, -100.4699, "MEX")
+    el_largo = seed("311", "EJIDO EL LARGO GARBAGE DUMP", 29.67236, -108.28273, "MEX")
+    template = {
+        "url": "https://news.example/closure", "attribute_name": "closing_year", "value": "2019", "unit": "year",
+        "value_date": "2019-05", "quoted_evidence_short": "se clausuró en 2019",
+        "why_unverified": "identity: the page names only the town's dump", "lead_summary": "The town's dump closed.",
+    }
+    older = [
+        {"attribute_name": "operator", "lead": "Run by the municipality, a 2019 report says.", "source_url": "https://a.example"},
+        {"attribute_name": "facility_type", "finding": "Called a basurero municipal; no engineering described."},
+        {"attribute_name": "area_square_meters", "candidate_value": "10.31", "unit": "Has", "reason": "A search snippet only."},
+        {"attribute_name": "facility_status", "lead": "Sanctioned in 2026.", "supporting_url": "https://b.example"},
+        {"url": "https://c.example", "description": "Land sought for a replacement."},
+    ]
+    found = rows(arbitrate(tmp_path, [maravatio, el_largo], {
+        "4646": {"site_id": "4646", "sources": [], "unverified_leads": [SOL_4646, template, *older]},
+        "311": {"site_id": "311", "sources": [], "unverified_leads": [TERRA_311]},
+    }))
+    columns = ("attribute_name", "value", "value_as_written", "value_date", "year", "source_url", "quote", "agent_note", "status_reason")
+    el_largo_lead, maravatio_lead, template_lead, *older_leads = [tuple(row[column] for column in columns) for row in found]
+    assert maravatio_lead == (
+        "facility_status", "Inactive", "Inactive", "2025-07-16", "2025", SOL_4646["url"], SOL_4646["quoted_evidence_short"], "",
+        f"The agent reported it as unverified: {SOL_4646['reason_unverified']}",
+    )
+    assert el_largo_lead == (
+        "", "", "", "", str(RUN_YEAR), TERRA_311["url"], "", "", f"The agent reported it as unverified: {TERRA_311['reason']}",
+    )
+    assert template_lead == (
+        "closing_year", "2019", "2019 year", "2019-05", "2019", "https://news.example/closure", "se clausuró en 2019",
+        "The town's dump closed.", "The agent reported it as unverified: identity: the page names only the town's dump.",
+    )
+    assert [(row["source_url"], row["value"], row["unit"], row["agent_note"]) for row in found[3:]] == [
+        ("https://a.example", "", "", "Run by the municipality, a 2019 report says."),
+        ("", "", "", "Called a basurero municipal; no engineering described."),
+        ("", "10.31", "Has", ""),
+        ("https://b.example", "", "", "Sanctioned in 2026."),
+        ("https://c.example", "", "", "Land sought for a replacement."),
+    ]
+    assert found[5]["status_reason"] == "The agent reported it as unverified: A search snippet only."
+    assert {row["status"] for row in found} == {NOT_USED}
+
+
 # --- every source stays with the site searched -----------------------------------------------------
 def test_a_source_placing_the_facility_at_another_site_of_ours_stays_with_the_site_searched(tmp_path):
     """The matcher once filed this permit under Brady Road, 0.1 km from where it places the facility.

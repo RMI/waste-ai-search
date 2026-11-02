@@ -17,7 +17,7 @@ from datetime import date
 
 import pytest
 
-from waste_ai_search.arbitrate import cached_source_urls, extract_evidence, run_arbitration
+from waste_ai_search.arbitrate import cached_source_urls, extract_evidence, payload_leads, run_arbitration
 from waste_ai_search.arbitration import resolve
 from waste_ai_search.credibility import DROPPED_SOURCE_SITES, dropped_source_site
 from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
@@ -134,6 +134,17 @@ def test_a_lead_pointing_at_a_map_site_is_counted_with_the_citations():
     ]}
     _by, _evidence, _sources, warnings = extract_evidence(site(), payload, "r", "v", date(2026, 1, 1))
     assert [warning.split(":")[0] for warning in warnings] == ["Dropped 1 citation(s) of mapcarta.com"]
+
+
+def test_a_lead_giving_a_map_site_under_another_key_is_dropped_and_counted_too(tmp_path):
+    """Leads written before the prompt's template named their link as they chose."""
+    payload = {"site_id": "1", "sources": [], "unverified_leads": [
+        {"lead": "Mapcarta lists a landfill here.", "source_url": "https://mapcarta.com/W2"},
+    ]}
+    _by, _evidence, _sources, warnings = extract_evidence(site(), payload, "r", "v", date(2026, 1, 1))
+    assert [warning.split(":")[0] for warning in warnings] == ["Dropped 1 citation(s) of mapcarta.com"]
+    (tmp_path / "site_1.json").write_text(json.dumps(payload))
+    assert payload_leads([tmp_path / "site_1.json"], {}, "r") == []
 
 
 # --- the link check and a whole run -----------------------------------------------------------

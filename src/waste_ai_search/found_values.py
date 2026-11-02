@@ -498,23 +498,30 @@ def flag_closures(rows: list[dict[str, Any]]) -> None:
 
 def unverified_rows(leads: list[dict[str, Any]], sites_by_id: dict[str, dict[str, Any]], run_year: int) -> list[dict[str, Any]]:
     """The agent's own unverified_leads as found_values.csv rows, not used: it gave no source it
-    would stand behind. `leads` are payload_leads'."""
+    would stand behind. `leads` are payload_leads': each row gives the lead's link, value and unit as
+    the agent wrote them, its date, which gives its year as a value's does, its quote and its note,
+    and status_reason why the agent didn't stand behind it, where it said."""
     rows = []
     for lead in leads:
         site = sites_by_id.get(lead["site_id"], {})
+        value, unit, why = lead.get("value", ""), lead.get("unit", ""), lead.get("why_unverified", "")
+        reason = "The agent reported it as unverified"
         rows.append({
             "run_id": lead.get("run_id", ""),
             "site_id": lead["site_id"],
             "site_name": normalize_scalar(site.get("site_name")),
             "country_iso3": normalize_scalar(site.get("country_iso3")),
-            "year": run_year,
+            "year": value_year(lead.get("value_date"), run_year),
             "source_url": lead.get("url", ""),
             "attribute_name": lead.get("attribute_name", ""),
-            "value": lead.get("value", ""),
-            "value_as_written": lead.get("value", ""),
+            "value": value,
+            "unit": unit,
+            "value_as_written": " ".join(part for part in (value, unit) if part),
+            "value_date": lead.get("value_date", ""),
+            "quote": lead.get("quote", ""),
             "agent_note": lead.get("lead_summary", ""),
             "status": NOT_USED,
-            "status_reason": "The agent reported it as unverified.",
+            "status_reason": f"{reason}: {why}{'' if why.endswith(('.', '?', '!')) else '.'}" if why else f"{reason}.",
             "_why": UNVERIFIED,
         })
     return rows

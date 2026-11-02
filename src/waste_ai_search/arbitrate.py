@@ -273,7 +273,7 @@ def extract_evidence(
     # The agent's own leads are listed in found_values.csv (payload_leads), which skips the same map
     # sites, so they are counted with the rest.
     for lead in read["unverified_leads"]:
-        mirror = dropped_source_site(lead.get("url")) if isinstance(lead, dict) else ""
+        mirror = dropped_source_site(lead_part(lead, "url")) if isinstance(lead, dict) else ""
         if mirror:
             dropped[mirror] = dropped.get(mirror, 0) + 1
 
@@ -436,12 +436,34 @@ def read_listed_candidates(path: Path) -> list[dict[str, str]]:
         return [dict(row) for row in csv.DictReader(handle) if row.get("found_by") == FOUND_BY_SME]
 
 
+# The parts of an unverified lead, and the keys each may come under. The prompt's template names the
+# first of each; responses from before it named them as the agent chose, in 23 shapes in round 2 of
+# the Mexico tests, where reading only the first lost the value and the note of 157 of 174 leads. The
+# reason keys say why the agent didn't stand behind it; the rest of its text is the note.
+LEAD_KEYS = {
+    "url": ("url", "source_url", "supporting_url"),
+    "attribute_name": ("attribute_name",),
+    "value": ("value", "candidate_value"),
+    "unit": ("unit",),
+    "value_date": ("value_date",),
+    "quote": ("quoted_evidence_short",),
+    "why_unverified": ("why_unverified", "reason_unverified", "reason"),
+    "lead_summary": ("lead_summary", "summary", "note", "lead", "finding", "description"),
+}
+
+
+def lead_part(lead: dict[str, Any], part: str) -> str:
+    """One part of an unverified lead (LEAD_KEYS), under whichever of its keys the agent used."""
+    return next((text for key in LEAD_KEYS[part] if (text := normalize_scalar(lead.get(key)))), "")
+
+
 def payload_leads(
     cached: list[Path],
     sites_by_id: dict[str, dict[str, Any]],
     run_id: str,
 ) -> list[dict[str, Any]]:
-    """The agent's own unverified_leads, which found_values.csv lists as not used.
+    """The agent's own unverified_leads, which found_values.csv lists as not used: each with its parts
+    (LEAD_KEYS), however the response named them. A lead given as text only is all note.
 
     A lead pointing at a dropped map site is skipped, like a citation of one; extract_evidence
     counts it in the site's parse warnings.
@@ -456,25 +478,12 @@ def payload_leads(
             continue
         for lead in payload["unverified_leads"]:
             if isinstance(lead, dict):
-                summary = normalize_scalar(lead.get("lead_summary") or lead.get("summary") or lead.get("note"))
-                url = normalize_scalar(lead.get("url"))
-                if dropped_source_site(url):
+                parts = {part: lead_part(lead, part) for part in LEAD_KEYS}
+                if dropped_source_site(parts["url"]):
                     continue
-                attribute = normalize_scalar(lead.get("attribute_name"))
-                value = normalize_scalar(lead.get("value"))
             else:
-                summary, url, attribute, value = normalize_scalar(lead), "", "", ""
-            out.append(
-                {
-                    "run_id": run_id,
-                    "site_id": site_id,
-                    "site_name": normalize_scalar(site.get("site_name")),
-                    "attribute_name": attribute,
-                    "value": value,
-                    "lead_summary": summary,
-                    "url": url,
-                }
-            )
+                parts = {**{part: "" for part in LEAD_KEYS}, "lead_summary": normalize_scalar(lead)}
+            out.append({"run_id": run_id, "site_id": site_id, "site_name": normalize_scalar(site.get("site_name")), **parts})
     return out
 
 
