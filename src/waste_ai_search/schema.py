@@ -672,7 +672,9 @@ FOUNDRY_RUN_LOG_HEADERS = [
     "run_id", "site_id", "pass_label", "site_name", "country_iso3", "requested_attributes", "agent_id",
     "request_started_at", "request_finished_at", "status", "raw_response_path",
     "parsed_attribute_count", "parsed_source_count", "error_message", "retry_count",
-    "web_searches",
+    # Bing queries, and the web search tool's calls - its searches and the pages it opened or
+    # searched in, which --max-web-searches caps together - every attempt at the pass added up.
+    "web_searches", "tool_calls",
     # The model that answered, and its tokens, every attempt at the pass added up (costs.py).
     "model", "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens",
 ]

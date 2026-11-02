@@ -73,16 +73,19 @@ class AzureFoundryAgentClient:
             allow_preview=True,
         )
         # A search's billed use, which the run log records: Bing queries, model tokens, and the
-        # model that answered.
+        # model that answered. And what its web search tool did (web_search_actions), which the
+        # search keeps in the response it saves.
         self.web_searches = 0
         self.usage = Usage()
         self.model = ""
+        self.search_actions: list[dict[str, Any]] = []
 
     def search_site(self, site: dict[str, Any], prompt: str) -> dict[str, Any]:
         # Bing bills per query, and a retry repeats every query, so all attempts are counted; so are
         # their tokens, which the model bills for whether or not its answer could be read.
         self.web_searches = 0
         self.usage = Usage()
+        self.search_actions = []
         limit = self.config.site_timeout_seconds
         deadline = time.monotonic() + limit if limit > 0 else None
         last_error: Exception | None = None
@@ -174,6 +177,9 @@ class AzureFoundryAgentClient:
             limit,
         )
         self.web_searches += count_web_searches(response)
+        if not isinstance(getattr(self, "search_actions", None), list):
+            self.search_actions = []
+        self.search_actions.extend(web_search_actions(response))
         if not isinstance(getattr(self, "usage", None), Usage):
             self.usage = Usage()
         self.usage.add(response)
@@ -224,21 +230,34 @@ def count_web_searches(response: Any) -> int:
     """Bing queries a response made - what Bing grounding bills for (WP-545).
 
     Each search is a `web_search_call` output item whose action lists the queries it sent. Other
-    actions (opening or reading a page) send no query and are not counted.
+    actions (opening a page, or finding text in one) send no query and are not counted.
     """
-    total = 0
+    return sum(len(action["queries"]) or 1 for action in web_search_actions(response) if action["type"] == "search")
+
+
+def web_search_actions(response: Any) -> list[dict[str, Any]]:
+    """What each of a response's web search tool calls did, in order: a search with the queries it
+    sent, or a page opened (open_page) or searched for a pattern (find_in_page) with its URL. Every
+    one counts toward max_tool_calls."""
+    actions = []
     for item in getattr(response, "output", None) or []:
         if getattr(item, "type", "") != "web_search_call":
             continue
         action = getattr(item, "action", None)
-        if isinstance(action, dict):
-            kind, queries = action.get("type"), action.get("queries")
+        kind = str(_field(action, "type") or "search")
+        if kind == "search":
+            queries = _field(action, "queries") or ([_field(action, "query")] if _field(action, "query") else [])
+            actions.append({"type": kind, "queries": [str(query) for query in queries]})
         else:
-            kind, queries = getattr(action, "type", None), getattr(action, "queries", None)
-        if kind not in (None, "search"):
-            continue
-        total += len(queries or []) or 1
-    return total
+            actions.append({"type": kind, "url": str(_field(action, "url") or "")})
+            if _field(action, "pattern"):
+                actions[-1]["pattern"] = str(_field(action, "pattern"))
+    return actions
+
+
+def _field(action: Any, name: str) -> Any:
+    """One field of a web search call's action, which comes as a dict or as an object."""
+    return action.get(name) if isinstance(action, dict) else getattr(action, name, None)
 
 
 def message_to_text(message: Any) -> str:

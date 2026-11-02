@@ -66,6 +66,11 @@ from .searchable_names import (
 )
 
 
+# Where a saved response keeps what the agent's web search tool did: each search with its queries, and
+# each page it opened or searched in (foundry_client.web_search_actions).
+SEARCH_ACTIONS = "_search_actions"
+
+
 class NothingToSearch(ValueError):
     """A search whose selection leaves no site to search: an instruction to the user, not a bug."""
 
@@ -173,6 +178,15 @@ def add_searches(total: int | None, client: Any) -> int | None:
     if count is None:
         return total
     return (total or 0) + count
+
+
+def add_tool_calls(total: int | None, client: Any) -> int | None:
+    """Add the web search tool calls of the client's last call to a site's running total: its
+    searches, and the pages it opened or searched in, each of which counts toward the cap."""
+    actions = getattr(client, "search_actions", None)
+    if not isinstance(actions, list):
+        return total
+    return (total or 0) + len(actions)
 
 
 def add_usage(total: Usage | None, client: Any) -> Usage | None:
@@ -473,6 +487,7 @@ def search_one_site(
     tool_retries = 0
     # None when the client cannot count (a fake in tests); blank in the log, never a false 0.
     web_searches: int | None = None
+    tool_calls: int | None = None
     usage: Usage | None = None
 
     payload: dict[str, Any] | None = None
@@ -490,12 +505,19 @@ def search_one_site(
                 payload = client.search_site(site, prompt)
             except Exception as exc:  # noqa: BLE001 - one bad site must not end a multi-day run
                 web_searches = add_searches(web_searches, client)
+                tool_calls = add_tool_calls(tool_calls, client)
                 usage = add_usage(usage, client)
                 status, error = "Failed", f"{type(exc).__name__}: {exc}"
                 print(f"    {site_id}: {error}", flush=True)
                 break
             web_searches = add_searches(web_searches, client)
+            tool_calls = add_tool_calls(tool_calls, client)
             usage = add_usage(usage, client)
+            actions = getattr(client, "search_actions", None)
+            if isinstance(actions, list):
+                # What the agent searched for and opened, kept with what it answered, to study recall
+                # and the search cap with. Nothing reads it back (payload.read_payload ignores it).
+                payload[SEARCH_ACTIONS] = list(actions)
 
             if not search_tool_failed(payload):
                 save_json(path, payload)
@@ -543,6 +565,7 @@ def search_one_site(
         "error_message": error,
         "retry_count": tool_retries,
         "web_searches": "" if web_searches is None else web_searches,
+        "tool_calls": "" if tool_calls is None else tool_calls,
         "model": normalize_scalar(getattr(client, "model", "")) if usage is not None else "",
         **(usage.as_row() if usage is not None else {column: "" for column in TOKEN_COLUMNS}),
     }
@@ -568,9 +591,9 @@ def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, 
     has its own row (pass_label), so a second pass with another model is priced at that model, and
     retrying a pass replaces only its row. A log from before rows had a pass reads as the first's.
 
-    `web_searches` and the token counts are the exception: every attempt is billed, so a row's count
-    adds to its earlier one. A skipped site logs a blank count, which keeps the earlier one rather than
-    erasing it, and its model.
+    `web_searches`, `tool_calls` and the token counts are the exception: they count every attempt,
+    each of which is billed, so a row's count adds to its earlier one. A skipped site logs a blank
+    count, which keeps the earlier one rather than erasing it, and its model.
     """
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     if path.exists():
@@ -581,7 +604,7 @@ def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, 
         key = _run_log_key(row)
         before = merged.get(key) or {}
         row = dict(row)
-        for column in ("web_searches", *TOKEN_COLUMNS):
+        for column in ("web_searches", "tool_calls", *TOKEN_COLUMNS):
             earlier = str(before.get(column) or "")
             if earlier.isdigit():
                 row[column] = int(earlier) + int(row.get(column) or 0)

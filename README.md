@@ -1531,6 +1531,12 @@ site that uses all 4 attempts can make up to 24 searches. On the same 10 sites:
 Repeat runs of one site vary widely (one used 12, 30 and 39 queries), so treat the last two rows as
 noise-level.
 
+**What each search did is kept.** The cap counts every call of the web search tool: its searches,
+and the pages it opens or finds text in. The run log's `tool_calls` counts them, every attempt added
+up like `web_searches`. The response saved for each site lists them in order, in `_search_actions`:
+each search with its queries, and each page with its URL and any text it looked for. Nothing reads
+them back. They show how often the cap binds, and which searches found the pages SMEs approve.
+
 ### If a site could not be searched
 
 `sites_to_retry.csv` lists sites where the agent's own web-search tool failed. These are **not**
