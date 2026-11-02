@@ -250,13 +250,13 @@ REVIEW_INSTRUCTIONS = [
             "is filed under the site that was searched, and status says what becomes of each value. "
             "SME review: it fills a field that is empty in our database, and loads once its source is "
             "approved on Site_Review - a key value from a Tier 3-5 source, or an operator the search "
-            "inferred (value_check required), only once it is marked Correct too. not used: it "
-            "confirms or would change a value we hold, its link is dead, or it could not be converted "
-            "or mapped. status_reason says why. review_id names the site-source pair, as on "
-            "Site_Review. Once your decisions are read back, "
-            "sme_decision gives the source's decision, value_decision and corrected_value a value "
-            "row's, and loaded says whether the value loads: yes, or no where another value was picked "
-            "for the same site, attribute and year."
+            "inferred or found sources disagreeing on (value_check required), only once it is marked "
+            "Correct too. not used: it confirms or would change a value we hold, its link is dead, it "
+            "could not be converted or mapped, or it is a planned closure year that has passed. "
+            "status_reason says why. review_id names the site-source pair, as on Site_Review. Once "
+            "your decisions are read back, sme_decision gives the source's decision, value_decision "
+            "and corrected_value a value row's, and loaded says whether the value loads: yes, or no "
+            "where another value was picked for the same site, attribute and year."
         ),
         "sme_action": "For the data team. You can skip this.",
         "editable": "nothing",

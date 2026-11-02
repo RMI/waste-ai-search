@@ -1290,8 +1290,8 @@ ReadMe tab gives the same steps as this section. Everything else in the run fold
 material you only need if a row raises a question.
 
 **The question for each row is whether the source is about this site of ours.** We trust the agent
-to read values off a page, so you don't check each value. A Tier 1–2 source's values for empty
-fields load without review, and you see only the sources that need a look.
+to read most values off a page: you check only those on ↳ rows (below), and the rest load with your
+approval of the source.
 
 ### 1. Open the Site_Review tab
 
@@ -1306,16 +1306,10 @@ tier, one for an operator the search worked out rather than read, or found sourc
 (`value_basis` Inferred or Conflicting). Check each against the page and mark it Correct or Wrong: it
 loads only once marked Correct, and only with its source.
 
-A row is here because its source is:
-
-- **Tier 3–5:** news, a directory, or a source whose type couldn't be told; or
-- **Tier 1–2 with an exception:** the same page and facility name are cited for another site of
-  ours; it places the facility more than 5 km from our site; or it says the site is Not a Waste
-  Facility.
-
-Not here: auto-approved sources, values that confirm or would change one we hold (only fills of
-empty fields load), dead links, and values that couldn't be converted or mapped. `found_values.csv`
-lists every value, with its status and why.
+Every source whose values would fill an empty field is here, whatever its tier: the flags (below)
+say which need a closer look. Not here: values that confirm or would change one we hold (only fills
+of empty fields load), dead links, and values that couldn't be converted or mapped.
+`found_values.csv` lists every value, with its status and why.
 
 ### 2. Read the row
 
@@ -1357,7 +1351,7 @@ Pick `decision` from its dropdown:
 
 | `decision` | When | What happens |
 |---|---|---|
-| **Correct site** | The source is about this site of ours. | Its values load here: everything in `would_load`, unless a flag says a better-tier value for the same field loads instead. |
+| **Correct site** | The source is about this site of ours. | Its values load here: everything in `would_load`, a line marked *(check independently)* once its ↳ row is Correct, unless a flag says a better-tier value for the same field loads instead. |
 | **Different site** | It is about another site of ours. Put that site's id in `other_site_id`. | Its values load at that site, where that site's fields are empty. |
 | **New site** | It is about a landfill that isn't in our database. | Nothing loads. The source is listed in `new_facility_candidates.csv` for ingestion. |
 | **Junk** | The source is no use: it isn't about one facility, or you can't tell which. | Nothing loads. |

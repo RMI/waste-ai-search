@@ -18,7 +18,7 @@ its match; a key value (schema.VALUE_CHECKED_ATTRIBUTES) from a Tier 3-5 pair is
 SME on its own row, and so is an operator the agent marked Inferred or Conflicting, whatever its
 pair's tier. value_check says so ("required").
 
-What once sent a Tier 1-2 pair to SMEs is now a warning on its row (Pair.exceptions):
+The warnings a pair can carry, whatever its tier (Pair.exceptions):
 
 - the same page and facility name are cited for two or more of our sites (possible_duplicates.csv
   lists them);
@@ -70,7 +70,7 @@ LOADABLE = (AUTO_APPROVED, SME_REVIEW)
 
 # Tier 1 is a regulator, permit or operator; Tier 2 government statistics, peer-reviewed or
 # intergovernmental data. Their values are trusted as read: they load with their pair's match, with
-# no value check (key-values plan, rule 3).
+# no value check (key-values plan, rule 3), but for an operator the agent doubted (below).
 MAX_TRUSTED_TIER = TIER_2
 # value_check for a value an SME checks on its own Site_Review row (needs_value_check).
 CHECK_REQUIRED = "required"
