@@ -518,9 +518,11 @@ def test_a_name_that_does_not_resolve_is_its_own_status_and_an_internal_address_
 
     import waste_ai_search.link_check as lc
 
-    _fake_resolution(monkeypatch, {"internal.example": ["10.0.0.5"]})
+    _fake_resolution(monkeypatch, {"internal.example": ["10.0.0.5"], "nowhere.example": []})
     with pytest.raises(lc.DoesNotResolve):
         lc._public_address("www.mide.example", 443)
+    with pytest.raises(lc.DoesNotResolve):  # a name with no address resolves to nothing either
+        lc._public_address("nowhere.example", 443)
     session = requests.Session()
     session.mount("https://", lc._pinned_adapter_class()())
     assert lc._original_fetch(session, "https://www.mide.example/indicador", lc._HostThrottle(0)) == "DoesNotResolve"
@@ -536,6 +538,8 @@ def test_a_name_that_does_not_resolve_is_its_own_status_and_an_internal_address_
     (LinkResult("u", UNVERIFIED, "403", "u"), "Unverified: the site refuses automated readers (403), so quotes weren't checked"),
     (LinkResult("u", UNVERIFIED, "ConnectTimeout", "u"), "Unverified: the site timed out, so quotes weren't checked"),
     (LinkResult("u", UNVERIFIED, "DoesNotResolve", "u"), "Unverified: the address doesn't resolve, so quotes weren't checked"),
+    # An internal address, or, in a run checked before DoesNotResolve, a name that didn't resolve.
+    (LinkResult("u", UNVERIFIED, "BlockedDestination", "u"), "Unverified: the site isn't on the public internet, so quotes weren't checked"),
     (LinkResult("u", UNVERIFIED, "500", "u"), "Unverified: the site had a server error (500), so quotes weren't checked"),
     (LinkResult("u", UNVERIFIED, "429", "u"), "Unverified: the site turned away too many requests (429), so quotes weren't checked"),
     (LinkResult("u", UNVERIFIED, "406", "u"), "Unverified: the site answered 406, so quotes weren't checked"),

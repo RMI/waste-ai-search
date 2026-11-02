@@ -186,7 +186,7 @@ def _public_address(host: str, port: int) -> str:
             raise BlockedDestination(f"{host} resolves to non-public address {address}")
         addresses.append(str(address))
     if not addresses:
-        raise BlockedDestination(f"{host} has no address")
+        raise DoesNotResolve(f"{host} has no address")
     return addresses[0]
 
 
@@ -373,7 +373,8 @@ UNREAD = {
     "ConnectionError": "the connection to the site failed",
     "SSLError": "the site's secure connection failed",
     "DoesNotResolve": "the address doesn't resolve",
-    "BlockedDestination": "the address is an internal one, which is never opened",
+    # True too of a run checked before DoesNotResolve, when a name that didn't resolve was blocked.
+    "BlockedDestination": "the site isn't on the public internet",
     "InvalidURL": "the link is malformed",
     "MissingSchema": "the link is malformed",
     "InvalidSchema": "the link is malformed",
