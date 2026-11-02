@@ -77,6 +77,14 @@ def pass_label(text: str) -> str:
     return text
 
 
+def tonnes(text: str) -> float:
+    """A tonnage of zero or more: a negative one would take every site, a typo that costs a batch."""
+    number = float(text)
+    if number < 0:
+        raise argparse.ArgumentTypeError(f"give 0 or more tonnes, not {text}")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="waste-ai-search",
@@ -117,7 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     search.add_argument(
         "--min-tonnes",
-        type=float,
+        type=tonnes,
         default=0,
         help="Search only sites our seed says take at least this many tonnes of waste a year (0 = any).",
     )

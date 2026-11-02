@@ -152,7 +152,8 @@ def name_similarity(name_a, name_b) -> float | None:
 # Added here: words that don't say which body runs a site. Spanish small words; a company's or
 # association's legal form, however it is spaced or dotted ("S.A. de C.V.", "SA de CV", "S.A.P.I.",
 # "S. de R.L.", "A.C."), with the suffixes above; and the "H." or "Honorable" of a town council.
-OPERATOR_SMALL_WORDS = {"de", "del", "la", "las", "los", "el", "y"}
+# "Proactiva (ahora Veolia)": the bracket gives the name it goes by now, which is its alias.
+OPERATOR_SMALL_WORDS = {"de", "del", "la", "las", "los", "el", "y", "ahora", "now", "antes", "formerly"}
 OPERATOR_LEGAL_FORMS = COMPANY_SUFFIXES | {"sapi", "sab", "s", "rl", "ac", "sc"}
 OPERATOR_TITLES = {"h", "honorable"}
 
@@ -178,6 +179,21 @@ def operator_words(name) -> tuple[set, set]:
     return kept(re.sub(r"\([^()]*\)", " ", plain)), acronyms
 
 
+def operator_letters(name) -> str:
+    """An operator name's kept words (operator_words) run together in order, outside brackets: "PRO-FAJ
+    Hidro Limpieza" and "Pro-Faj Hidrolimpieza" are both "profajhidrolimpieza", and "TEC-MED" is
+    "tecmed"."""
+    if not isinstance(name, str):
+        return ""
+    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    plain = re.sub(r"\b([a-z])\.\s?(?=[a-z]\b)", r"\1", re.sub(r"\([^()]*\)", " ", plain))
+    return "".join(
+        word for word in re.findall(r"[a-z0-9]+", plain)
+        if word not in OPERATOR_SMALL_WORDS | OPERATOR_LEGAL_FORMS | OPERATOR_TITLES
+        and not re.fullmatch(r"(19|20)[0-9]{2}", word)
+    )
+
+
 def same_operator(name_a, name_b) -> bool:
     """Whether two operator names are one body's, spelled two ways: one name's words (operator_words)
     are all among the other's, or one name is the other's bracketed acronym, or both give the same
@@ -190,6 +206,11 @@ def same_operator(name_a, name_b) -> bool:
     if words_a and words_b and (words_a <= words_b or words_b <= words_a):
         return True
     if acronyms_a & acronyms_b or any(words_b == {acronym} for acronym in acronyms_a) or any(words_a == {acronym} for acronym in acronyms_b):
+        return True
+    # The same letters split or joined differently, or an acronym written with a hyphen (retest-new,
+    # 2 November: 8 of 17 operator rival flags were one company's spellings).
+    letters_a, letters_b = operator_letters(name_a), operator_letters(name_b)
+    if letters_a and (letters_a == letters_b or letters_a in acronyms_b or letters_b in acronyms_a):
         return True
     # Two names of small words and legal forms only have nothing to tell them apart.
     return not (words_a or words_b or acronyms_a or acronyms_b)

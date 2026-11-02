@@ -235,6 +235,8 @@ def test_the_search_command_takes_a_pass_label_and_a_minimum_tonnage(tmp_path, m
     for label in ("../sol", "sol__2", "s o l"):
         with pytest.raises(SystemExit):
             cli.build_parser().parse_args(["search", "--pass-label", label])
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["search", "--min-tonnes", "-100000"])
 
 
 def test_name_yield_counts_a_site_searched_in_two_passes_once(tmp_path):

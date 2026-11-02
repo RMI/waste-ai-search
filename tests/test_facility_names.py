@@ -88,6 +88,10 @@ def test_a_misspelling_still_scores_high_and_conflicting_qualifiers_score_nothin
     ("Consultas Nacionales de Información y Asesorías SA de CV (Conadia)", "Conadia S.A. de C.V."),
     ("Pro-Faj Hidro Limpieza S. A. de C. V.", "PRO-FAJ HIDRO LIMPIEZA"),
     ("Honorable Ayuntamiento de Motul", "Ayuntamiento de Motul"),
+    # Words joined, a hyphenated acronym, and the name a company goes by now (retest-new, 2 November).
+    ("PRO-FAJ Hidro Limpieza, SA de CV", "Pro-Faj Hidrolimpieza, S. A. de C.V."),
+    ("Técnicas Medioambientales (Tecmed)", "TEC-MED"),
+    ("Proactiva (ahora Veolia)", "Veolia"),
 ])
 def test_two_spellings_of_one_operators_name_are_one_operator(name_a, name_b):
     assert same_operator(name_a, name_b)
