@@ -324,6 +324,14 @@ def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]
     return decisions
 
 
+def read_value_rows(workbook: Path) -> set[tuple[str, str]]:
+    """Every value row on a reviewed workbook's Site_Review tab, decided or not, by (review_id, check).
+    A workbook made before the run was arbitrated again can lack a row the run now checks a value on."""
+    return {
+        (record.get("review_id", ""), record["check"]) for _number, record in read_site_review(workbook) if record.get("check")
+    }
+
+
 def checked_value(row: dict[str, Any]) -> bool:
     """Whether a found value is one an SME checks on its own row (found_values.needs_value_check), so
     loads only with an SME's Correct, or corrected value, there: a key value from a Tier 3-5 pair, or
@@ -353,6 +361,8 @@ class Acceptance:
     unmatched_values: list[ValueDecision] = field(default_factory=list)
     # Key values under an approved pair with no decision of their own yet.
     undecided_values: int = 0
+    # Of those, the ones whose row the workbook doesn't have, so no SME can decide them there.
+    missing_value_rows: int = 0
     # Value decisions worth a second look (value_warnings).
     value_warnings: list[str] = field(default_factory=list)
 
@@ -362,10 +372,12 @@ def accept(
     decisions: dict[str, Decision],
     sites_by_id: dict[str, dict[str, Any]],
     value_decisions: dict[tuple[str, str], ValueDecision] | None = None,
+    value_rows: set[tuple[str, str]] | None = None,
 ) -> Acceptance:
     """Apply the decisions to found_values.csv's rows, filling in each row's sme_decision,
     value_decision, corrected_value and loaded, and pick the one value to load for each site,
-    attribute and year. `found` is changed in place.
+    attribute and year. `found` is changed in place. `value_rows` are the workbook's value rows
+    (read_value_rows), to tell a checked value not decided yet from one with no row to decide it on.
 
     loaded is "yes" for the value written to accepted_values.csv, "no" for a value accepted to load
     that lost to another, and blank for a value not accepted.
@@ -374,7 +386,7 @@ def accept(
     pairs: dict[str, list[dict[str, Any]]] = {}
     accepted: list[dict[str, Any]] = []
     matched: set[tuple[str, str]] = set()
-    undecided_values = 0
+    undecided_values = missing_value_rows = 0
     for index, row in enumerate(found):
         row["sme_decision"] = row["loaded"] = row["value_decision"] = row["corrected_value"] = ""
         review = row.get("review_id", "")
@@ -393,7 +405,10 @@ def accept(
         loads_at = destination(row, decision, sites_by_id)
         if loads_at and checked:
             if on_its_row is None:
-                undecided_values += row["status"] in LOADABLE
+                if row["status"] in LOADABLE:
+                    undecided_values += 1
+                    # A workbook made before the run was arbitrated again can lack the row.
+                    missing_value_rows += value_rows is not None and (review, check_label(row)) not in value_rows
                 loads_at = ""
             elif on_its_row.decision == WRONG and not on_its_row.corrected:
                 loads_at = ""
@@ -425,6 +440,7 @@ def accept(
         ),
         unmatched_values=[value for key, value in value_decisions.items() if key not in matched],
         undecided_values=undecided_values,
+        missing_value_rows=missing_value_rows,
         value_warnings=value_warnings(value_decisions, matched, decisions, accepted),
     )
 
@@ -683,7 +699,7 @@ def accept_reviews(run_dir: Path, workbook: Path) -> Acceptance:
         reader = csv.DictReader(handle)
         found = [dict(row) for row in reader]
         headers = list(reader.fieldnames or FOUND_VALUES_HEADERS)
-    acceptance = accept(found, decisions, sites_by_id, value_decisions)
+    acceptance = accept(found, decisions, sites_by_id, value_decisions, read_value_rows(workbook))
     acceptance.warnings = other_site_warnings(decisions, found, sites_by_id, searched_sites(run_dir, found))
 
     write_csv_records(run_dir / ACCEPTED_VALUES_FILE, acceptance.values, ACCEPTED_VALUES_HEADERS)
@@ -726,6 +742,12 @@ def print_acceptance(
         f"Key values decided: {sum(checked.values())} (Correct {checked[CORRECT]}, Wrong {checked[WRONG]}, "
         f"{corrected} of them corrected); waiting under approved sources: {acceptance.undecided_values}"
     )
+    if acceptance.missing_value_rows:
+        print(
+            f"!! {acceptance.missing_value_rows} value(s) waiting under approved sources have no ↳ row in "
+            f"{workbook.name}: the run was arbitrated again after the workbook was made. They load nothing "
+            "until they are decided on a workbook that has their rows."
+        )
     if acceptance.unmatched_values:
         rows = ", ".join(str(value.row) for value in acceptance.unmatched_values)
         print(

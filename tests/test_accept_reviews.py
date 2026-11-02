@@ -588,6 +588,31 @@ def test_a_decision_on_a_pair_the_run_no_longer_has_is_reported_not_applied(tmp_
     assert "1 decision(s) are on pairs found_values.csv no longer has (Site_Review rows 2)" in capsys.readouterr().out
 
 
+def test_a_value_whose_row_the_reviewed_workbook_doesnt_have_is_said_and_loads_nothing(tmp_path, capsys):
+    """A workbook made before the run was arbitrated again can lack a ↳ row the run now checks a value
+    on: until 1 November, an operator the agent inferred had none under a Tier 1 page. The value waits
+    as any undecided one does, and accept-reviews says no SME can decide it on that workbook."""
+    page = source("https://manitoba.example/permit", "Brady Road Landfill", source_type="Regulator", values=[
+        {**value("operator", "City of Winnipeg"), "value_basis": "Inferred"}, value("facility_status", "Active"),
+    ])
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [page]})
+    workbook = decide(run_dir, {page["url"]: {"decision": CORRECT_SITE}})
+    capsys.readouterr()
+    result = accept_reviews(run_dir, workbook)
+    assert (result.undecided_values, result.missing_value_rows) == (1, 0)
+    assert "!!" not in capsys.readouterr().out
+
+    book = load_workbook(workbook)
+    ws = book["Site_Review"]
+    check = [cell.value for cell in ws[1]].index("check") + 1
+    ws.delete_rows(next(row for row in range(2, ws.max_row + 1) if ws.cell(row, check).value == "operator"))
+    book.save(workbook)
+    result = accept_reviews(run_dir, workbook)
+    assert (result.undecided_values, result.missing_value_rows) == (1, 1)
+    assert [r["attribute_name"] for r in accepted(run_dir)] == ["facility_status"]
+    assert "!! 1 value(s) waiting under approved sources have no ↳ row in run_review.xlsx: the run was" in capsys.readouterr().out
+
+
 # --- what stops it -------------------------------------------------------------------------------
 @pytest.mark.parametrize("cells, says", [
     ({"decision": "Approve"}, "row 3 (WAIREV-13413-"),
