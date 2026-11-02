@@ -547,6 +547,14 @@ Names:
         f"  municipality or within {NEAR_KM:g} km)"
         if site.get(OTHER_SITES_FIELD) else "the town's waste or another of its sites"
     )
+    # But a page about the town's dump is about ours where we hold no other site there, and so is
+    # one about the dump of the place ours is named after (Hugh, 1 November). In the 31 October
+    # Mexico tests 34 of the 84 pages judged ours named the site only by its town, and Terra and Sol
+    # declined some, such as San Ignacio Cerro Gordo's, where we hold no other site nearby.
+    towns_dump = (
+        f" where\n  {OTHER_SITES_FIELD} lists none of our sites in that town"
+        if site.get(OTHER_SITES_FIELD) else ", as we hold no other site nearby"
+    )
     same_point = (
         f"\n  {SAME_POINT_FIELD} may be this facility recorded twice: a page about one of them may be\n"
         "  about this one."
@@ -670,7 +678,10 @@ Definitions:
 - A town can have waste sites we don't hold, such as a new landfill that replaced an old
   dump. A page about {not_this_one} is not about this facility unless it also describes this
   one: its name, place or history. From such a page use only what it says about this one. A
-  generic phrase such as "municipal dump" or "basurero municipal" names no particular site.{same_point}
+  generic phrase such as "basurero municipal" does not by itself name a site. But a page about
+  the dump of the place our site is named after, or about the town's dump{towns_dump},
+  describes this one unless it speaks of a replacement or another location: return it, and
+  say in evidence_summary that it names the site only by its place.{same_point}
 - If you cannot confirm you found this specific facility, return an empty sources list
   and explain why in search_notes. Do not return data for a different site.
 - From a page listing many facilities, such as a registry, use only this facility's entry.

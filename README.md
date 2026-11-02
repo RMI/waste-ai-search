@@ -1538,14 +1538,20 @@ named and the rest counted.
 Every prompt also says that a town can have waste sites we don't hold, such as a new landfill that
 replaced an old dump. A page about the town's waste, another of its sites, or one of our other
 sites nearby is not about our site unless it also describes ours: its name, place or history. From
-such a page the agent uses only what it says about ours, and a generic phrase such as "basurero
-municipal" names no particular site. In test10-mex-sample2, the first search gave Las Varas two
-NADBank pages and a Chihuahua state government page about Madera's new landfill. None named Las
-Varas, and the second search declined pages like them.
+such a page the agent uses only what it says about ours. In test10-mex-sample2, the first search
+gave Las Varas two NADBank pages and a Chihuahua state government page about Madera's new landfill.
+None named Las Varas, and the second search declined pages like them.
 
-The rule adds about 390 characters to every prompt (Thunder Bay's is 18,794, under the size test's
-19,000). Where a site has others nearby, the first named adds about 175 more and each further one
-about 65.
+A generic phrase such as "basurero municipal" doesn't by itself name a site. But a page about the
+dump of the place our site is named after, or about the town's dump where we hold no other site in
+that town, describes ours unless it speaks of a replacement or another location. The agent returns
+it and says in `evidence_summary` that it names the site only by its place. In the 31 October Mexico
+tests the judges called 34 of the 84 good pages ours on that basis ("basurero municipal de
+Tolcayuca"), while Terra and Sol declined some, such as San Ignacio Cerro Gordo's, where we hold no
+other site nearby.
+
+The rule adds about 660 characters to every prompt. Where a site has others nearby, the first named
+adds about 175 more and each further one about 65.
 
 This is separate from the locate step's address geocoding, which places the addresses sources
 state (see [Locating each source](#locating-each-source)).

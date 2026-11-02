@@ -100,22 +100,48 @@ def test_a_page_about_the_town_or_another_of_its_sites_is_not_about_this_one():
     assert (
         "A town can have waste sites we don't hold, such as a new landfill that replaced an old dump. A page "
         "about the town's waste or another of its sites is not about this facility unless it also describes "
-        "this one: its name, place or history. From such a page use only what it says about this one. A "
-        'generic phrase such as "municipal dump" or "basurero municipal" names no particular site.'
+        "this one: its name, place or history. From such a page use only what it says about this one."
     ) in prompt
     # Thunder Bay has none of our other sites near it, so the prompt names none.
     assert "our_other_sites_nearby" not in prompt and "our_records_within_1_km" not in prompt
 
 
+def test_a_page_about_the_towns_dump_is_about_ours_where_we_hold_no_other_site_there():
+    """Hugh's call (1 November). In the 31 October Mexico tests the judges called 34 of the 84 good
+    pages ours though they name the site only by its town ('basurero municipal de Tolcayuca'), and
+    Terra and Sol declined some: at 3564, San Ignacio Cerro Gordo's dump, where we hold no other
+    site nearby, both returned nothing. A page about a replacement or another location is still
+    not ours, as at Chalchihuites, whose 2006 pages are about a new landfill."""
+    prompt = " ".join(prompt_for(THUNDER_BAY).split())
+    assert (
+        'A generic phrase such as "basurero municipal" does not by itself name a site. But a page about the dump '
+        "of the place our site is named after, or about the town's dump, as we hold no other site nearby, "
+        "describes this one unless it speaks of a replacement or another location: return it, and say in "
+        "evidence_summary that it names the site only by its place."
+    ) in prompt
+    assert "names no particular site" not in prompt
+    # The note goes where the contract keeps a value's evidence.
+    (source,) = contract(prompt_for(THUNDER_BAY))["sources"]
+    assert "evidence_summary" in source["values"][0]
+
+
 def test_our_other_sites_nearby_come_under_the_same_rule():
-    """A page about one of them that describes this site too is still about this site."""
+    """A page about one of them that describes this site too is still about this site, and a page
+    about the town's dump is ours only where none of them is in that town."""
     nearby = ["BASURERO NICOLAS BRAVO (Madera, 18 km away)", 'unnamed site, recorded as "BASURERO MUNICIPAL" (Madera, 31 km away)']
     prompt = prompt_for({**THUNDER_BAY, "our_other_sites_nearby": nearby})
     assert json.loads(section(prompt, "Site context"))["our_other_sites_nearby"] == nearby
+    flat = " ".join(prompt.split())
     assert (
         "A page about the town's waste, another of its sites, or one of our_other_sites_nearby (our other sites "
         "in this municipality or within 15 km) is not about this facility unless it also describes this one"
-    ) in " ".join(prompt.split())
+    ) in flat
+    assert (
+        "But a page about the dump of the place our site is named after, or about the town's dump where "
+        "our_other_sites_nearby lists none of our sites in that town, describes this one unless it speaks of a "
+        "replacement or another location"
+    ) in flat
+    assert "as we hold no other site nearby" not in flat
 
 
 def test_our_records_within_1_km_may_be_this_site_recorded_twice():
