@@ -298,6 +298,33 @@ def test_a_quote_missing_from_an_html_page_that_kept_only_its_menu_is_no_page_te
     assert check("https://xeu.example/nota", "basurero municipal de Veracruz fue abierto en 1990") == (NOT_FOUND, "")
 
 
+def test_which_pages_are_only_a_menu_is_read_from_html_pages_alone_without_building_a_page(tmp_path, monkeypatch):
+    """link_words asks it of every page the link check kept, and building a Page from a long one
+    takes most of a second."""
+    from waste_ai_search import on_page
+    from waste_ai_search.link_check import LinkResult
+    from waste_ai_search.page_text import read_page_text
+
+    pages = {"https://xeu.example/menu": ("html", MENU), "https://xeu.example/nota": ("html", ARTICLE),
+             "https://gob.example/acta.pdf": ("pdf", MENU)}
+    results = {}
+    for url, (kind, text) in pages.items():
+        name = save_page_text(tmp_path / PAGE_TEXT_DIR, url, text)
+        results[url] = LinkResult(url, "OK", "200", url, text_file=name, text_kind=kind, text_chars=len(text))
+    read = []
+
+    def no_page(text):  # noqa: ARG001
+        raise AssertionError("built a Page")
+
+    monkeypatch.setattr(on_page, "read_page_text", lambda directory, name: read.append(name) or read_page_text(directory, name))
+    monkeypatch.setattr(on_page, "Page", no_page)
+    checker = PageChecker(tmp_path, {}, {result.text_file: result.text_kind for result in results.values()})
+    words = checker.link_words(results)
+    assert words["https://xeu.example/menu"].startswith("OK, but its text is only the site's menu")
+    assert words["https://xeu.example/nota"] == words["https://gob.example/acta.pdf"] == "OK"
+    assert sorted(read) == sorted(results[url].text_file for url in ("https://xeu.example/menu", "https://xeu.example/nota"))
+
+
 def test_site_review_says_why_a_page_had_no_automatic_check_and_found_values_keeps_the_verdict(tmp_path):
     from waste_ai_search.link_check import LINK_CHECK_FILE, LinkResult, save_results
     from waste_ai_search.page_text import text_file_name

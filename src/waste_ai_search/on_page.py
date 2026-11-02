@@ -267,6 +267,7 @@ class PageChecker:
         self.notes = notes or {}
         self.kinds = kinds or {}
         self.load = lru_cache(maxsize=256)(self._load)
+        self.menu_only = lru_cache(maxsize=None)(self._menu_only)
 
     def _load(self, source_id: str) -> Page | None:
         name = f"{source_id}.txt.gz" if source_id else ""
@@ -291,10 +292,14 @@ class PageChecker:
             location = NO_PAGE_TEXT if location in (NOT_FOUND, PARTLY) else location
         row["quote_on_page"], row["location_on_page"] = quote, location
 
-    def menu_only(self, source_id: str) -> bool:
-        """Whether a page is HTML whose kept text is only the site's menu (menu_only)."""
-        page = self.load(source_id)
-        return page is not None and self.kinds.get(f"{source_id}.txt.gz") == HTML and menu_only(page.raw)
+    def _menu_only(self, source_id: str) -> bool:
+        """Whether a page is HTML whose kept text is only the site's menu (menu_only). link_words asks
+        it of every page, so only an HTML page's text is read, and no Page is built from it."""
+        name = f"{source_id}.txt.gz"
+        if self.kinds.get(name) != HTML or little_text(self.notes.get(name, "")):
+            return False
+        text = read_page_text(self.directory, name)
+        return bool(text) and menu_only(text)
 
     def link_words(self, results: dict[str, LinkResult]) -> dict[str, str]:
         """Site_Review's link_status for each page the link check saw, by the URL its rows carry,
