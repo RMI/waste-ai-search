@@ -566,6 +566,9 @@ Names:
         towns_dump = f", as we hold\n  no other site nearby except those in {SAME_POINT_FIELD}"
     else:
         towns_dump = ", as we hold no other site nearby"
+    # Not where the name is an operator's, whose place may not be the site's: 7 of the 8 sites named
+    # 'PROMOTORA AMBIENTAL DE LA LAGUNA' are outside La Laguna.
+    named_place = "" if operator_name else "the dump of the place our site is named after, or about "
     same_point = (
         f"\n  {SAME_POINT_FIELD} may be this facility recorded twice: a page about one of them may be\n"
         "  about this one."
@@ -703,7 +706,7 @@ Definitions:
   dump. A page about {not_this_one} is not about this facility unless it also describes this
   one: its name, place or history. From such a page use only what it says about this one. A
   generic phrase such as "basurero municipal" does not by itself name a site. But a page about
-  the dump of the place our site is named after, or about the town's dump{towns_dump},
+  {named_place}the town's dump{towns_dump},
   describes this one unless it speaks of a replacement or another location: return it, and
   say in evidence_summary that it names the site only by its place.{same_point}
 - If you cannot confirm you found this specific facility, return an empty sources list

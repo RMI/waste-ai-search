@@ -1554,7 +1554,8 @@ that town, describes ours unless it speaks of a replacement or another location.
 it and says in `evidence_summary` that it names the site only by its place. In the 31 October Mexico
 tests the judges called 34 of the 84 good pages ours on that basis ("basurero municipal de
 Tolcayuca"), while Terra and Sol declined some, such as San Ignacio Cerro Gordo's, where we hold no
-other site nearby.
+other site nearby. Where our name looks like an operator's, only the town's dump counts: 7 of the 8
+sites named "Promotora Ambiental de la Laguna" are outside La Laguna.
 
 The rule adds about 660 characters to every prompt (Thunder Bay's is 20,480, under the size test's
 20,600). Where a site has others nearby, the first named adds about 210 more and each further one

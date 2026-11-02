@@ -514,6 +514,19 @@ def test_a_sites_own_name_gets_no_operator_bullet(site_id):
     assert "looks like an operator's name" not in build_site_prompt(OWN_NAMES[site_id], ["operator"])
 
 
+def test_a_place_in_an_operators_name_is_not_taken_for_the_sites():
+    """7 of the 8 sites named 'PROMOTORA AMBIENTAL DE LA LAGUNA', such as 8146 in Sinaloa, are
+    outside La Laguna, so a page about La Laguna's dump is not about them. The town's dump still is."""
+    operator_named = flat(OPERATOR_NAMED["8146"])
+    assert "the place our site is named after" not in operator_named
+    assert (
+        "But a page about the town's dump, as we hold no other site nearby, describes this one unless it speaks "
+        "of a replacement or another location"
+    ) in operator_named
+    own_name = flat(OWN_NAMES["9233"])
+    assert "But a page about the dump of the place our site is named after, or about the town's dump" in own_name
+
+
 def test_an_operators_name_is_never_called_confirmed():
     """INEGI's names are Tier 1, and 'The name and coordinates are already confirmed' pushed the
     agent to match the company's name exactly. Only the coordinates are confirmed now."""
