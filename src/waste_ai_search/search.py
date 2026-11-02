@@ -153,9 +153,10 @@ def choose_sites(
         print(f"Batch {config.batch}: {len(selected):,} site(s) in {len(countries)} country(ies).")
     if config.min_tonnes > 0:
         # After the rules above, like --limit, so a second pass on a batch's largest sites takes the
-        # sites its first pass searched.
+        # sites its first pass searched. Listed, so which sites it took can be checked.
         selected = [site for site in selected if (incoming_tonnes(site) or 0) >= config.min_tonnes]
-        print(f"Taking {config.min_tonnes:,.0f} t a year or more: {len(selected):,} site(s).")
+        ids = " ".join(normalize_scalar(site.get("site_id")) for site in selected)
+        print(f"Taking {config.min_tonnes:,.0f} t a year or more: {len(selected):,} site(s){': ' + ids if ids else '.'}")
 
     if config.pilot_size > 0:
         return select_mixed_pilot(selected, size=config.pilot_size), skipped

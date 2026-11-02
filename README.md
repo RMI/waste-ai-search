@@ -853,8 +853,8 @@ uv run waste-ai-search arbitrate --run-id batch3
 ```
 
 - `--min-tonnes 100000` takes the sites whose seed gives 100,000 t a year or more of incoming
-  waste. It applies after the other rules, like `--limit`, so with `--batch 3` it takes the large
-  sites the first pass searched, and says how many. `--site-ids` works too, for a list of your own.
+  waste, and lists them. It applies after the other rules, like `--limit`, so with `--batch 3` it
+  takes the large sites the first pass searched. `--site-ids` works too, for a list of your own.
 - `--pass-label sol` keeps each response beside the first, as `site_<id>__sol.json`, and
   arbitration merges every pass's sources. Retry a site that failed as the same pass, with the same
   agent, as the search prints: `AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run

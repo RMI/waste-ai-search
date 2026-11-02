@@ -74,9 +74,11 @@ def test_min_tonnes_keeps_the_sites_our_seed_says_take_that_much(tmp_path, capsy
 
     sites, _headers = load_sites(seed(tmp_path))
     config = PipelineConfig(input_csv=None, run_dir=tmp_path / "run", run_id="t", min_tonnes=100000)
-    # A site with no tonnage in the seed is not known to be large.
+    # A site with no tonnage in the seed is not known to be large. Each site taken is listed.
     assert [site["site_id"] for site in search.select_sites(sites, config)] == ["2"]
-    assert "Taking 100,000 t a year or more: 1 site(s)." in capsys.readouterr().out
+    assert "Taking 100,000 t a year or more: 1 site(s): 2\n" in capsys.readouterr().out
+    assert [site["site_id"] for site in search.select_sites(sites, replace(config, min_tonnes=10000))] == ["1", "2"]
+    assert "Taking 10,000 t a year or more: 2 site(s): 1 2\n" in capsys.readouterr().out
     assert len(search.select_sites(sites, replace(config, min_tonnes=0))) == 3
 
 
