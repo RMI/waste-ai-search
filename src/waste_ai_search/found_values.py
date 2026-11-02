@@ -55,7 +55,7 @@ from .lists import citation_point, id_order, plain
 from .locate import coordinates_from, format_point, haversine_km, same_state, seed_point
 from .payload import normalize_url
 from .prompt_builder import needs_contradiction_check
-from .schema import NOT_A_WASTE_FACILITY, VALUE_CHECKED_ATTRIBUTES, is_blank, normalize_scalar
+from .schema import NOT_A_WASTE_FACILITY, TIME_VARYING_ATTRIBUTES, VALUE_CHECKED_ATTRIBUTES, is_blank, normalize_scalar
 
 
 FOUND_VALUES_FILE = "found_values.csv"
@@ -499,15 +499,20 @@ def status_of(
 
 
 def collapse(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One row per site, year, source and attribute.
+    """One row per site, source and attribute, and per year for a yearly attribute.
 
     A source can give one attribute twice for one year, or be cited again by a follow-up pass. The
     row kept is a value that could load if there is one, then the newest, then the first the agent
     gave; a different value it set aside is named in the kept row's status_reason.
+
+    An attribute that isn't yearly, such as facility_type or an area, is one value whatever its
+    year: two years of it from one source would be two ↳ rows under one (review_id, check), and the
+    SME's decision on one would be read as both (integration review, 2 November).
     """
-    groups: dict[tuple[str, int, str, str], list[dict[str, Any]]] = {}
+    groups: dict[tuple[str, int | None, str, str], list[dict[str, Any]]] = {}
     for row in rows:
-        groups.setdefault((row["site_id"], row["year"], row["review_id"], row["attribute_name"]), []).append(row)
+        year = row["year"] if row["attribute_name"] in TIME_VARYING_ATTRIBUTES else None
+        groups.setdefault((row["site_id"], year, row["review_id"], row["attribute_name"]), []).append(row)
     out = []
     for group in groups.values():
         group.sort(key=lambda row: (

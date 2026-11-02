@@ -144,6 +144,21 @@ def test_a_tier_3_to_5_pair_has_a_row_for_each_key_value_and_a_tier_1_2_pair_non
     )
 
 
+def test_one_page_giving_an_area_for_two_years_has_one_row_to_check(tmp_path):
+    """An area isn't yearly, so two years of it from one page would be two ↳ rows under one
+    (review_id, check), and a decision on one would be read as both: the newer is kept."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://news.example/brady", "Brady Road", source_type="News report", values=[
+            value("area_square_meters", "30", "2016", unit="ha"),
+            value("area_square_meters", "45", "2025", unit="ha"),
+        ]),
+    ]})
+    checks = [row for row in all_rows(run_dir) if row["check"]]
+    assert [(row["check"], row["would_load"]) for row in checks] == [("area_square_meters", "area_square_meters = 450000")]
+    kept = [r for r in found_values(run_dir) if r["attribute_name"] == "area_square_meters"]
+    assert len(kept) == 1 and "The source also gives 300000 (2016)" in kept[0]["status_reason"]
+
+
 def test_an_inferred_operator_has_a_row_of_its_own_under_a_tier_1_pair_too(tmp_path):
     """The agent marked it Inferred, so an SME checks it against the page, whatever the tier."""
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
