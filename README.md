@@ -840,12 +840,12 @@ nothing to look for, so each batch searches fewer sites than this. `measure_name
 Batch 3 is searched with GPT-5.6 Terra, then GPT-5.6 Sol searches the batch's largest sites again:
 the 64 taking 100,000 t a year or more, which hold 63% of its incoming waste. In the October 2026
 tests on 60 Mexican sites, adding Sol on such sites took good pages from 1.8 to 3.5 a site, for
-about $21 across the 64; on smaller sites it mostly found what Terra had, or nothing. The second
-pass goes into the same run, so its pages are on the same Site_Review and a page both models cite
-is one pair:
+about $21 across the 64 at list price; on smaller sites it mostly added pages repeating what Terra's
+said, or found nothing. The second pass goes into the same run, so its pages are on the same
+Site_Review and a page both models cite is one pair:
 
 ```bash
-uv run waste-ai-search search --run-id batch3 --batch 3      # Terra, the agent .env names
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search search --run-id batch3 --batch 3
 AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search \
   --run-id batch3 --batch 3 --min-tonnes 100000 --pass-label sol
 uv run waste-ai-search arbitrate --run-id batch3
