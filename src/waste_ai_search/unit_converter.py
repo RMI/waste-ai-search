@@ -479,7 +479,7 @@ def parse_numbers(value: str, unit: str = "") -> tuple[list[float], float]:
     asks for digits in value and the source's unit in unit. Only whole words are read from the
     unit: an abbreviation there is a unit in its own right ("mm" is millimetres).
     """
-    text = value.lower().replace(",", "")
+    text = _plain(value.lower()).replace(",", "")
     # A hyphen BETWEEN two digits is a range separator, not a sign: sources write "3-8 metres"
     # far more often than they write a negative quantity. Left as-is, "3-8" parses to [3, -8],
     # which then reads as a negative measurement and the whole value is discarded. A leading
@@ -493,13 +493,32 @@ def parse_numbers(value: str, unit: str = "") -> tuple[list[float], float]:
         multiplier = 1_000_000.0
     elif re.search(r"\b(thousand|k)\b", text):
         multiplier = 1_000.0
-    elif re.search(r"\bbillions?\b", unit.lower()):
-        multiplier = 1_000_000_000.0
-    elif re.search(r"\bmillions?\b", unit.lower()):
-        multiplier = 1_000_000.0
-    elif re.search(r"\bthousands?\b", unit.lower()):
-        multiplier = 1_000.0
+    else:
+        unit_text = _plain(unit.lower())
+        for words, scale in _MAGNITUDES:
+            if re.search(words, text) or re.search(words, unit_text):
+                multiplier = scale
+                break
     return [float(match) for match in matches], multiplier
+
+
+def _plain(text: str) -> str:
+    """Text with its accents taken off: "millón" reads as "millon"."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+# A magnitude written out as a word, in English or the languages _FOREIGN_UNITS reads, whole words
+# only and with accents off. In the 1 November retest Terra gave 7482's waste in place as "1.4" with
+# unit "millones de toneladas", and it loaded as 1.4 t. Spanish "mil millones" and the French,
+# Italian and German words for a thousand million are 10^9, so they come before the millions, and
+# the millions before the thousands. Spanish "billón" is 10^12, too rare in these sources to read.
+_MAGNITUDES = [
+    (r"\bbillions?\b|\bmil millones\b|\bmilliards?\b|\bmiliard[oi]\b|\bmilliarden?\b", 1_000_000_000.0),
+    (r"\bmillions?\b|\bmillon(?:es)?\b|\bmilh(?:ao|oes)\b|\bmilion[ei]\b|\bmillionen\b", 1_000_000.0),
+    # Not Spanish "miles" (thousands), which is the English unit too; "5 mil" is how a figure is written.
+    (r"\bthousands?\b|\bmil\b|\bmilliers?\b|\bmille\b|\bmila\b|\btausend\b", 1_000.0),
+]
 
 
 def detect_unit_text(value: str, unit: str) -> str:
