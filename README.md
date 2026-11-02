@@ -419,8 +419,9 @@ the file first. It is saved as the step goes, so an interrupted run keeps what i
 
 Arbitration only reads it, so it stays offline. It parses coordinates and grid references itself,
 which needs no network, so a run's coordinates are read even before it is located; an address
-not yet looked up says "not located yet: run `locate --run-id`". Blob storage carries the file
-like `link_check.json`.
+not yet looked up says "not located yet: run `locate --run-id`". So does each address of a run
+located before addresses went with their town and state, until `locate` runs again and looks it up
+once more. Blob storage carries the file like `link_check.json`.
 
 ```bash
 uv run waste-ai-search locate --run-id <run_id>       # backfill an older run, then arbitrate
