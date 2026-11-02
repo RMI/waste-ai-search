@@ -803,6 +803,37 @@ These sizes and costs predate rule 4 below, which also skips sites whose name gi
 nothing to look for, so each batch searches fewer sites than this. `measure_name_yield.py
 --list-sites` counts how many per batch.
 
+### A second model on the largest sites
+
+Batch 3 is searched with GPT-5.6 Terra, then GPT-5.6 Sol searches the batch's largest sites again:
+the 64 taking 100,000 t a year or more, which hold 63% of its incoming waste. In the October 2026
+tests on 60 Mexican sites, adding Sol on such sites took good pages from 1.8 to 3.5 a site, for
+about $21 across the 64; on smaller sites it mostly found what Terra had, or nothing. The second
+pass goes into the same run, so its pages are on the same Site_Review and a page both models cite
+is one pair:
+
+```bash
+uv run waste-ai-search search --run-id batch3 --batch 3      # Terra, the agent .env names
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search \
+  --run-id batch3 --batch 3 --min-tonnes 100000 --pass-label sol
+uv run waste-ai-search arbitrate --run-id batch3
+```
+
+- `--min-tonnes 100000` takes the sites whose seed gives 100,000 t a year or more of incoming
+  waste. It applies after the other rules, like `--limit`, so with `--batch 3` it takes the large
+  sites the first pass searched, and says how many. `--site-ids` works too, for a list of your own.
+- `--pass-label sol` keeps each response beside the first, as `site_<id>__sol.json`, and
+  arbitration merges every pass's sources. Retry a site that failed as the same pass, as the search
+  prints: `--pass-label sol --force --site-ids ...`. Without the label, `--force` would replace the
+  first pass's response.
+- The search checks the new pages' links and locates their sources, as every search does. If it
+  ran with `--no-link-check` or `--no-locate`, run `check-links` and `locate` before arbitrating.
+- The run log has a row for each site and pass, each priced at its own model (see
+  [Bing cost](#bing-cost)).
+- Don't raise `--max-web-searches` instead. The pages one model missed were nearly all ones it
+  never came across, not ones it ran out of searches for, and where no model found anything, each
+  had confirmed the town and found no page about a dump there.
+
 ### What is actually searched — read this before a full run
 
 Four rules narrow the search. The first three mean a full run queries **12,392 of 15,537
@@ -1456,14 +1487,17 @@ can't read it. Batch 1's reviewed Review_Queue is for a one-off conversion scrip
 ### Bing cost
 
 Bing grounding bills per query, so the run log records the queries each site made in
-`web_searches` (every retried attempt, resumed run and follow-up pass included, since each is
-billed), and the search prints the run's total.
+`web_searches` (every retried attempt and resumed run included, since each is billed), and the
+search prints the run's total. The log has a row for each site and pass: `pass_label` is blank for
+the first pass, `gccs` for the gas follow-up, and a second pass's own label (see
+[A second model on the largest sites](#a-second-model-on-the-largest-sites)).
 
-**Model tokens are recorded too, and the run is priced.** Each site's row also gives the model that
+**Model tokens are recorded too, and the run is priced.** Each row also gives the model that
 answered (`model`) and its tokens: `input_tokens`, of which `cached_input_tokens` were read from the
 prompt cache, `output_tokens`, and of those `reasoning_tokens`. Like `web_searches`, the token counts
-add up across every attempt and pass. A search prints its queries, tokens and estimated cost at list
-prices:
+add up across every attempt at the pass, and each pass is priced at its own model. A site searched in
+two passes counts once among the searched sites. A search prints its queries, tokens and estimated
+cost at list prices:
 
 ```text
 Bing queries: 157 across 10 searched site(s), ~$2.20 at $14 per 1,000.

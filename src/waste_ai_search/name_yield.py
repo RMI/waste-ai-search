@@ -137,7 +137,7 @@ def load_run(run_id: str, read: Reader) -> RunFiles:
     run = RunFiles(
         run_id=run_id,
         seed=csv_rows(data[SEED]),
-        run_log=csv_rows(data[RUN_LOG]),
+        run_log=one_row_per_site(csv_rows(data[RUN_LOG])),
         resolved=csv_rows(data.get(RESOLVED)),
         review=csv_rows(data.get(REVIEW_QUEUE)),
         manifest=json.loads(manifest) if manifest is not None else None,
@@ -233,6 +233,19 @@ def _searched_id(row: dict[str, Any]) -> str:
 def _as_int(value: Any) -> int:
     text = normalize_scalar(value)
     return int(text) if text.isdigit() else 0
+
+
+def one_row_per_site(run_log: list[dict[str, str]]) -> list[dict[str, str]]:
+    """A run log with one row per site. A site searched in more than one pass (the gas follow-up, a
+    second model) has a row per pass: its first pass's row is kept, with every pass's Bing queries."""
+    merged: dict[str, dict[str, str]] = {}
+    for row in run_log:
+        first = merged.get(_site_id(row))
+        if first is None:
+            merged[_site_id(row)] = dict(row)
+        else:
+            first["web_searches"] = str(_as_int(first.get("web_searches")) + _as_int(row.get("web_searches")))
+    return list(merged.values())
 
 
 SITE_HEADERS = [

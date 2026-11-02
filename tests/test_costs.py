@@ -57,11 +57,11 @@ def test_cached_input_is_priced_as_cached_and_output_includes_reasoning():
 
 def test_a_run_is_priced_from_its_log_and_a_row_with_no_count_adds_nothing():
     rows = [
-        {"web_searches": "20", "model": "gpt-5.4-2026-03-05", "input_tokens": "200000", "cached_input_tokens": "0", "output_tokens": "11000"},
-        {"web_searches": "10", "model": "gpt-5.4-2026-03-05", "input_tokens": "100000", "cached_input_tokens": "0", "output_tokens": "5000"},
+        {"site_id": "1", "web_searches": "20", "model": "gpt-5.4-2026-03-05", "input_tokens": "200000", "cached_input_tokens": "0", "output_tokens": "11000"},
+        {"site_id": "2", "web_searches": "10", "model": "gpt-5.4-2026-03-05", "input_tokens": "100000", "cached_input_tokens": "0", "output_tokens": "5000"},
         # A search from before tokens were recorded, and one skipped with a cached response.
-        {"web_searches": "15", "model": "", "input_tokens": "", "output_tokens": ""},
-        {"web_searches": "", "model": "", "input_tokens": "", "output_tokens": ""},
+        {"site_id": "3", "web_searches": "15", "model": "", "input_tokens": "", "output_tokens": ""},
+        {"site_id": "4", "web_searches": "", "model": "", "input_tokens": "", "output_tokens": ""},
     ]
     cost = run_cost(rows)
     assert (cost.queries, cost.sites, cost.models, cost.input_tokens, cost.output_tokens) == (45, 3, ("gpt-5.4-2026-03-05",), 300_000, 16_000)

@@ -730,7 +730,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
                 "value": describe_seed(config),
             },
             {"setting": "consolidation_run", "value": recorded_run(config.run_dir)},
-            {"setting": "sites_arbitrated", "value": len(cached)},
+            # Sites, not responses: a site searched in two passes has two.
+            {"setting": "sites_arbitrated", "value": len(by_site)},
             {"setting": "unsearchable_names_skipped", "value": recorded_skips(config.run_dir, set(by_site))},
             {"setting": "unsearchable_names_searched", "value": unsearchable_searched},
             {"setting": "arbitrated_at", "value": arbitrated_at.isoformat()},

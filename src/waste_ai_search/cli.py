@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -68,6 +69,14 @@ def non_negative_int(text: str) -> int:
     return value
 
 
+def pass_label(text: str) -> str:
+    """A pass's label, which names its response files (site_<id>__<label>.json): letters, digits,
+    dashes and single underscores. Blank is the first pass."""
+    if text and not re.fullmatch(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*", text):
+        raise argparse.ArgumentTypeError(f"use letters, digits, - and _, not {text!r}")
+    return text
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="waste-ai-search",
@@ -105,6 +114,19 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         choices=range(1, LAST_BATCH + 1),
         help="Search one country batch of the full run (see COUNTRY_BATCHES), most-needed first.",
+    )
+    search.add_argument(
+        "--min-tonnes",
+        type=float,
+        default=0,
+        help="Search only sites our seed says take at least this many tonnes of waste a year (0 = any).",
+    )
+    search.add_argument(
+        "--pass-label",
+        type=pass_label,
+        default="",
+        help="Search again as a second pass, kept beside the first (site_<id>__<label>.json) and merged "
+        "with it by arbitrate, such as a second model's on the largest sites.",
     )
     search.add_argument("--force", action="store_true", help="Re-query sites that already have a cached response.")
     search.add_argument("--site-delay-seconds", type=float, default=3.0)
@@ -322,6 +344,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         include_unsearchable_names=getattr(args, "include_unsearchable_names", False),
         iso3=list(getattr(args, "iso3", []) or []),
         batch=getattr(args, "batch", None) or 0,
+        min_tonnes=getattr(args, "min_tonnes", 0) or 0,
         site_ids=list(getattr(args, "site_ids", []) or []),
         force=getattr(args, "force", False),
         site_delay_seconds=getattr(args, "site_delay_seconds", 3.0),
@@ -485,7 +508,7 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
         sync = RunSync(config, local=args.local)
         sync.down()
         try:
-            run_search(config)
+            run_search(config, pass_label=args.pass_label)
         finally:
             # Pushed even when the search fails or is interrupted: every finished site is saved
             # and should outlive this laptop too.

@@ -138,7 +138,7 @@ def test_an_interrupted_search_still_pushes_to_blob(tmp_path, monkeypatch):
         def up(self):
             events.append("up")
 
-    def interrupted(config):  # noqa: ARG001
+    def interrupted(config, pass_label=""):  # noqa: ARG001
         raise KeyboardInterrupt
 
     monkeypatch.setattr(cli, "RunSync", _Sync)

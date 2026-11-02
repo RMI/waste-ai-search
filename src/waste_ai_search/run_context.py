@@ -47,6 +47,9 @@ class PipelineConfig:
     site_ids: list[str] = field(default_factory=list)
     # One of the country batches in schema.COUNTRY_BATCHES (F30); 0 means no batch filter.
     batch: int = 0
+    # Only sites our seed says take at least this many tonnes of waste a year; 0 means any. A second
+    # pass with another model searches a batch's largest sites (search --min-tonnes).
+    min_tonnes: float = 0
     force: bool = False
     site_delay_seconds: float = 3.0
     hard_site_timeout_seconds: int = 240

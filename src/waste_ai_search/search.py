@@ -146,12 +146,25 @@ def choose_sites(
         # than the ~9,600 USA and Brazil sites it is about to drop.
         countries = sorted({normalize_scalar(site.get("country_iso3")).upper() for site in selected})
         print(f"Batch {config.batch}: {len(selected):,} site(s) in {len(countries)} country(ies).")
+    if config.min_tonnes > 0:
+        # After the rules above, like --limit, so a second pass on a batch's largest sites takes the
+        # sites its first pass searched.
+        selected = [site for site in selected if (incoming_tonnes(site) or 0) >= config.min_tonnes]
+        print(f"Taking {config.min_tonnes:,.0f} t a year or more: {len(selected):,} site(s).")
 
     if config.pilot_size > 0:
         return select_mixed_pilot(selected, size=config.pilot_size), skipped
     if config.limit > 0:
         selected = selected[: config.limit]
     return selected, skipped
+
+
+def incoming_tonnes(site: dict[str, Any]) -> float | None:
+    """The waste a year our seed says a site takes, in tonnes, or None where it says nothing."""
+    try:
+        return float(normalize_scalar(site.get("annual_incoming_waste_metric_tonnes")).replace(",", ""))
+    except ValueError:
+        return None
 
 
 def add_searches(total: int | None, client: Any) -> int | None:
@@ -433,8 +446,10 @@ def run_search(
         locate_run(config, sites, geocoder)
     if failures:
         ids = " ".join(row["site_id"] for row in failures)
+        # Retried as the same pass: without its label, --force would replace the first pass's responses.
+        label = f" --pass-label {pass_label}" if pass_label else ""
         print(f"\n!! {len(failures)} site(s) still failing after retries. Try again later:")
-        print(f"   uv run waste-ai-search search --run-id {config.run_id} --force --site-ids {ids}")
+        print(f"   uv run waste-ai-search search --run-id {config.run_id}{label} --force --site-ids {ids}")
     return config.run_dir
 
 
@@ -514,6 +529,7 @@ def search_one_site(
     return {
         "run_id": config.run_id,
         "site_id": site_id,
+        "pass_label": pass_label,
         "site_name": site_name,
         "country_iso3": normalize_scalar(site.get("country_iso3")),
         "requested_attributes": "; ".join(attributes),
@@ -544,23 +560,26 @@ def _usable_response(path: Path) -> dict[str, Any] | None:
 
 
 def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep history across resumed and retried searches; the newest row for a site wins.
+    """Keep history across resumed and retried searches: one row per site and pass, the newest
+    winning.
 
     A retried search only covers the sites it touched, so replacing the file would erase every
-    other site from the log - which matters a great deal for a multi-day resumable run.
+    other site from the log - which matters a great deal for a multi-day resumable run. Each pass
+    has its own row (pass_label), so a second pass with another model is priced at that model, and
+    retrying a pass replaces only its row. A log from before rows had a pass reads as the first's.
 
-    `web_searches` and the token counts are the exception: every pass is billed, so a site's count
+    `web_searches` and the token counts are the exception: every attempt is billed, so a row's count
     adds to its earlier one. A skipped site logs a blank count, which keeps the earlier one rather than
     erasing it, and its model.
     """
-    merged: dict[str, dict[str, Any]] = {}
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
     if path.exists():
         with path.open(newline="", encoding="utf-8-sig") as handle:
             for row in csv.DictReader(handle):
-                merged[normalize_scalar(row.get("site_id"))] = dict(row)
+                merged[_run_log_key(row)] = dict(row)
     for row in new_rows:
-        site_id = normalize_scalar(row.get("site_id"))
-        before = merged.get(site_id) or {}
+        key = _run_log_key(row)
+        before = merged.get(key) or {}
         row = dict(row)
         for column in ("web_searches", *TOKEN_COLUMNS):
             earlier = str(before.get(column) or "")
@@ -568,8 +587,13 @@ def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, 
                 row[column] = int(earlier) + int(row.get(column) or 0)
         if not row.get("model") and before.get("model"):
             row["model"] = before["model"]
-        merged[site_id] = row
+        merged[key] = row
     return sorted(
         merged.values(),
-        key=lambda row: int(row["site_id"]) if str(row.get("site_id", "")).isdigit() else 0,
+        key=lambda row: (int(row["site_id"]) if str(row.get("site_id", "")).isdigit() else 0, _run_log_key(row)[1]),
     )
+
+
+def _run_log_key(row: dict[str, Any]) -> tuple[str, str]:
+    """A run-log row's site and pass: blank for the first pass, as in a log from before passes."""
+    return normalize_scalar(row.get("site_id")), normalize_scalar(row.get("pass_label"))

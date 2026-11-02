@@ -667,11 +667,13 @@ SOURCES_HEADERS = [
 ]
 
 FOUNDRY_RUN_LOG_HEADERS = [
-    "run_id", "site_id", "site_name", "country_iso3", "requested_attributes", "agent_id",
+    # One row per site and pass. pass_label is blank for the first pass, "gccs" for the gas
+    # follow-up, and the label a second pass was searched with (search --pass-label).
+    "run_id", "site_id", "pass_label", "site_name", "country_iso3", "requested_attributes", "agent_id",
     "request_started_at", "request_finished_at", "status", "raw_response_path",
     "parsed_attribute_count", "parsed_source_count", "error_message", "retry_count",
     "web_searches",
-    # The model that answered, and its tokens, every attempt and pass added up (costs.py).
+    # The model that answered, and its tokens, every attempt at the pass added up (costs.py).
     "model", "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens",
 ]
 

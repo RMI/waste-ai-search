@@ -2,7 +2,8 @@
 
 Every search records, in the run log, the Bing queries it made (web_searches) and the model's
 tokens: input, the part of it read from the prompt cache, and output, which includes the model's
-reasoning. A retried attempt and the gas follow-up pass are billed too, so they count. This turns
+reasoning. A retried attempt and the gas follow-up pass are billed too, so they count; each pass has
+its own row, so a second pass with another model is priced at that model. This turns
 those counts into dollars at list prices, for comparing models and budgeting batches. Azure Cost
 Management has the billed amount; prices change, so check the table against it.
 """
@@ -102,15 +103,17 @@ class RunCost:
 
 
 def run_cost(rows: list[dict[str, Any]]) -> RunCost:
-    """Add up a run log's rows. A row with no count (a search before tokens were recorded, or a
-    fake client) adds nothing, rather than a false zero."""
+    """Add up a run log's rows: one per site and pass, so a site searched in two passes counts once,
+    and each pass's tokens are priced at the model that answered it. A row with no count (a search
+    before tokens were recorded, or a fake client) adds nothing, rather than a false zero."""
     cost = RunCost()
     models: list[str] = []
+    searched: set[str] = set()
     for row in rows:
         queries = str(row.get("web_searches") or "")
         if queries.isdigit():
             cost.queries += int(queries)
-            cost.sites += 1
+            searched.add(str(row.get("site_id") or ""))
         tokens = {column: _int(row.get(column)) for column in TOKEN_COLUMNS}
         if not (tokens["input_tokens"] or tokens["output_tokens"]):
             continue
@@ -122,6 +125,7 @@ def run_cost(rows: list[dict[str, Any]]) -> RunCost:
         cost.output_tokens += tokens["output_tokens"]
         dollars = model_cost(model, tokens["input_tokens"], tokens["cached_input_tokens"], tokens["output_tokens"])
         cost.model_dollars = None if dollars is None or cost.model_dollars is None else cost.model_dollars + dollars
+    cost.sites = len(searched)
     cost.models = tuple(models)
     return cost
 
