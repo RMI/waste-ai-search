@@ -1118,8 +1118,8 @@ def plainer_address(text: str, names: list[str]) -> str:
             continue
         parts.append(part)
     plainer = address_to_send(", ".join(parts), names)
-    with_place = len([part for part in plainer.split(",") if part.strip()]) >= 2
-    if plainer == original or not with_place or not STREET_OR_NUMBER.search(plainer):
+    has_place = len([part for part in plainer.split(",") if part.strip()]) >= 2
+    if plainer == original or not has_place or not STREET_OR_NUMBER.search(plainer):
         return ""
     return plainer
 
