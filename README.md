@@ -1563,11 +1563,11 @@ Foundry errors (`AZURE_FOUNDRY_MAX_RETRIES`) and reported search-tool failures
 (`--search-tool-retries`), so a site runs the agent at most 4 times, down from 9. A local `.env` that
 still sets `AZURE_FOUNDRY_MAX_RETRIES=3` overrides the new default.
 
-Searches per attempt are capped at 6 (`--max-web-searches`, 0 = no cap). The cap is sent as the
-Responses API's `max_tool_calls`, which Foundry enforces; asking in the prompt alone was ignored. It
-caps the web search tool's calls, a page opened as well as a search, not queries — each search sends
-about 4 queries. Each retry gets a fresh cap, so a
-site that uses all 4 attempts can make up to 24 searches. On the same 10 sites:
+The web search tool's calls per attempt are capped at 6 (`--max-web-searches`, 0 = no cap): a
+search, or a page opened or searched in. The cap is sent as the Responses API's `max_tool_calls`,
+which Foundry enforces; asking in the prompt alone was ignored. It caps calls, not queries — each
+search sends about 4 queries. Each retry gets a fresh cap, so a site that uses all 4 attempts can
+make up to 24 calls. On the same 10 sites:
 
 | | No cap | Prompt only (12) | Cap of 6 |
 |---|---|---|---|

@@ -160,7 +160,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-web-searches",
         type=int,
         default=DEFAULT_MAX_WEB_SEARCHES,
-        help="Web searches allowed per attempt at a site, enforced by the service; each sends several billed Bing queries (0 = no cap).",
+        help="Web search tool calls allowed per attempt at a site, a search or a page opened, enforced by the service; "
+        "each search sends several billed Bing queries (0 = no cap).",
     )
 
     search.add_argument(
