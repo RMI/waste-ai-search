@@ -100,7 +100,7 @@ class AzureFoundryAgentClient:
                 return parse_json_response(text)
             except Exception as exc:  # noqa: BLE001 - preserve retries around SDK/network calls
                 last_error = exc
-                delay = min(2 * attempt, 10)
+                delay = retry_delay(exc, attempt)
                 if attempt >= attempts:
                     break
                 # A retry that cannot finish in time would only add billed queries.
@@ -311,3 +311,24 @@ def parse_json_response(text: str) -> dict[str, Any]:
 
 def looks_like_uuid(value: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-fA-F-]{36}", str(value).strip()))
+
+
+
+# A deployment's token limit (429) is counted on what each call might use, not what it does: batch 3's
+# first run, 16 sites at a time, had 130 of 147 refused, and 6 at a time still a quarter, at a fifth of
+# the limit by the tokens billed. A refused call is billed nothing, so it waits out the minute.
+RATE_LIMIT_WAIT_SECONDS = 15
+RATE_LIMIT_MAX_WAIT_SECONDS = 60
+
+
+def retry_delay(exc: Exception, attempt: int) -> float:
+    """Seconds to wait before attempt `attempt + 1`: what a 429 asks for (Retry-After), or 15 s more
+    each time up to a minute; two seconds more each time, up to 10, after any other failure."""
+    if getattr(exc, "status_code", None) != 429 and type(exc).__name__ != "RateLimitError":
+        return min(2 * attempt, 10)
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    try:
+        asked = float(headers.get("retry-after", ""))
+    except (TypeError, ValueError):
+        asked = 0
+    return min(max(asked, RATE_LIMIT_WAIT_SECONDS * attempt), RATE_LIMIT_MAX_WAIT_SECONDS)

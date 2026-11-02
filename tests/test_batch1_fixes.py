@@ -181,6 +181,24 @@ def test_zero_retries_still_makes_one_attempt():
     assert client.search_site({}, "prompt") == {"attributes": []}
 
 
+def test_a_rate_limited_call_waits_out_the_minute_before_its_retry():
+    """Batch 3's first run had most sites refused (429) and retried two seconds later, into the same
+    minute's limit."""
+    from types import SimpleNamespace
+
+    from waste_ai_search.foundry_client import retry_delay
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+        def __init__(self, headers=None):
+            self.response = SimpleNamespace(headers=headers or {})
+
+    assert [retry_delay(RateLimitError(), attempt) for attempt in (1, 2, 4, 9)] == [15, 30, 60, 60]
+    assert retry_delay(RateLimitError({"retry-after": "40"}), 1) == 40
+    assert [retry_delay(ValueError("not JSON"), attempt) for attempt in (1, 9)] == [2, 10]
+
+
 @pytest.mark.parametrize("option", ["--limit", "--pilot-size"])
 def test_a_negative_count_is_refused_not_read_as_all(option):
     from waste_ai_search.cli import build_parser
