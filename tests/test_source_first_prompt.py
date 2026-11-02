@@ -304,7 +304,23 @@ def test_a_closure_that_has_not_happened_or_did_not_last_does_not_count():
     # closing years flagged were worked out with none stated.
     assert "A closed site's answer is incomplete until you have looked for its closure year." in prompt
     assert "A closed site without a closure year is an incomplete answer" not in prompt
+    assert (
+        "Whenever the facility is closed or inactive, search for it specifically: a source often gives it in news "
+        "coverage, a council resolution, or a closure order that was carried out."
+    ) in prompt
+    assert "REQUIRED whenever" not in prompt and "almost always exists" not in prompt
     assert "Status and closure" not in prompt_for(THUNDER_BAY, ["opening_year"])
+
+
+def test_a_site_that_already_looks_closed_is_asked_for_the_year_a_source_gives():
+    """The paragraph for a site that looks closed pointed at closure orders, which count only once
+    carried out, and asked for a closing_year whether or not a source gives one."""
+    prompt = " ".join(prompt_for({**THUNDER_BAY, "facility_status": "Inactive"}).split())
+    assert (
+        "Search specifically for it - closure orders that were carried out, council resolutions, news coverage of "
+        "the shutdown - and return the closing_year a source gives."
+    ) in prompt
+    assert "and return closing_year." not in prompt
 
 
 def test_the_prompt_stays_compact():

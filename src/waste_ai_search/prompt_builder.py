@@ -139,10 +139,12 @@ ATTRIBUTE_GUIDANCE = {
         "Four-digit year the facility first accepted waste. Not the date of a permit or licence, "
         "or of a later stage, cell or extension opening."
     ),
+    # Looked for, not required: in the 31 October Mexico tests, 8 of the 13 closing years flagged were
+    # worked out where no source gave one.
     "closing_year": (
-        "Four-digit year the facility closed, meaning it stopped accepting waste. REQUIRED whenever "
-        "the facility is closed or inactive - a closure date almost always exists in news coverage, "
-        "a council resolution, or a closure order that was carried out. Search for it specifically. "
+        "Four-digit year the facility closed, meaning it stopped accepting waste. Whenever the "
+        "facility is closed or inactive, search for it specifically: a source often gives it in news "
+        "coverage, a council resolution, or a closure order that was carried out. "
         "If the facility is still open and a source gives the year it is planned or expected to "
         "close, return that year with planned = true; an actual closure is planned = false."
     ),
@@ -591,9 +593,9 @@ Names:
     if "closing_year" in attributes and looks_inactive(site):
         closure_focus = (
             "\nThis facility appears to be closed or inactive already, so a closure date should\n"
-            "exist. Search specifically for it - closure orders, council resolutions, news\n"
-            "coverage of the shutdown - and return closing_year. Say in search_notes what you\n"
-            "tried if you genuinely cannot find one.\n"
+            "exist. Search specifically for it - closure orders that were carried out, council\n"
+            "resolutions, news coverage of the shutdown - and return the closing_year a source gives.\n"
+            "Say in search_notes what you tried if you genuinely cannot find one.\n"
         )
 
     output_contract = {
