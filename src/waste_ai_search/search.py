@@ -201,13 +201,16 @@ def add_usage(total: Usage | None, client: Any) -> Usage | None:
 
 
 # --- phase 1: search --------------------------------------------------------------------------
-def check_run_links(run_dir: Path, keep_text: bool = True) -> dict:
+def check_run_links(run_dir: Path, keep_text: bool = True, retry_unverified: bool = False) -> dict:
     """Fetch every source URL in a run's cached responses once, and record the verdicts. With
-    keep_text, the text of each page that loads is kept in page_text/ too."""
+    keep_text, the text of each page that loads is kept in page_text/ too. With retry_unverified, a
+    URL left Unverified for a reason that may pass is fetched again (link_check.retryable)."""
     from .arbitrate import cached_source_urls
 
     text_dir = run_dir / PAGE_TEXT_DIR if keep_text else None
-    results = check_urls(cached_source_urls(run_dir), cache_path=run_dir / LINK_CHECK_FILE, text_dir=text_dir)
+    results = check_urls(
+        cached_source_urls(run_dir), cache_path=run_dir / LINK_CHECK_FILE, text_dir=text_dir, retry_unverified=retry_unverified
+    )
     broken = sum(1 for r in results.values() if r.verdict == BROKEN)
     repaired = sum(1 for r in results.values() if r.resolved_url != r.url)
     kept = f"; text kept for {sum(1 for r in results.values() if r.text_file)} page(s) -> {PAGE_TEXT_DIR}/" if keep_text else ""

@@ -189,6 +189,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common(links)
     links.add_argument("--no-page-text", action="store_true", help=PAGE_TEXT_HELP)
+    links.add_argument(
+        "--retry-unverified",
+        action="store_true",
+        help="Fetch again, with 45 s to answer, URLs left Unverified by a timeout, a failed connection, a "
+        "name that didn't resolve, a 429 or a server error. Never a 403, which refuses automated readers.",
+    )
 
     locate = subparsers.add_parser(
         "locate",
@@ -519,7 +525,7 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
     if args.command == "check-links":
         from .search import check_run_links
 
-        check_run_links(config.run_dir, keep_text=config.keep_page_text)
+        check_run_links(config.run_dir, keep_text=config.keep_page_text, retry_unverified=args.retry_unverified)
         print(f"\nNow arbitrate to apply the verdicts:\n  uv run waste-ai-search arbitrate --run-id {config.run_id}")
         return 0
 

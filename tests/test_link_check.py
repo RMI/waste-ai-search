@@ -242,7 +242,7 @@ def test_the_search_phase_checks_links_and_can_be_told_not_to(tmp_path, monkeypa
     checked = []
     monkeypatch.setattr(
         pl, "check_urls",
-        lambda urls, cache_path, text_dir=None: checked.append((list(urls), text_dir and text_dir.name)) or {},
+        lambda urls, cache_path, text_dir=None, retry_unverified=False: checked.append((list(urls), text_dir and text_dir.name)) or {},
     )
 
     pl.run_search(pl.PipelineConfig(input_csv=seed, run_dir=tmp_path / "run", run_id="a", site_delay_seconds=0))
@@ -438,3 +438,72 @@ def test_environment_proxies_are_ignored(monkeypatch):
     monkeypatch.setattr(requests, "Session", recording_session)
     check_urls(["https://x.org/a"], fetch=responder({}))
     assert sessions and sessions[0].trust_env is False
+
+
+# --- check-links --retry-unverified: a failure that may pass is fetched again (#25) --------------
+def test_retry_unverified_fetches_again_only_what_may_pass_with_longer_to_answer(tmp_path):
+    """Of the 32 pages round 2 couldn't read, 20 refused automated readers (403), which asking again
+    won't change; 5 timed out, 2 answered 500 and 1 name didn't resolve, which may pass."""
+    from waste_ai_search.link_check import RETRY_TIMEOUT_SECONDS, save_results
+
+    cache = tmp_path / LINK_CHECK_FILE
+    before = {
+        "https://scielo.example/a": "ConnectTimeout", "https://slow.example/b": "ReadTimeout",
+        "https://down.example/c": "ConnectionError", "https://busy.example/d": "429", "https://opb.example/e": "500",
+        "https://mide.example/f": "DoesNotResolve",
+        "https://oem.example/g": "403", "https://internal.example/h": "BlockedDestination",
+        "https://tls.example/i": "SSLError", "https://fine.example/j": "200", "https://gone.example/k": "404",
+    }
+    save_results(cache, {
+        url: LinkResult(url=url, verdict=classify(int(status) if status.isdigit() else status), status=status, resolved_url=url)
+        for url, status in before.items()
+    })
+    calls = []
+    now = {"https://opb.example/e": 503, "https://mide.example/f": "DoesNotResolve"}
+
+    def fetch(session, url, throttle, timeout=None):
+        calls.append((url, timeout))
+        return now.get(url, 200)
+
+    check_urls(list(before), cache_path=cache, fetch=fetch)
+    assert calls == []  # a plain check fetches nothing it has a verdict for
+    results = check_urls(list(before), cache_path=cache, fetch=fetch, retry_unverified=True)
+    assert sorted(calls) == sorted((url, RETRY_TIMEOUT_SECONDS) for url in list(before)[:6])
+    assert RETRY_TIMEOUT_SECONDS == 45
+    # The new verdict replaces the old, and a failure that persists keeps its new status.
+    assert {url: results[url].status for url in list(before)[:6]} == {
+        "https://scielo.example/a": "200", "https://slow.example/b": "200", "https://down.example/c": "200",
+        "https://busy.example/d": "200", "https://opb.example/e": "503", "https://mide.example/f": "DoesNotResolve",
+    }
+    assert load_results(cache)["https://scielo.example/a"].verdict == OK
+    assert [results[url].status for url in list(before)[6:]] == ["403", "BlockedDestination", "SSLError", "200", "404"]
+
+
+def test_the_check_links_command_retries_unverified_links_when_asked(tmp_path, monkeypatch):
+    from waste_ai_search import cli, search
+
+    asked = []
+    monkeypatch.setattr(search, "check_run_links", lambda run_dir, keep_text=True, retry_unverified=False: asked.append(retry_unverified))
+    run_dir = build_run(tmp_path, None)
+    assert cli.main(["check-links", "--run-id", "run", "--run-dir", str(run_dir), "--retry-unverified"]) == 0
+    assert cli.main(["check-links", "--run-id", "run", "--run-dir", str(run_dir)]) == 0
+    assert asked == [True, False]
+
+
+def test_a_name_that_does_not_resolve_is_its_own_status_and_an_internal_address_is_still_blocked(monkeypatch):
+    """Round 2's www.mide.jalisco.gob.mx was reported BlockedDestination, as an internal address is,
+    though it was only a name that didn't resolve, which may pass."""
+    import requests
+
+    import waste_ai_search.link_check as lc
+
+    _fake_resolution(monkeypatch, {"internal.example": ["10.0.0.5"]})
+    with pytest.raises(lc.DoesNotResolve):
+        lc._public_address("www.mide.example", 443)
+    session = requests.Session()
+    session.mount("https://", lc._pinned_adapter_class()())
+    assert lc._original_fetch(session, "https://www.mide.example/indicador", lc._HostThrottle(0)) == "DoesNotResolve"
+    assert lc._original_fetch(session, "https://internal.example/x", lc._HostThrottle(0)) == "BlockedDestination"
+    assert classify("DoesNotResolve") == UNVERIFIED
+    assert lc.retryable(verdict("https://www.mide.example/indicador", UNVERIFIED, status="DoesNotResolve"))
+    assert not lc.retryable(verdict("https://internal.example/x", UNVERIFIED, status="BlockedDestination"))

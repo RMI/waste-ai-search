@@ -155,12 +155,20 @@ refining-ai-search (RDP-63):
 |---|---|---|
 | `OK` | 200 | Normal |
 | `Broken` | 404, 410 or a redirect loop | Its values are not used (`dead link` in `found_values.csv`) |
-| `Unverified` | 403, 429, timeout, TLS error | Left alone — usually bot-blocking, not a dead page |
+| `Unverified` | 403, 429, 5xx, timeout, failed connection, a name that doesn't resolve, TLS error | Left alone — usually bot-blocking, not a dead page |
 
 A broken URL is retried with a literal comma for `%2C` and with the trailing slash toggled; a
 respelling that works replaces it. Existing escapes are never decoded otherwise.
 
-**Only public addresses are ever contacted.** Cited URLs are untrusted and are fetched from a machine that is often on the VPN, so every hop — redirects included — is resolved first and refused if any address is private, loopback, link-local (including the cloud metadata address) or otherwise non-public. The connection then goes to the address that was checked, so a second DNS answer cannot redirect it. A refused URL is `Unverified` and never fetched; a malformed one is `Unverified` too, rather than stopping the check.
+**Only public addresses are ever contacted.** Cited URLs are untrusted and are fetched from a machine that is often on the VPN, so every hop — redirects included — is resolved first and refused if any address is private, loopback, link-local (including the cloud metadata address) or otherwise non-public. The connection then goes to the address that was checked, so a second DNS answer cannot redirect it. A refused URL is `Unverified` and never fetched; a malformed one is `Unverified` too, rather than stopping the check. So is a name that doesn't resolve, with its own status (`DoesNotResolve`), since a name server can fail for a while.
+
+**An Unverified page can be fetched again.** `check-links --retry-unverified` fetches once more,
+with 45 seconds to answer rather than 15, each URL left Unverified by a timeout, a failed connection,
+a name that didn't resolve, a 429 or a server error, and keeps its new verdict and text. Never a 403:
+that site refuses automated readers on purpose. No headless browser is used either: these sites
+refuse those too, and one would resolve names itself, past the address check above. Of the 32 pages
+the October 2026 model tests couldn't read, 20 were 403s, 5 timeouts, 2 server errors, 1 a name that
+didn't resolve and 4 scanned PDFs.
 
 The fetching happens during **search**, which needs the network anyway; `arbitrate` only reads
 `link_check.json`, so it stays offline. A dead source's values are not used, but the same value from
@@ -168,6 +176,7 @@ another, working source still is.
 
 ```bash
 uv run waste-ai-search check-links --run-id <run_id>   # backfill an older run, then arbitrate
+uv run waste-ai-search check-links --run-id <run_id> --retry-unverified   # fetch again what may pass
 uv run waste-ai-search run --no-link-check ...          # skip checking
 uv run waste-ai-search arbitrate --keep-broken-link-evidence ...  # let dead sources stay usable
 ```

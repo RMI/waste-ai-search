@@ -24,6 +24,10 @@ One difference from RDP-63: the fetching happens in the SEARCH phase, which need
 anyway, and the verdicts are kept in `link_check.json` in the run directory. Arbitration only reads
 that file, so `arbitrate` stays offline as the CLI promises.
 
+`check-links --retry-unverified` fetches a URL once more, with longer to answer, where it was left
+Unverified for a reason that may pass: a timeout, a failed connection, a name that didn't resolve,
+a 429 or a server error. Never a 403: that site refuses automated readers on purpose.
+
 A page that loads is also read, and its text kept in page_text/ (page_text.py), so arbitration can
 check that a source's quote and stated location are really on it. The text costs no extra request:
 it is the same response the verdict comes from. A page read before text was kept, or whose text file
@@ -62,6 +66,12 @@ LINK_CHECK_FILE = "link_check.json"
 
 BROKEN_STATUS_CODES = {404, 410}
 TIMEOUT_SECONDS = 15
+# How long a URL fetched again (retryable) has to answer. Of the 32 pages the October 2026 model
+# tests couldn't read, 5 had timed out at TIMEOUT_SECONDS and 2 had answered 500.
+RETRY_TIMEOUT_SECONDS = 45
+# The failures that may pass, besides a 429 and a 5xx. A TLS error, or a malformed or internal
+# address, won't.
+RETRYABLE_ERRORS = {"ConnectTimeout", "ReadTimeout", "Timeout", "ConnectionError", "DoesNotResolve"}
 MAX_WORKERS = 16
 PER_HOST_DELAY_SECONDS = 1.0
 USER_AGENT = (
@@ -138,8 +148,22 @@ def classify(status: Any) -> str:
     return BROKEN if status == "TooManyRedirects" else UNVERIFIED
 
 
+def retryable(result: LinkResult) -> bool:
+    """Whether an Unverified URL failed for a reason that may pass, and is worth fetching again."""
+    if result.verdict != UNVERIFIED:
+        return False
+    if result.status.isdigit():
+        return int(result.status) == 429 or 500 <= int(result.status) <= 599
+    return result.status in RETRYABLE_ERRORS
+
+
 class BlockedDestination(OSError):
     """The URL resolves to an address the link checker must not reach."""
+
+
+class DoesNotResolve(OSError):
+    """The URL's host name doesn't resolve, so there is nowhere to connect to. Unlike a blocked
+    address, it may pass: a name server can fail for a while."""
 
 
 def _public_address(host: str, port: int) -> str:
@@ -151,7 +175,7 @@ def _public_address(host: str, port: int) -> str:
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except (socket.gaierror, UnicodeError) as exc:
-        raise BlockedDestination(f"{host} does not resolve") from exc
+        raise DoesNotResolve(f"{host} does not resolve") from exc
     addresses = []
     for info in infos:
         address = ipaddress.ip_address(info[4][0])
@@ -226,7 +250,9 @@ def _read_body(response: Any) -> tuple[bytes, str]:
         return b"".join(chunks), CUT_BY_ERROR
 
 
-def _fetch(session: Any, url: str, throttle: _HostThrottle, keep_text: bool = False) -> Any:
+def _fetch(
+    session: Any, url: str, throttle: _HostThrottle, keep_text: bool = False, timeout: float = TIMEOUT_SECONDS
+) -> Any:
     """The status of one GET, or, with keep_text and a page that loaded, the page as Fetched."""
     import requests
 
@@ -237,7 +263,7 @@ def _fetch(session: Any, url: str, throttle: _HostThrottle, keep_text: bool = Fa
         return "InvalidURL"
     throttle.wait(host)
     try:
-        response = session.get(url, timeout=TIMEOUT_SECONDS, allow_redirects=True, stream=True)
+        response = session.get(url, timeout=timeout, allow_redirects=True, stream=True)
         status = response.status_code
         try:
             if keep_text and classify(status) == OK:
@@ -248,12 +274,13 @@ def _fetch(session: Any, url: str, throttle: _HostThrottle, keep_text: bool = Fa
             response.close()
     except requests.TooManyRedirects:
         return "TooManyRedirects"
-    except BlockedDestination:
-        return "BlockedDestination"
+    except (BlockedDestination, DoesNotResolve) as exc:
+        return type(exc).__name__
     except requests.RequestException as exc:
-        # urllib3 may wrap the guard's error inside a connection error; it is still a refusal.
-        if isinstance(getattr(exc, "__context__", None), BlockedDestination) or "BlockedDestination" in repr(exc):
-            return "BlockedDestination"
+        # urllib3 may wrap the guard's error inside a connection error; it is still the guard's.
+        for guard in (BlockedDestination, DoesNotResolve):
+            if isinstance(getattr(exc, "__context__", None), guard) or guard.__name__ in repr(exc):
+                return guard.__name__
         return type(exc).__name__
     except ValueError:
         return "InvalidURL"
@@ -278,12 +305,18 @@ def _with_text(result: LinkResult, page: Fetched | None, text_dir: Path) -> Link
     return result
 
 
-def check_url(session: Any, url: str, throttle: _HostThrottle, fetch=None, text_dir: Path | None = None) -> LinkResult:
+def check_url(
+    session: Any, url: str, throttle: _HostThrottle, fetch=None, text_dir: Path | None = None, timeout: float | None = None
+) -> LinkResult:
+    """One URL's verdict, and its text where it loads. `timeout` gives a URL fetched again longer."""
     fetch = fetch or _fetch
     reads = text_dir is not None and getattr(fetch, "keeps_text", False)
+    options: dict[str, Any] = {"keep_text": True} if reads else {}
+    if timeout is not None:
+        options["timeout"] = timeout
 
     def get(target: str) -> tuple[Any, Fetched | None]:
-        fetched = fetch(session, target, throttle, keep_text=True) if reads else fetch(session, target, throttle)
+        fetched = fetch(session, target, throttle, **options)
         return (fetched.status, fetched) if isinstance(fetched, Fetched) else (fetched, None)
 
     status, page = get(url)
@@ -349,17 +382,22 @@ def check_urls(
     max_workers: int = MAX_WORKERS,
     fetch=None,
     text_dir: Path | None = None,
+    retry_unverified: bool = False,
 ) -> dict[str, LinkResult]:
     """Check each distinct URL once, reusing anything already in the sidecar. With `text_dir`, a
     page that loads also has its text kept there, and one checked before without it is read again.
+    With `retry_unverified`, a URL left Unverified for a reason that may pass (retryable) is fetched
+    once more, with RETRY_TIMEOUT_SECONDS to answer, and its new verdict replaces the old.
 
     `fetch` defaults to the real HTTP fetch, looked up at call time so tests can replace it.
     """
     fetch = fetch or _fetch
     results = load_results(cache_path) if cache_path else {}
+    urls = [url for url in dict.fromkeys(urls) if url]
+    retrying = {url for url in urls if retry_unverified and url in results and retryable(results[url])}
     pending = [
-        url for url in dict.fromkeys(urls)
-        if url and (url not in results or (text_dir is not None and wants_text(results[url], text_dir)))
+        url for url in urls
+        if url not in results or url in retrying or (text_dir is not None and wants_text(results[url], text_dir))
     ]
     if pending:
         import requests
@@ -372,17 +410,27 @@ def check_urls(
         adapter = _pinned_adapter_class()(pool_connections=max_workers, pool_maxsize=max_workers)
         session.mount("https://", adapter)
         session.mount("http://", adapter)
-        print(f"Checking {len(pending)} source URL(s)")
+        again = f", {len(retrying)} of them again with {RETRY_TIMEOUT_SECONDS} s to answer" if retrying else ""
+        print(f"Checking {len(pending)} source URL(s){again}")
         try:
             with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="link-check") as executor:
-                for result in executor.map(lambda url: check_url(session, url, throttle, fetch, text_dir), pending):
+                checks = executor.map(
+                    lambda url: check_url(
+                        session, url, throttle, fetch, text_dir, RETRY_TIMEOUT_SECONDS if url in retrying else None
+                    ),
+                    pending,
+                )
+                for result in checks:
                     previous = results.get(result.url)
-                    results[result.url] = with_new_text(previous, result) if previous else result
+                    # A page read again for its text keeps its verdict; a URL fetched again gets a new one.
+                    results[result.url] = with_new_text(previous, result) if previous and result.url not in retrying else result
         finally:
             session.close()
             # Saved even when the check is interrupted, so the verdicts it reached are kept.
             if cache_path:
                 save_results(cache_path, results)
+        if retrying:
+            print(f"Fetched {len(retrying)} unverified URL(s) again: {sum(1 for url in retrying if results[url].verdict == OK)} now load.")
         return results
     if cache_path:
         save_results(cache_path, results)
