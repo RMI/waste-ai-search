@@ -11,7 +11,7 @@ three of our sites is three pairs, each decided on its own, and each loads only 
 | Status | When |
 |---|---|
 | SME review | The value fills an empty field. It loads once an SME approves its pair |
-| not used | Anything else, and status_reason says which: it confirms our value, would change one we hold, its link is dead or missing, it could not be converted or mapped, or the agent itself marked it an excluded candidate |
+| not used | Anything else, and status_reason says which: it confirms our value, would change one we hold, its link is dead or missing, it could not be converted or mapped, it is a planned closure year that has passed, or the agent itself marked it an excluded candidate |
 
 Nothing is approved automatically. A Tier 1-2 pair's values are trusted as read, so they load with
 its match; a key value (schema.VALUE_CHECKED_ATTRIBUTES) from a Tier 3-5 pair is also checked by an
@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .arbitration import baseline_for, comparable, date_key, decision_key, same_value, site_for_year, source_key, value_year
-from .credibility import TIER_2, TIER_5, TIER_BY_LABEL, tier_label
+from .credibility import TIER_2, TIER_5, TIER_BY_LABEL, parse_year, tier_label
 from .facility_names import distinctive_words
 from .lists import citation_point, id_order, plain
 from .locate import coordinates_from, format_point, haversine_km, same_state, seed_point
@@ -111,9 +111,10 @@ EXCLUDED_BY_AGENT = "excluded by the agent"
 UNVERIFIED = "the agent's unverified lead"
 NOT_MUNICIPAL = "not municipal waste"
 NO_LONGER_ASKED = "no longer asked"
+PLANNED_PASSED = "planned closure date passed"
 NOT_USED_REASONS = [
     CONFIRMS, CHANGES, DEAD_LINK, NO_LINK, UNUSABLE, EXCLUDED_BY_AGENT, NOT_OFFERED, NOT_MUNICIPAL,
-    NO_LONGER_ASKED, UNVERIFIED,
+    NO_LONGER_ASKED, PLANNED_PASSED, UNVERIFIED,
 ]
 # How status_reason begins for a value not used only because of the value we hold at the site
 # searched. That says nothing of another site, so an SME's Different site weighs it again there
@@ -383,7 +384,7 @@ def found_row(
     year = value_year(row.get("value_date"), run_year)
     site_then, note = site_for_year(site, attribute, year)
     ours = baseline_for(site_then, attribute)
-    status, reason, why = status_of(row, attribute, value, ours, pair, site)
+    status, reason, why = status_of(row, attribute, value, ours, pair, site, run_year)
     check = pair.value_check(attribute, row.get("value_basis")) if status == SME_REVIEW else ""
     if note:
         reason = f"{reason} {note}"
@@ -445,9 +446,10 @@ def found_row(
 
 
 def status_of(
-    row: dict[str, Any], attribute: str, value: str, ours: str, pair: Pair, site: dict[str, Any]
+    row: dict[str, Any], attribute: str, value: str, ours: str, pair: Pair, site: dict[str, Any], run_year: int
 ) -> tuple[str, str, str]:
-    """(status, why in words, why as Run_Config counts it) for one value."""
+    """(status, why in words, why as Run_Config counts it) for one value, in a run arbitrated in
+    `run_year`."""
     excluded = row.get("_excluded", "")
     if excluded:
         reason = normalize_scalar(row.get("exclusion_reason"))
@@ -476,6 +478,14 @@ def status_of(
             "No longer asked: whether incoming waste is municipal is marked on the amount itself, "
             "and a site taking mainly other waste is a Non-Municipal Waste Landfill."
         ), NO_LONGER_ASKED
+    if attribute == "closing_year" and row.get("planned") and (parse_year(value) or run_year) < run_year:
+        # A plan to close by a year now past doesn't say the site closed: Milenio reported in
+        # October 2024 that El Huixmí (3035) would stop taking waste that December, and it was still
+        # taking it in October 2026. closing_year isn't yearly, so its own year is compared.
+        return NOT_USED, (
+            "A planned closure date that has passed can't say whether it happened: an actual closure "
+            "has to come from a source that reports one."
+        ), PLANNED_PASSED
     if not is_blank(ours):
         if comparable(ours, attribute) == comparable(value, attribute):
             return NOT_USED, CONFIRMS_TEXT, CONFIRMS

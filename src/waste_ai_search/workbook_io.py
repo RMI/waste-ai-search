@@ -229,7 +229,7 @@ REVIEW_INSTRUCTIONS = [
             "FOR EACH ↳ ROW (skip it if the page is New site or Junk: it turns grey):\n"
             "7. Click source_url: the page opens at the quote, highlighted (Chrome or Edge, not "
             "PDFs). evidence shows the quote. A closure year flagged planned is one the page "
-            "expects: Correct keeps it.\n"
+            "expects, still to come: Correct keeps it.\n"
             "8. Pick Correct or Wrong. If it's wrong and you know the right value, type it in "
             "corrected_value, in would_load's unit. Incoming waste is municipal waste only: mark "
             "rubble, soil or tailings Wrong, or type just the municipal part in corrected_value.\n"

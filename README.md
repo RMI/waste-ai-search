@@ -436,7 +436,7 @@ Every value found is written to `found_values.csv` with one of three statuses:
 |---|---|
 | `auto-approved` | It fills an empty field, and its pair's source is Tier 1–2 with none of the exceptions below. It loads without review. |
 | `SME review` | It fills an empty field, and its pair's source is Tier 3–5, or Tier 1–2 with an exception. It loads once an SME approves the pair on Site_Review. |
-| `not used` | Anything else. `status_reason` says why: it confirms our value; it would change a value we hold; its link is dead or missing; it could not be converted or mapped; the agent itself marked it an excluded candidate; it says Not a Waste Facility of a site not offered that check; it is one of the agent's unverified leads; or an auto-approved source of a better tier already gives every value its source gives (see below). |
+| `not used` | Anything else. `status_reason` says why: it confirms our value; it would change a value we hold; its link is dead or missing; it could not be converted or mapped; the agent itself marked it an excluded candidate; it says Not a Waste Facility of a site not offered that check; it is a planned closure year that has passed; it is one of the agent's unverified leads; or an auto-approved source of a better tier already gives every value its source gives (see below). |
 
 **A source that adds nothing isn't reviewed.** One value loads per site, attribute and year, and
 the best tier wins. So where an auto-approved source of a better tier already gives every value a
@@ -457,6 +457,14 @@ as consolidation keeps them by year), the seed holds our value for its reference
 any other year our latest value stands in, and `status_reason` says so. Where our value for the
 reference year was carried forward from an earlier one, we hold nothing for that year, so a value
 found for it fills an empty field.
+
+**A planned closure year that has passed isn't used.** The agent marks a `closing_year` the source
+gives as planned or expected (`planned`). Where that year is before the run's, the plan can't say
+whether the site closed: in October 2024 Milenio reported that El Huixmí would stop taking waste that
+December, and it was still taking waste in October 2026. An actual closure has to come from a
+source that reports one. A planned year still to come is used like any other closing year, flagged
+planned on its ↳ row. `accepted_values.csv` has no column to say it is planned, so ingestion reads it
+as the year the site closes.
 
 **Three exceptions send a Tier 1–2 pair to an SME:**
 

@@ -238,6 +238,34 @@ def test_a_planned_closing_year_is_marked_and_not_read_as_a_closure(tmp_path):
     assert found["operator"]["planned"] == ""
 
 
+def test_a_planned_closing_year_that_has_passed_is_not_used(tmp_path):
+    """A plan to close by a year now past can't say whether the site closed: Milenio reported in
+    October 2024 that El Huixmí (3035) would stop taking waste that December, and it was still
+    taking it in October 2026. A planned year still to come is used, as is an actual one that has
+    passed."""
+    passed, this_year, to_come = (str(RUN_YEAR + years) for years in (-2, 0, 4))
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://news.example/passed", "Brady Road", source_type="News report",
+               values=[value("closing_year", passed, planned=True)], published=f"{passed}-10-24"),
+        source("https://news.example/this-year", "Brady Road", source_type="News report",
+               values=[value("closing_year", this_year, planned=True)]),
+        source("https://news.example/to-come", "Brady Road", source_type="News report",
+               values=[value("closing_year", to_come, planned=True)]),
+        source("https://news.example/closed", "Brady Road", source_type="News report",
+               values=[value("closing_year", passed, planned=False)]),
+    ]})
+    found = {row["source_url"]: row for row in rows(run_dir)}
+    assert (found["https://news.example/passed"]["status"], found["https://news.example/passed"]["status_reason"]) == (
+        NOT_USED,
+        "A planned closure date that has passed can't say whether it happened: an actual closure has to come "
+        "from a source that reports one.",
+    )
+    assert found["https://news.example/passed"]["value_check"] == ""
+    for url in ("https://news.example/this-year", "https://news.example/to-come", "https://news.example/closed"):
+        assert (found[url]["status"], found[url]["value_check"]) == (SME_REVIEW, "required")
+    assert run_config(run_dir)["values_not_used"] == "1: planned closure date passed 1"
+
+
 def test_a_tier_1_source_sent_to_review_by_an_exception_is_reviewed_though_a_tier_2_one_gives_its_value(tmp_path):
     # 6 km from our site, so for review; approved, its Tier 1 status would beat the Tier 2 one.
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
