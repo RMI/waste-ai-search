@@ -63,6 +63,7 @@ class Places:
         return {
             "Gro.": "Guerrero", "Guerrero": "Guerrero", "Oaxaca": "Oaxaca", "Oax.": "Oaxaca", "Veracruz": "Veracruz",
             "Ver.": "Veracruz", "Estado de México": "Estado de México", "Chihuahua": "Chihuahua",
+            "Baja California": "Baja California",
         }.get(text, "")
 
 
@@ -253,16 +254,42 @@ def test_a_source_in_the_municipality_our_sites_name_gives_is_not_flagged(tmp_pa
     ]
 
 
+def test_a_source_in_the_town_only_our_sites_original_name_gives_is_not_flagged(tmp_path):
+    """Translation made our site 8's EL ROSARIO "THE ROARY", so where our point's municipality is
+    another, only the name before translation says the source's El Rosario is our site's town."""
+    el_rosario = {**seed_row("8", "THE ROARY", 30.08934444, -115.6516528), "original_site_name": "EL ROSARIO"}
+    run_dir = run(tmp_path, [source("https://bc.example/el-rosario", "El Rosario", "Baja California")],
+                  ours=el_rosario, place=("San Quintín", "Baja California"))
+    assert [(row["source_place"], row["flags"]) for row in site_review(run_dir)] == [("El Rosario, Baja California", None)]
+
+
+def test_two_towns_named_for_saints_are_two_towns(tmp_path):
+    """Our 6086 is in San Sebastián Tecomaxtlahuaca. San Juan Mixtepec, in the same state, is another
+    town: the San they share says nothing of where either is."""
+    run_dir = run(tmp_path, [
+        source("https://oaxaca.example/mixtepec", "San Juan Mixtepec", "Oax."),
+        source("https://oaxaca.example/tecomaxtlahuaca", "San Sebastián Tecomaxtlahuaca", "Oaxaca"),
+    ])
+    assert [(row["source_url"], row["flags"]) for row in site_review(run_dir)] == [
+        ("https://oaxaca.example/mixtepec",
+         "the source puts the site in San Juan Mixtepec; ours is in San Sebastián Tecomaxtlahuaca - check it is our site"),
+        ("https://oaxaca.example/tecomaxtlahuaca", None),
+    ]
+
+
 def test_a_source_naming_no_facility_is_flagged_for_an_sme_to_check(tmp_path):
-    """All six of round 2's pages that named no facility were gpt-5.4's, and none was judged ours."""
+    """All six of round 2's pages that named no facility were gpt-5.4's, and none was judged ours. A
+    name given only in English still names one."""
     bocoyna = seed_row("247", "BOCOYNA LANDFILL", 27.860113, -107.585116)
     run_dir = run(tmp_path, [
         source("https://chihuahua.example/relleno", "Bocoyna", "Chihuahua", name="relleno sanitario de Bocoyna"),
         source("https://congreso.example/iniciativa", "Bocoyna", "Chihuahua", name=""),
+        {**source("https://chihuahua.example/english", "Bocoyna", "Chihuahua", name=""), "facility_name_english": "Bocoyna landfill"},
     ], ours=bocoyna, place=("Bocoyna", "Chihuahua"))
     assert [(row["source_url"], row["flags"]) for row in site_review(run_dir)] == [
         ("https://congreso.example/iniciativa", "the source names no facility"),
         ("https://chihuahua.example/relleno", None),
+        ("https://chihuahua.example/english", None),
     ]
 
 
@@ -271,3 +298,8 @@ def test_places_are_compared_by_their_words_without_accents_case_or_words_like_c
     assert place_words("H. Matamoros") == place_words("Heroica Matamoros") == {"matamoros"}
     assert place_words("Ciudad Obregón") == {"obregon"}
     assert place_words("Municipio de Ecatepec de Morelos") == {"ecatepec", "morelos"}
+    assert place_words("Villa de Zaachila") == {"zaachila"}
+    assert place_words("San Juan Mixtepec") == {"juan", "mixtepec"}
+    assert place_words("Santa María Huatulco") == {"maria", "huatulco"}
+    assert place_words("Santo Domingo Tehuantepec") == {"domingo", "tehuantepec"}
+    assert place_words("Santiago Juxtlahuaca") == {"juxtlahuaca"}

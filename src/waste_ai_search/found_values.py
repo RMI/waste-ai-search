@@ -25,7 +25,7 @@ What once sent a Tier 1-2 pair to SMEs is now a warning on its row (Pair.excepti
 - the source places the facility more than EXCEPTION_KM from our site's coordinates. A source
   that gives no coordinates, or a site with none, is not checked, as in batch 1. Coordinates too
   coarse to use, or that disagree with the source's own address, are still checked (Pair.measure);
-- the source puts the facility in another state than ours, or in the same state but a municipality
+- the source puts the facility in another state than ours, or, where it doesn't, in a municipality
   that shares no word with ours or our site's name;
 - the source names no facility;
 - the source says the site is "Not a Waste Facility".
@@ -97,8 +97,13 @@ EXCEPTIONS = [SAME_PAGE, FAR_AWAY, OTHER_STATE, OTHER_MUNICIPALITY, NO_NAME, SAY
 # set by arbitration from the run's state_names.json.
 STATE_NAME = "_state"
 # Words that don't tell one place from another, left out where a source's municipality is compared
-# with ours and our site's name: "Ciudad Obregón", "Municipio de Ecatepec", "H. Matamoros".
-PLACE_FILLER_WORDS = {"ciudad", "municipio", "de", "del", "la", "las", "los", "el", "y", "h", "heroica"}
+# with ours and our site's name: "Ciudad Obregón", "Municipio de Ecatepec", "H. Matamoros", "Villa de
+# Zaachila", and the San, Santa, Santo or Santiago that begins 210 of the 917 municipalities our
+# geocoded Mexican sites are in, so San Juan Mixtepec and San Sebastián Tecomaxtlahuaca are told apart.
+PLACE_FILLER_WORDS = {
+    "ciudad", "municipio", "de", "del", "la", "las", "los", "el", "y", "h", "heroica", "villa",
+    "san", "santa", "santo", "santiago",
+}
 
 # Why a value is not used, as Run_Config counts them.
 CONFIRMS = "confirms our value"
@@ -173,7 +178,7 @@ class Pair:
     # The state the source puts the facility in, where that isn't our site's state (measure).
     other_state: str = ""
     # The municipality the source puts the facility in, where it shares no word with ours or our
-    # site's name, in the same state, and ours (measure).
+    # site's name and the source doesn't put it in another state, and ours (measure).
     other_municipality: str = ""
     our_municipality: str = ""
 
