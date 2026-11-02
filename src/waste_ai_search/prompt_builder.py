@@ -766,9 +766,9 @@ Value requirements:
   Leave out planned, proposed, ordered or required, permitted or licensed, design and
   projected ones - a permitted capacity or annual limit is not waste received, and a design
   capacity is not waste in place. Never return a future year, except a planned closing_year
-  (planned = true). If a source gives only such a figure, leave the attribute out and mention
-  the figure in evidence_summary. (A gas project's status may still be Planned or Under
-  Construction.)
+  (planned = true). If a source gives only such a figure, leave the attribute out and put the
+  figure in unverified_leads (why_unverified: value rule). (A gas project's status may still be
+  Planned or Under Construction.)
 - Label anything not directly stated by the source as value_basis = Inferred.
 - Put uncertain or unsourced findings in unverified_leads, not in values: one entry each,
   or an empty list if there are none.

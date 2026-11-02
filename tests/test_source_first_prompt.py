@@ -266,6 +266,13 @@ def test_only_actual_figures_dates_and_features_are_asked_for():
         "planned, proposed, ordered or required, permitted or licensed, design and projected ones"
     ) in prompt
     assert "a permitted capacity or annual limit is not waste received" in prompt
+    # Such a figure has one home, the lead the contract shapes: evidence_summary belongs to a value,
+    # so a page giving only a planned figure had nowhere to put it.
+    assert (
+        "If a source gives only such a figure, leave the attribute out and put the figure in unverified_leads "
+        "(why_unverified: value rule)."
+    ) in prompt
+    assert "mention the figure in evidence_summary" not in prompt
     assert "A gas project's status may still be Planned or Under Construction" in prompt
     assert "closed or is expected to close" not in prompt
     assert "Not the date of a permit or licence, or of a later stage, cell or extension opening" in prompt
