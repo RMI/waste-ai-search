@@ -26,6 +26,7 @@ from .credibility import (
     NEWER_SOURCE_YEARS,
     RECENCY_OVERRIDE_ATTRIBUTES,
 )
+from .facility_names import same_operator
 from .schema import (
     AI_SEARCH_DATA_SOURCE,
     ARRAY_TARGET_ATTRIBUTES,
@@ -85,6 +86,15 @@ def comparable(value: Any, attribute_name: str = "") -> str:
         return f"{float(text):.6g}"
     except (TypeError, ValueError):
         return text
+
+
+def same_value(a: Any, b: Any, attribute_name: str = "") -> bool:
+    """Whether two values agree: as comparable() reads them, or, for an operator, as two spellings
+    of one body's name (facility_names.same_operator). "PRO-FAJ Hidro Limpieza, SA de CV" and
+    "PRO-FAJ Hidro Limpieza S.A. de C.V." are one operator, not two sources disagreeing."""
+    if attribute_name == "operator":
+        return same_operator(normalize_scalar(a), normalize_scalar(b))
+    return comparable(a, attribute_name) == comparable(b, attribute_name)
 
 
 def date_key(value: Any) -> tuple[int, int, int]:

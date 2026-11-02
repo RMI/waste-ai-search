@@ -42,7 +42,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from .arbitration import baseline_for, comparable, date_key, decision_key, site_for_year, source_counts, value_year
+from .arbitration import baseline_for, comparable, date_key, decision_key, same_value, site_for_year, source_key, value_year
 from .credibility import TIER_2, TIER_5, TIER_BY_LABEL, tier_label
 from .facility_names import distinctive_words
 from .lists import citation_point, id_order, plain
@@ -515,7 +515,8 @@ def pick_values(rows: list[dict[str, Any]], statuses: tuple[str, ...] = LOADABLE
     """The one value to load for each site, attribute and year (for a yearly attribute; otherwise
     each site and attribute), among the rows with one of `statuses`, where they disagree: the best
     tier, then the newest value_date, then the value the most sources give (a page giving it twice
-    counts once), then the agent's order (decision 6).
+    counts once, and an operator's name counts every spelling of it, arbitration.same_value), then
+    the agent's order (decision 6).
 
     Tier always comes first. arbitration.resolve, which this once went through, let a status from a
     lower tier win when it was dated years later, which within one year's key only happens where a
@@ -533,11 +534,19 @@ def pick_values(rows: list[dict[str, Any]], statuses: tuple[str, ...] = LOADABLE
     picked = {}
     for key, items in by_key.items():
         attribute = key[1]
-        counts = source_counts([row for _order, row in items], attribute)
+        rows_here = [row for _order, row in items]
+        # How many sources give each row's value, counted as arbitration.source_counts counts them.
+        agreeing = {
+            id(row): len({
+                source_key(other, index) for index, other in enumerate(rows_here)
+                if same_value(other.get("value"), row.get("value"), attribute)
+            })
+            for row in rows_here
+        }
         _order, best = min(items, key=lambda item: (
             TIER_BY_LABEL.get(normalize_scalar(item[1].get("source_tier")), TIER_5),
             tuple(-part for part in date_key(item[1].get("value_date"))),
-            -counts[comparable(item[1].get("value"), attribute)],
+            -agreeing[id(item[1])],
             item[0],
         ))
         picked[key] = best

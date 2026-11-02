@@ -28,11 +28,13 @@ from waste_ai_search.accept_reviews import (
     ACCEPTED_VALUES_FILE,
     Decision,
     ReviewError,
+    ValueDecision,
     accept,
     accept_reviews,
     read_decisions,
     read_value_decisions,
     reviewed_workbook,
+    value_warnings,
 )
 from waste_ai_search.arbitrate import run_arbitration
 from waste_ai_search.cli import main
@@ -427,6 +429,19 @@ def test_one_source_marked_new_site_under_two_sites_is_one_candidate():
     }
     [candidate] = accept(rows_in, decisions, SITES).new_sites
     assert candidate["searched_site_ids"] == "7; 8"
+
+
+def test_two_spellings_of_one_operator_marked_correct_are_one_value_not_two():
+    """Different values for one field all marked Correct are said, as one of them loads. Two spellings
+    of one operator's name are one value."""
+    def checked(review, operator, row):
+        return {"site_id": "7", "attribute_name": "operator", "year": "2024", "value": operator,
+                "_value_decision": ValueDecision(review, "operator", "operator", "Correct", "", "", row)}
+
+    spellings = [checked("a", "H. Ayuntamiento de Tixkokob 2024-2027", 3), checked("b", "Ayuntamiento de Tixkokob", 5)]
+    assert value_warnings({}, set(), {}, spellings) == []
+    [warning] = value_warnings({}, set(), {}, [*spellings, checked("c", "Red Ambiental", 7)])
+    assert warning.startswith("Site_Review: different values for operator at site 7 are all approved")
 
 
 # --- running it again ----------------------------------------------------------------------------

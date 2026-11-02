@@ -222,6 +222,28 @@ def test_a_value_another_source_contradicts_is_flagged_with_which_loads(tmp_path
     )
 
 
+def test_two_spellings_of_one_operators_name_are_not_rivals(tmp_path):
+    """Every operator rival flag on Sol's round-2 page rows was one body spelled two ways, such as
+    Tixkokob's council with and without its "H." and administration years (site 10239). Another body
+    is still flagged."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://tixkokob.example/gob", "Brady Road", values=[value("operator", "H. Ayuntamiento de Tixkokob 2024-2027")]),
+        source("https://news.example/one", "Brady Road", values=[value("operator", "Ayuntamiento de Tixkokob")], source_type="News report"),
+    ]})
+    assert [row["flags"] for row in site_review(run_dir)] == ["", ""]
+
+    run_dir = arbitrate(tmp_path / "other", [BRADY], {"13413": [
+        source("https://tixkokob.example/gob", "Brady Road", values=[value("operator", "H. Ayuntamiento de Tixkokob 2024-2027")]),
+        source("https://news.example/one", "Brady Road", values=[value("operator", "Ayuntamiento de Tixkokob")], source_type="News report"),
+        source("https://news.example/two", "Brady Road", values=[value("operator", "Red Ambiental")], source_type="News report"),
+    ]})
+    flags = {row["source_url"]: row["flags"] for row in site_review(run_dir)}
+    assert flags["https://tixkokob.example/gob"] == "a Tier 3 source here gives operator = Red Ambiental; if both are approved, this one loads"
+    assert flags["https://news.example/two"] == (
+        "a Tier 1 source here gives operator = H. Ayuntamiento de Tixkokob 2024-2027; if both are approved, that one loads"
+    )
+
+
 def test_would_load_gives_the_year_only_for_a_yearly_attribute():
     """One value loads per site, attribute and year for a yearly attribute, and per site and attribute
     otherwise; lines come in the order the attributes are searched, the newest year first."""

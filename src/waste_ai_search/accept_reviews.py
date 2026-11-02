@@ -41,12 +41,13 @@ import csv
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, time
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
 from .arbitration import baseline_for, site_for_year
 from .costs import RUN_LOG_FILE
-from .arbitration import comparable, decision_key
+from .arbitration import decision_key, same_value
 from .credibility import TIER_5, TIER_BY_LABEL
 from .found_values import (
     AUTO_APPROVED,
@@ -434,7 +435,8 @@ def value_warnings(
 ) -> list[str]:
     """The value decisions worth a second look, though none stops accept-reviews: one under a source
     that is Junk, New site or not decided, so it doesn't load (yet); a Correct with a corrected_value,
-    which is ignored; and two different values for one field both marked Correct, of which one loads."""
+    which is ignored; and two different values for one field both marked Correct, of which one loads.
+    Two spellings of one operator's name are one value (arbitration.same_value)."""
     warnings = []
     for value in sorted(value_decisions.values(), key=lambda value: value.row):
         if value.key not in matched:
@@ -452,7 +454,7 @@ def value_warnings(
         if row["_value_decision"] is not None:
             by_field.setdefault(decision_key(row["site_id"], row["attribute_name"], int(row["year"])), []).append(row)
     for (site_id, attribute, _year), rows in by_field.items():
-        if len({comparable(row["value"], attribute) for row in rows}) > 1:
+        if any(not same_value(one["value"], other["value"], attribute) for one, other in combinations(rows, 2)):
             listed = ", ".join(f"row {row['_value_decision'].row} ({row['value']})" for row in rows)
             warnings.append(
                 f"{SITE_REVIEW_SHEET}: different values for {attribute} at site {site_id} are all approved "

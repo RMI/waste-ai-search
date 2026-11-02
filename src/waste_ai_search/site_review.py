@@ -31,7 +31,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .arbitration import comparable, decision_key
+from .arbitration import decision_key, same_value
 from .found_values import CHECK_REQUIRED, EXCEPTION_KM, SME_REVIEW, Pair, closures, pick_values
 from .geocoder import place_text
 from .lists import id_order
@@ -241,7 +241,8 @@ def pair_flags(
 def rival_flag(row: dict[str, Any], loading: dict[tuple[str, str, Any], list[dict[str, Any]]]) -> str:
     """Where another source on the tab gives a different value for what this one would fill. One
     value loads per site, attribute and year, picked by tier first, so the SME is told which loads if
-    both sources are approved. Blank where no other source disagrees.
+    both sources are approved. Blank where no other source disagrees; two spellings of one operator's
+    name don't (arbitration.same_value).
 
     `loading` is every value that would load, by arbitration.decision_key.
     """
@@ -249,7 +250,7 @@ def rival_flag(row: dict[str, Any], loading: dict[tuple[str, str, Any], list[dic
     key = decision_key(row["site_id"], attribute, int(row["year"]))
     others = [
         other for other in loading.get(key, [])
-        if other.get("review_id") != row.get("review_id") and comparable(other["value"], attribute) != comparable(value, attribute)
+        if other.get("review_id") != row.get("review_id") and not same_value(other["value"], value, attribute)
     ]
     if not value or not others:
         return ""

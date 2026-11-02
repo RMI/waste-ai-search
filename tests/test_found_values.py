@@ -628,6 +628,18 @@ def test_one_value_is_loaded_per_site_attribute_and_year_best_tier_then_newest_t
     assert picked == {"operator": "B", "closing_year": "D", "opening_year": "F"}
 
 
+def test_every_spelling_of_an_operators_name_counts_as_a_source_giving_it():
+    """Two sources give Tixkokob's council, spelled two ways, and one another body: the council is the
+    operator most sources give."""
+    rows_ = [
+        found_row("Red Ambiental", "Tier 3", source="s1"),
+        found_row("Ayuntamiento de Tixkokob", "Tier 3", source="s2"),
+        found_row("H. Ayuntamiento de Tixkokob 2024-2027", "Tier 3", source="s3"),
+    ]
+    [row] = pick_values(rows_).values()
+    assert row["value"] == "Ayuntamiento de Tixkokob"
+
+
 @pytest.mark.parametrize("lower_date", ["2030", "1940", "2026-11"])
 def test_a_better_tier_always_wins_within_one_key_however_the_other_is_dated(lower_date):
     """A status dated after the run's year, or before 1950, counts as the run's year, so it shares a
