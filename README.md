@@ -841,15 +841,18 @@ nothing to look for, so each batch searches fewer sites than this. `measure_name
 Batch 3 is searched with GPT-5.6 Terra, then GPT-5.6 Sol searches the batch's largest sites again:
 the 64 taking 100,000 t a year or more, which hold 63% of its incoming waste. In the October 2026
 tests on 60 Mexican sites, adding Sol on such sites took good pages from 1.8 to 3.5 a site, for
-about $21 across the 64 at list price; on smaller sites it mostly added pages repeating what Terra's
+about $22 across the 64 at list price; on smaller sites it mostly added pages repeating what Terra's
 said, or found nothing. The second pass goes into the same run, so its pages are on the same
-Site_Review and a page both models cite is one pair:
+Site_Review, and a page both models cite under the same name is one pair:
 
 ```bash
-AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search search --run-id batch3 --batch 3
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search search \
+  --run-id batch3 --batch 3 --workers 16
 AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search \
   --run-id batch3 --batch 3 --min-tonnes 100000 --pass-label sol
-uv run waste-ai-search arbitrate --run-id batch3
+uv run waste-ai-search check-links --run-id batch3 --retry-unverified
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search run \
+  --run-id batch3 --batch 3 --workers 16
 ```
 
 - `--min-tonnes 100000` takes the sites whose seed gives 100,000 t a year or more of incoming
@@ -861,8 +864,14 @@ uv run waste-ai-search arbitrate --run-id batch3
   waste-ai-search search --run-id batch3 --pass-label sol --force --site-ids ...`. Without the
   label, `--force` would replace the first pass's response; without the agent, `.env`'s would
   answer, and its tokens would be added to Sol's.
-- The search checks the new pages' links and locates their sources, as every search does. If it
-  ran with `--no-link-check` or `--no-locate`, run `check-links` and `locate` before arbitrating.
+- `check-links --retry-unverified` fetches once more, with longer to answer, each page that timed
+  out, failed to connect, didn't resolve or had a server error, so its quotes can be checked before
+  SMEs review: 8 of the 32 pages the October tests couldn't read. Never a 403 (see
+  [Link checking](#link-checking)).
+- The last command is the one every batch runs. It searches only a site that has no response yet,
+  checks the links and locates the sources the searches didn't, arbitrates both passes, runs the gas
+  follow-up on what either model found, with Terra, and publishes the workbook. So SMEs never get
+  one without Sol's pages.
 - The run log has a row for each site and pass, each priced at its own model (see
   [Bing cost](#bing-cost)).
 - Don't raise `--max-web-searches` instead. The pages one model missed were nearly all ones it
