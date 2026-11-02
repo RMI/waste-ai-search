@@ -849,13 +849,21 @@ Site_Review, and a page both models cite under the same name is one pair:
 
 ```bash
 AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search search \
-  --run-id batch3 --batch 3 --workers 16
+  --run-id batch3 --batch 3 --workers 3
 AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search \
-  --run-id batch3 --batch 3 --min-tonnes 100000 --pass-label sol
+  --run-id batch3 --batch 3 --min-tonnes 100000 --pass-label sol --workers 3
 uv run waste-ai-search check-links --run-id batch3 --retry-unverified
 AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search run \
-  --run-id batch3 --batch 3 --workers 16
+  --run-id batch3 --batch 3 --workers 3
 ```
+
+- `--workers 3`: each deployment allows 1M tokens a minute, but Azure counts what each call might
+  use, not what it does. Batch 3 at 16 sites at a time had 130 of its first 147 searches refused
+  (429), and at 6 a quarter; at 3 none were, about 5 sites a minute (1,553 in 5 hours). A refused
+  search waits out the minute and tries again, with `AZURE_FOUNDRY_MAX_RETRIES=4` in `.env`.
+- About 1% of Mexican sites can't be searched: Azure's content filter stops the agent's answer,
+  probably over violent local news it read (batch 3: 14 of 1,553 with Terra, 1 of 64 with Sol).
+  The search says so (`ContentFiltered`) and doesn't retry; trying again later rarely helps.
 
 - `--min-tonnes 100000` takes the sites whose seed gives 100,000 t a year or more of incoming
   waste, and lists them. It applies after the other rules, like `--limit`, so with `--batch 3` it
