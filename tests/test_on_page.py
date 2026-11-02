@@ -334,7 +334,7 @@ def test_site_review_says_why_a_page_had_no_automatic_check_and_found_values_kee
     assert {name: listed[url]["link_status"] for name, url in urls.items()} == {
         "refused": "Unverified: the site refuses automated readers (403), so quotes weren't checked",
         "scan": "OK, but it's a scanned PDF, so quotes weren't checked",
-        "menu": "OK, but its text is only the site's menu, so quotes weren't checked",
+        "menu": "OK, but its text is only the site's menu, so a quote missing from it isn't flagged",
         "read": "OK",
     }
     # Its quote isn't flagged on the menu's row, as it was when it read "not found".

@@ -566,8 +566,9 @@ def test_link_status_says_in_words_why_a_page_had_no_automatic_check(result, wor
 def test_a_page_whose_text_is_only_its_menu_says_so():
     from waste_ai_search.link_check import describe_link
 
+    # Not "quotes weren't checked": one in the menu, such as the page's title, is still found.
     menu = LinkResult("u", OK, "200", "u", text_file="WAISRC-1.txt.gz", text_kind="html", text_chars=593)
-    assert describe_link(menu, menu_only=True) == "OK, but its text is only the site's menu, so quotes weren't checked"
+    assert describe_link(menu, menu_only=True) == "OK, but its text is only the site's menu, so a quote missing from it isn't flagged"
 
 
 def test_the_workbook_readme_says_what_link_status_tells_an_sme():

@@ -402,8 +402,9 @@ def describe_link(result: LinkResult | None, menu_only: bool = False) -> str:
         return f"{result.verdict}: {why}, {NOT_CHECKED}"
     note = result.text_note
     if menu_only:
-        why = "its text is only the site's menu"
-    elif little_text(note):
+        # A quote in the menu, such as the page's title, is still found.
+        return "OK, but its text is only the site's menu, so a quote missing from it isn't flagged"
+    if little_text(note):
         why = "it has almost no text: it may be built by JavaScript"
     elif result.text_file:
         return OK

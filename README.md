@@ -242,7 +242,9 @@ it says so in words rather than as a flag, so the SME knows its quotes weren't c
 - `Unverified: the site refuses automated readers (403), so quotes weren't checked`, or `the site
   timed out`, `the address doesn't resolve`, `the site had a server error (500)`, and so on;
 - `OK, but it's a scanned PDF, so quotes weren't checked`, or `it has almost no text: it may be built
-  by JavaScript`, or `its text is only the site's menu`.
+  by JavaScript`;
+- `OK, but its text is only the site's menu, so a quote missing from it isn't flagged`: a quote that
+  is in the menu, the page's title say, is still found.
 
 A page that loaded and was read says `OK`. `found_values.csv` keeps the verdict alone.
 
