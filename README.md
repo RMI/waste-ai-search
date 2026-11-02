@@ -949,10 +949,9 @@ location an older cached response gave as a value is not loaded.
 and to base `facility_status` on the most recent source that shows whether the site still takes
 waste (a closure notice, current opening hours, news) rather than an older permit or directory
 listing. A fire doesn't show it, since closed dumps burn too: in the 31 October Mexico tests, 9
-statuses came from fire reports. Arbitration follows the same
-rule: where approved values for one site, attribute and year disagree, within a tier the newer
-`value_date` wins. Each year of a status is its own value now, so an older status loads at its own
-year rather than losing to a newer one.
+statuses came from fire reports. Arbitration follows the same rule: where approved values for one
+site, attribute and year disagree, within a tier the newer `value_date` wins. Each year of a status
+is its own value now, so an older status loads at its own year rather than losing to a newer one.
 
 **A closure counts once it has happened.** A closure that is only ordered, recommended, planned,
 funded or expected, a temporary one (*clausura temporal*), one later reversed, or a replacement
@@ -1557,8 +1556,9 @@ tests the judges called 34 of the 84 good pages ours on that basis ("basurero mu
 Tolcayuca"), while Terra and Sol declined some, such as San Ignacio Cerro Gordo's, where we hold no
 other site nearby.
 
-The rule adds about 660 characters to every prompt. Where a site has others nearby, the first named
-adds about 175 more and each further one about 65.
+The rule adds about 660 characters to every prompt (Thunder Bay's is 20,480, under the size test's
+20,600). Where a site has others nearby, the first named adds about 210 more and each further one
+about 65.
 
 This is separate from the locate step's address geocoding, which places the addresses sources
 state (see [Locating each source](#locating-each-source)).
@@ -1737,6 +1737,10 @@ independent facts, and the prompt branches on both:
 | Translated source, name unchanged (4,458 non-English) | One name, but search it in the recorded ISO 639-1 language too |
 | English-language source (11,452) | One name, stated plainly as the source's own |
 
+A facility whose original matches its translation is left blank rather than repeating the string —
+but its `source_language` is still recorded, because a Portuguese source that translated to itself
+still needs searching in Portuguese.
+
 For a Spanish-language site, neither the translation nor English is searched, except for
 gas-project records (see [What the agent returns](#what-the-agent-returns)).
 
@@ -1744,10 +1748,6 @@ Every prompt also says our recorded name may be misspelt or garbled, and asks th
 close spellings before it concludes a site is undocumented. At 5099, "RELLENO SANITARIO EL ASALTO",
 Terra's six searches were all for El Asalto and found nothing; Sol tried El Salto, and found the one
 page judged ours.
-
-A facility whose original matches its translation is left blank rather than repeating the string —
-but its `source_language` is still recorded, because a Portuguese source that translated to itself
-still needs searching in Portuguese.
 
 ### How duplicate rows are collapsed
 

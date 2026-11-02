@@ -535,7 +535,7 @@ Names:
 
     # Batch 1's identity rule. Not asked is not the same as trusted: nothing about identity is asked
     # now, so only a Tier 1-2 provenance lets the prompt call our name or coordinates confirmed. An
-    # operator's name is never called confirmed, so the agent doesn't look for pages that use it.
+    # operator's name is never called confirmed: that pushed the agent to match pages on the name.
     confirmed = {
         (True, True): "The name and coordinates are",
         (True, False): "The name is",
