@@ -18,8 +18,10 @@ pair's values:
 A key value of a Tier 3-5 pair (schema.VALUE_CHECKED_ATTRIBUTES), and an operator the agent marked
 Inferred or Conflicting from a pair of any tier, also need their own row's decision: Correct loads
 the value as found; Wrong with a corrected_value loads that instead; Wrong alone, or no decision,
-loads nothing. A corrected_value with no decision is read as Wrong. A Tier 1-2 pair's other values
-are trusted as read.
+loads nothing. A corrected_value with no decision is read as Wrong. A pair giving one such value
+only has no row for it: the pair's own Correct site or Different site is Correct for the value too,
+or Wrong with its corrected_value where one is typed. A Tier 1-2 pair's other values are trusted as
+read.
 
 A pair's values are those that would load at the site searched. A Different site also weighs again,
 at the other site, the values set aside only because they confirm or would change one we hold at the
@@ -83,7 +85,7 @@ from .schema import (
     is_blank,
     normalize_scalar,
 )
-from .site_review import SITE_REVIEW_SHEET, check_label, would_load
+from .site_review import SITE_REVIEW_SHEET, check_label, checked_on_page, would_load
 
 
 ACCEPTED_VALUES_FILE = "accepted_values.csv"
@@ -205,7 +207,7 @@ def read_decisions(workbook: Path, site_ids: set[str]) -> dict[str, Decision]:
     decisions: dict[str, Decision] = {}
     problems: list[str] = []
     for number, record in read_site_review(workbook):
-        if record.get("check"):
+        if record.get("check") and not checked_on_page(record["check"]):
             continue  # a value row (read_value_decisions)
         review = record.get("review_id", "")
         typed, other = record.get("decision", ""), record.get("other_site_id", "")
@@ -278,7 +280,9 @@ def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]
     """The value rows' decisions on a reviewed workbook's Site_Review tab, by (review_id, check). A
     row with neither a decision nor a corrected_value is left out: it isn't decided yet. A
     corrected_value with no decision is read as Wrong, since a value typed instead says the found one
-    is wrong.
+    is wrong. A source row that checks its pair's one value (site_review.ON_PAGE_ROW) decides it too:
+    Correct site or Different site is Correct, or Wrong with the corrected_value typed; any other
+    decision, or none, decides nothing of the value.
 
     Raises ReviewError, naming every row at fault, where a decision isn't Correct or Wrong, or a
     corrected_value isn't a value the attribute can take - converted, mapped and range-checked as the
@@ -291,6 +295,10 @@ def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]
     for number, record in read_site_review(workbook):
         check = record.get("check", "")
         typed, corrected = record.get("decision", ""), record.get("corrected_value", "")
+        if checked_on_page(check):
+            if DECISION_BY_TEXT.get(_folded(typed)) not in (CORRECT_SITE, DIFFERENT_SITE):
+                continue
+            check, typed = checked_on_page(check), WRONG if corrected else CORRECT
         if not check or (not typed and not corrected):
             continue
         review = record.get("review_id", "")
@@ -328,7 +336,8 @@ def read_value_rows(workbook: Path) -> set[tuple[str, str]]:
     """Every value row on a reviewed workbook's Site_Review tab, decided or not, by (review_id, check).
     A workbook made before the run was arbitrated again can lack a row the run now checks a value on."""
     return {
-        (record.get("review_id", ""), record["check"]) for _number, record in read_site_review(workbook) if record.get("check")
+        (record.get("review_id", ""), checked_on_page(record["check"]) or record["check"])
+        for _number, record in read_site_review(workbook) if record.get("check")
     }
 
 

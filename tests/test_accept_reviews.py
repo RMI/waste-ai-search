@@ -43,6 +43,7 @@ from waste_ai_search.input_loader import write_csv_records
 from waste_ai_search.run_context import PipelineConfig
 from waste_ai_search.schema import ACCEPTED_VALUES_HEADERS, CORRECT_SITE, DIFFERENT_SITE, JUNK, NEW_SITE
 from waste_ai_search.seed_source import seed_headers
+from waste_ai_search.site_review import checked_on_page
 from waste_ai_search.workbook_io import write_review_workbook
 
 
@@ -96,7 +97,7 @@ def decide(run_dir, decisions):
     for row in range(2, ws.max_row + 1):
         url, site_id = ws.cell(row, column["source_url"]).value, ws.cell(row, column["site_id"]).value
         review, check = ws.cell(row, column["review_id"]).value, ws.cell(row, column["check"]).value
-        if check:
+        if check and not checked_on_page(check):
             cells = decisions.get((url_of.get(review), check))
         else:
             url_of[review] = url
@@ -196,6 +197,42 @@ def test_a_wrong_key_value_loads_the_smes_correction_if_they_give_one(tmp_path, 
     assert (closing["value"], closing["value_decision"], closing["corrected_value"]) == ("2045", "Wrong", str(cells.get("corrected_value", "")))
 
 
+# A page giving one key value only: its own row checks it (Hugh, 2 November).
+CLOSURE = source("https://news.example/closure", "Springfield Landfill", values=[value("closing_year", "2045")])
+
+
+@pytest.mark.parametrize("cells, loads, value_decision", [
+    ({"decision": CORRECT_SITE}, "2045", "Correct"),
+    # Its page is ours, and the value is wrong: the SME's loads instead.
+    ({"decision": CORRECT_SITE, "corrected_value": "2041"}, "2041", "Wrong"),
+    ({"decision": JUNK, "corrected_value": "2041"}, None, ""),
+    ({"corrected_value": "2041"}, None, ""),
+])
+def test_a_pages_one_key_value_is_decided_by_the_pages_own_decision(tmp_path, cells, loads, value_decision):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [CLOSURE]})
+    decide(run_dir, {CLOSURE["url"]: cells})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert {r["attribute_name"]: r["value"] for r in accepted(run_dir)}.get("closing_year") == loads
+    [closing] = found(run_dir)
+    assert closing["value_decision"] == value_decision
+
+
+def test_a_pages_one_key_value_loads_at_the_site_an_sme_says_it_is_about(tmp_path):
+    other = seed("901", "Springfield landfill", 49.9, -96.9)
+    run_dir = arbitrate(tmp_path, [BRADY, other], {"13413": [CLOSURE]})
+    decide(run_dir, {CLOSURE["url"]: {"decision": DIFFERENT_SITE, "other_site_id": "901"}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert [(r["site_id"], r["attribute_name"], r["value"]) for r in accepted(run_dir)] == [("901", "closing_year", "2045")]
+
+
+def test_a_corrected_value_on_a_pages_own_row_is_checked_as_on_a_value_row(tmp_path):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [CLOSURE]})
+    decide(run_dir, {CLOSURE["url"]: {"decision": CORRECT_SITE, "corrected_value": "soon"}})
+    with pytest.raises(ReviewError) as stopped:
+        accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert "(closing_year): corrected_value 'soon' can't be used" in str(stopped.value)
+
+
 @pytest.mark.parametrize("attribute, typed, says", [
     ("closing_year", "soon", "corrected_value 'soon' can't be used: closing_year value 'soon' is not numeric"),
     ("closing_year", "20410", "corrected_value '20410' can't be used: closing_year '20410' is not a year"),
@@ -207,7 +244,9 @@ def test_a_corrected_value_that_isnt_a_valid_value_stops_it_naming_the_row(tmp_p
     news = source("https://news.example/landfill", "Springfield Landfill", values=[
         value("closing_year", "2045"), value("facility_type", "Sanitary Landfill"), value("has_landfill_gas_collection", "TRUE"),
     ])
-    gas = source("https://news.example/gas", "Springfield Landfill", values=[value("gccs_collection_efficiency", "0.6")])
+    gas = source("https://news.example/gas", "Springfield Landfill", values=[
+        value("gccs_collection_efficiency", "0.6"), value("has_landfill_gas_collection", "TRUE"),
+    ])
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [news, gas]})
     decide(run_dir, {(url, attribute): {"decision": "Wrong", "corrected_value": typed} for url in (news["url"], gas["url"])})
     with pytest.raises(ReviewError) as stopped:

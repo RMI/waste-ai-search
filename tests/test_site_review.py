@@ -24,7 +24,7 @@ from waste_ai_search.on_page import FOUND, NO_PAGE_TEXT, NOT_FOUND, PARTLY
 from waste_ai_search.run_context import PipelineConfig
 from waste_ai_search.schema import NOT_A_WASTE_FACILITY, SITE_REVIEW_HEADERS
 from waste_ai_search.seed_source import seed_headers
-from waste_ai_search.site_review import our_coordinates, pair_flags, would_load
+from waste_ai_search.site_review import PLANNED_FLAG, checked_on_page, our_coordinates, pair_flags, would_load
 
 
 def seed(site_id, name, lat, lon, iso3="CAN", **extra):
@@ -73,7 +73,7 @@ def all_rows(run_dir):
 
 def site_review(run_dir):
     """The source rows."""
-    return [row for row in all_rows(run_dir) if not row["check"]]
+    return [row for row in all_rows(run_dir) if not row["check"] or checked_on_page(row["check"])]
 
 
 def found_values(run_dir):
@@ -128,12 +128,12 @@ def test_a_tier_3_to_5_pair_has_a_row_for_each_key_value_and_a_tier_1_2_pair_non
         ("open the page at the quote", "area_square_meters"),
     ]
     news, closing, incoming, area = rows[1:]
-    assert news["would_load"] == (
+    assert news["attributes"] == (
         "operator = City of Winnipeg\nclosing_year = 2031 (check independently)\n"
         "annual_incoming_waste_metric_tonnes = 400000 (2023) (check independently)\narea_square_meters = 120000 (check independently)"
     )
     assert {row["review_id"] for row in (closing, incoming, area)} == {news["review_id"]}
-    assert (area["source_title"], area["would_load"], area["site_id"], area["site_name"]) == (
+    assert (area["source_title"], area["attributes"], area["site_id"], area["site_name"]) == (
         "↳ check area_square_meters", "area_square_meters = 120000", "13413", "",
     )
     assert area["evidence"] == "“The 12 ha site”\nAs written: 12 ha\nAgent: Footprint."
@@ -170,7 +170,8 @@ def test_one_page_giving_an_area_for_two_years_has_one_row_to_check(tmp_path):
         ]),
     ]})
     checks = [row for row in all_rows(run_dir) if row["check"]]
-    assert [(row["check"], row["would_load"]) for row in checks] == [("area_square_meters", "area_square_meters = 450000")]
+    # The page's one value, so its own row checks it.
+    assert [(row["check"], row["attributes"]) for row in checks] == [("page: area_square_meters", "area_square_meters = 450000")]
     kept = [r for r in found_values(run_dir) if r["attribute_name"] == "area_square_meters"]
     assert len(kept) == 1 and "The source also gives 300000 (2016)" in kept[0]["status_reason"]
 
@@ -184,11 +185,37 @@ def test_an_inferred_operator_has_a_row_of_its_own_under_a_tier_1_pair_too(tmp_p
         ]),
     ]})
     permit, operator = all_rows(run_dir)
-    assert (permit["check"], permit["would_load"]) == ("", "operator = City of Winnipeg (check independently)\nopening_year = 1973")
-    assert (operator["check"], operator["source_title"], operator["would_load"], operator["review_id"]) == (
+    assert (permit["check"], permit["attributes"]) == ("", "operator = City of Winnipeg (check independently)\nopening_year = 1973")
+    assert (operator["check"], operator["source_title"], operator["attributes"], operator["review_id"]) == (
         "operator", "↳ check operator", "operator = City of Winnipeg", permit["review_id"],
     )
     assert operator["evidence"] == "“It says so.”\nAgent: A municipal dump."
+
+
+def test_a_page_giving_one_key_value_checks_it_on_its_own_row(tmp_path):
+    """Hugh, 2 November: "If the source is only providing one attribute, we don't also need to
+    independently check that attribute". The page's row is the value's: no ↳ row, the value unmarked,
+    its quote in evidence, and its flags on the page."""
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://news.example/brady", "Brady Road", source_type="News report", values=[
+            {**value("closing_year", "2045"), "evidence_summary": "Expected to close.", "planned": True},
+        ]),
+    ]})
+    [row] = all_rows(run_dir)
+    assert (row["check"], row["source_title"], row["attributes"]) == ("page: closing_year", "Page", "closing_year = 2045")
+    assert row["evidence"] == "“It says so.”\nAgent: Expected to close."
+    assert PLANNED_FLAG in row["flags"].splitlines()
+
+
+def test_a_page_giving_two_values_keeps_its_rows_to_check(tmp_path):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [
+        source("https://news.example/brady", "Brady Road", source_type="News report", values=[
+            value("closing_year", "2045"), value("facility_status", "Active", "2023"),
+        ]),
+    ]})
+    page, closing = all_rows(run_dir)
+    assert (page["check"], closing["check"]) == ("", "closing_year")
+    assert page["attributes"] == "facility_status = Active (2023)\nclosing_year = 2045 (check independently)"
 
 
 def test_a_source_row_gives_the_agents_notes_once_each(tmp_path):
@@ -222,7 +249,6 @@ def test_our_sites_come_in_id_order_with_flagged_pairs_first(tmp_path):
         ("900", "https://wiki.example/landfill", ""),
         ("13413", "https://manitoba.example/permit", "more than 5 km from our site"),
         ("13413", "https://news.example/brady", ""),
-        ("13413", "open the page at the quote", ""),
     ]
 
 
@@ -245,7 +271,7 @@ def test_a_row_shows_our_site_the_source_and_where_the_source_places_the_facilit
     )
     assert row["location_note"] == ""
     assert row["flags"] == ""
-    assert row["would_load"] == "facility_status = Active (2023)\nclosing_year = 2045 (check independently)"
+    assert row["attributes"] == "facility_status = Active (2023)\nclosing_year = 2045 (check independently)"
 
 
 def test_a_location_too_coarse_to_place_is_shown_as_written_with_why(tmp_path):
@@ -361,7 +387,7 @@ def test_a_not_a_waste_facility_verdict_is_flagged_and_says_when_the_site_was_fo
         f"says {NOT_A_WASTE_FACILITY}, but this run also found closing_year = 1998: is it a closed landfill "
         "misread as never a waste site?"
     )
-    assert row["would_load"] == f"facility_type = {NOT_A_WASTE_FACILITY}\noperator = Quarry Co"
+    assert row["attributes"] == f"facility_type = {NOT_A_WASTE_FACILITY}\noperator = Quarry Co"
 
 
 def pair(**fields):

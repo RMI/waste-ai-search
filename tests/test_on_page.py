@@ -245,11 +245,11 @@ def test_found_values_says_whether_each_quote_and_location_is_on_its_page(tmp_pa
     sheet = load_workbook(run_dir / "run_review.xlsx")["Site_Review"]
     header = [cell.value for cell in sheet[1]]
     listed = [dict(zip(header, row)) for row in sheet.iter_rows(min_row=2, values_only=True)]
-    [review] = [row for row in listed if row["source_url"] == news and not row["check"]]
-    assert review["flags"] == "address or coordinates not found on the page"
-    # closing_year is a key value from a Tier 3 source, so its quote is flagged on its own row.
-    [checked] = [row for row in listed if row["check"] == "closing_year"]
-    assert checked["flags"] == "quote not found on the page"
+    # closing_year is a key value from a Tier 3 source, and the page's only one, so its own row
+    # checks it, and flags its quote.
+    [review] = [row for row in listed if row["source_url"] == news]
+    assert review["check"] == "page: closing_year"
+    assert review["flags"] == "quote not found on the page (closing_year)\naddress or coordinates not found on the page"
 
 
 # --- a page whose kept text is only its menu (#25) ------------------------------------------------

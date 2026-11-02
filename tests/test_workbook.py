@@ -27,7 +27,7 @@ from waste_ai_search.workbook_io import FLAG_FILL, IGNORED_FILL, QUOTE_LINK_TEXT
 def review_row(site_id, url="https://a.example/permit", flags="", **extra):
     return {h: "" for h in SITE_REVIEW_HEADERS} | {
         KIND: SOURCE_ROW, "review_id": f"WAIREV-{site_id}-{url}", "site_id": site_id,
-        "source_url": url, "flags": flags, "would_load": "operator = City", **extra,
+        "source_url": url, "flags": flags, "attributes": "operator = City", **extra,
     }
 
 
@@ -35,7 +35,7 @@ def value_row(source, attribute, quote="The landfill closed in 2008 after 30 yea
     return {h: "" for h in SITE_REVIEW_HEADERS} | {
         KIND: VALUE_ROW, "review_id": source["review_id"], "site_id": source["site_id"], "check": attribute,
         "source_url": source["source_url"], "source_title": f"↳ check {attribute}", "quote": quote,
-        "_attribute": attribute, "would_load": f"{attribute} = 2008", **extra,
+        "_attribute": attribute, "attributes": f"{attribute} = 2008", **extra,
     }
 
 
@@ -70,17 +70,18 @@ def test_site_review_replaces_the_review_queue_the_leads_and_found_values(tmp_pa
 
 
 def test_the_columns_go_from_our_site_to_the_source_to_the_smes_decision():
-    """Our site, then the source, what it says, the flags, what approving would load and the evidence,
-    then the six columns an SME fills in, and last the two a decision is read back by."""
+    """Our site, then the source with what approving it would load beside its title (Hugh, 2 November),
+    what it says, the flags and the evidence, then the six columns an SME fills in, and last the two a
+    decision is read back by."""
     assert SITE_REVIEW_HEADERS[:7] == [
         "site_id", "site_name", "original_site_name", "source_language", "country_iso3", "our_coordinates", "our_place",
     ]
     for group in (
-        ["source_url", "source_title", "publisher", "source_tier", "link_status"],
+        ["source_title", "attributes", "source_url", "publisher", "source_tier", "link_status"],
         # As the source writes them, then what we read from them, and why not where we couldn't.
         ["facility_name_in_source", "facility_name_english", "source_address", "source_place", "stated_coordinates",
          "source_coordinates", "coordinates_from", "distance_km", "location_note"],
-        ["flags", "would_load", "evidence"],
+        ["flags", "evidence"],
     ):
         start = SITE_REVIEW_HEADERS.index(group[0])
         assert SITE_REVIEW_HEADERS[start:start + len(group)] == group
@@ -178,7 +179,7 @@ def test_the_readme_walks_an_sme_through_a_row_in_plain_words(tmp_path):
     numbered = [line.split(".")[0] for line in steps.splitlines() if line[:1].isdigit()]
     assert numbered == ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
     for column in ("our_coordinates", "source_url", "source_coordinates", "coordinates_from", "distance_km",
-                   "flags", "would_load", "evidence", *SITE_REVIEW_EDITABLE):
+                   "flags", "attributes", "evidence", *SITE_REVIEW_EDITABLE):
         assert column in steps, column
     for decision in SITE_REVIEW_DECISIONS:
         assert f"- {decision}:" in steps
@@ -262,6 +263,22 @@ def test_a_value_row_is_shaded_folds_under_its_source_and_links_to_the_quote(tmp
     assert link.hyperlink.target == "https://news.example/landfill#:~:text=The%20landfill%20closed%20in,30%20years%20of%20service"
     # The source's own row keeps its plain link.
     assert ws[f"{column['source_url']}2"].hyperlink.target == "https://news.example/landfill"
+
+
+def test_a_page_checking_its_one_value_links_to_the_quote_and_offers_the_attributes_values(tmp_path):
+    """A page giving one key value has no ↳ row (Hugh, 2 November): its own row links to the quote
+    under its URL, offers the source decisions, and corrected_value the attribute's values."""
+    page = review_row("13413", url="https://news.example/landfill", check="page: facility_type", _attribute="facility_type",
+                      quote="The landfill closed in 2008 after 30 years of service")
+    wb, _ = build(tmp_path, rows=[page])
+    ws = wb["Site_Review"]
+    column = letters(ws)
+    link = ws[f"{column['source_url']}2"]
+    assert link.value == "https://news.example/landfill"
+    assert link.hyperlink.target == "https://news.example/landfill#:~:text=The%20landfill%20closed%20in,30%20years%20of%20service"
+    assert ws.row_dimensions[2].outlineLevel == 0
+    by_range = {str(v.sqref): v for v in ws.data_validations.dataValidation}
+    assert set(by_range) == {f"{column['decision']}2", f"{column['corrected_value']}2"}
 
 
 def test_the_columns_decisions_are_read_back_by_are_hidden_but_kept(tmp_path):

@@ -77,6 +77,11 @@ PLANNED_FLAG = "planned: a closure the page expects, not one that has happened"
 # Said on a source row, which lists every value the page gives, of a key value an SME checks on
 # its own ↳ row below (Hugh, 30 October: "(check below)" said too little).
 CHECK_INDEPENDENTLY = "(check independently)"
+# A page giving one value only, which an SME checks, has no ↳ row: the page's own decision checks
+# the value too (Hugh, 2 November: "If the source is only providing one attribute, we don't also need
+# to independently check that attribute"). Its hidden check names the value after this, so
+# accept-reviews reads the decision as the page's and the value's.
+ON_PAGE_ROW = "page: "
 
 
 def our_coordinates(site: dict[str, Any]) -> str:
@@ -107,11 +112,18 @@ def needs_check(row: dict[str, Any]) -> bool:
     return row.get("value_check") == CHECK_REQUIRED
 
 
+def checked_on_page(check: str) -> str:
+    """The value a page row checks, as check_label names it, where the page gives that one value only
+    (ON_PAGE_ROW); blank on any other row."""
+    return check[len(ON_PAGE_ROW):] if check.startswith(ON_PAGE_ROW) else ""
+
+
 def site_review_rows(
     found: list[dict[str, Any]], pairs: list[Pair], sites_by_id: dict[str, dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Site_Review's rows: one per pair with values that would load, and under it one per key value
-    an SME checks. Our sites come in id order, and under each, the pairs with flags first, then the
+    an SME checks, unless that is the only value the pair gives: then the pair's own row checks it
+    (ON_PAGE_ROW). Our sites come in id order, and under each, the pairs with flags first, then the
     best tier, then in the order the search cited them.
 
     `found` is found_values.csv's rows and `pairs` the run's site-source pairs, as sort_values gives
@@ -137,8 +149,12 @@ def site_review_rows(
         if not waiting:
             continue
         checked = sorted((row for row in waiting if needs_check(row)), key=value_order)
-        unchecked = [row for row in waiting if not needs_check(row)]
+        alone = checked[0] if len(waiting) == 1 and checked else None
+        # The values with no row of their own, flagged here: the one value a page checks on its row too.
+        unchecked = [row for row in waiting if not needs_check(row) or row is alone]
         flags = pair_flags(pair, rows, unchecked, closed.get(pair.site_id, []))
+        if alone and alone.get("planned"):
+            flags.append(PLANNED_FLAG)
         flags += [flag for row in unchecked if (flag := rival_flag(row, loading))]
         if neighbours.get(pair.site_id):
             flags.append(neighbours[pair.site_id])
@@ -147,17 +163,22 @@ def site_review_rows(
         record.update({
             KIND: SOURCE_ROW,
             "review_id": pair.review_id,
-            "check": "",
+            "check": f"{ON_PAGE_ROW}{check_label(alone)}" if alone else "",
             "site_id": pair.site_id,
             "our_coordinates": our_coordinates(sites_by_id.get(pair.site_id, {})),
             "our_place": place_text(sites_by_id.get(pair.site_id, {})),
             "flags": "\n".join(dict.fromkeys(flags)),
-            "would_load": would_load(waiting),
-            "evidence": agent_notes(rows),
-            "quote": "",
+            "attributes": value_line(alone) if alone else would_load(waiting),
+            "evidence": "\n".join(dict.fromkeys(
+                [*(evidence(alone).splitlines() if alone else []), *agent_notes(rows).splitlines()]
+            )),
+            # As on a value row: the link opens the page at the quote, and corrected_value offers
+            # the attribute's own allowed values.
+            "quote": normalize_scalar(alone.get("quote")) if alone else "",
+            "_attribute": alone["attribute_name"] if alone else "",
             **{column: "" for column in SITE_REVIEW_EDITABLE},
         })
-        group = [record, *(value_record(row, loading) for row in checked)]
+        group = [record, *(value_record(row, loading) for row in checked if row is not alone)]
         listed.append(((id_order(pair.site_id), not flags, pair.tier, order), group))
     listed.sort(key=lambda item: item[0])
     return [record for _key, group in listed for record in group]
@@ -188,7 +209,7 @@ def value_record(row: dict[str, Any], loading: dict[tuple[str, str, Any], list[d
         "source_url": row.get("source_url", ""),
         "source_title": f"{VALUE_ROW_MARK} check {check_label(row)}",
         "flags": "\n".join(flags),
-        "would_load": value_line(row),
+        "attributes": value_line(row),
         "evidence": evidence(row),
         # Not columns: the workbook links the source to the quote (a text fragment), and offers
         # corrected_value the attribute's own allowed values.

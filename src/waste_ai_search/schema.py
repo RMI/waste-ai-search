@@ -606,17 +606,18 @@ SITE_REVIEW_HEADERS = [
     # Our site, as our database holds it; our_coordinates is "lat, lon", linked to Google Maps, and
     # our_place the municipality and state it is in.
     "site_id", *SITE_NAME_COLUMNS, "country_iso3", "our_coordinates", "our_place",
-    # The source. On a value row, source_url links to the page at the value's quote, and
-    # source_title says which value the row checks.
-    "source_url", "source_title", "publisher", "source_tier", "link_status",
+    # The source, and what approving it would load, "attribute = value (year)", beside its title so an
+    # SME knows what to look for on the page (Hugh, 2 November). On a value row, source_url links to
+    # the page at the value's quote, and source_title says which value the row checks.
+    "source_title", "attributes", "source_url", "publisher", "source_tier", "link_status",
     # What the source says of the facility it describes, and where it places it, as found_values.csv
     # gives them: its address and coordinates as written, the point read from them, and why there is
     # none where a source states a location we couldn't place.
     "facility_name_in_source", "facility_name_english", "source_address", "source_place", "stated_coordinates",
     "source_coordinates", "coordinates_from", "distance_km", "location_note",
-    # Why the row needs a second look, and what approving it would load: "attribute = value (year)".
-    # On a value row, evidence is the quote, the value as written and the agent's note.
-    "flags", "would_load", "evidence",
+    # Why the row needs a second look. On a value row, evidence is the quote, the value as written and
+    # the agent's note.
+    "flags", "evidence",
     # The SME's.
     "decision", "other_site_id", "corrected_value", "reviewer", "reviewed_date", "notes",
     # What accept-reviews reads a row back by: the pair, and on a value row which value it checks.

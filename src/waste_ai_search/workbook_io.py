@@ -201,41 +201,41 @@ REVIEW_INSTRUCTIONS = [
             "sure of. We trust the other values of high-tier pages (Tier 1-2)."
         ),
         "sme_action": (
-            "Work down the sheet. The - and + at the far left hide or show the ↳ rows.\n"
+            "Work down the sheet. The - and + at the far left fold or unfold the ↳ rows.\n"
             "FOR EACH PAGE:\n"
             "1. Click our_coordinates to see our site on Google Maps.\n"
-            "2. Click source_url: is it about our site? Compare the name it uses "
+            "2. attributes lists the values the page gives. Click source_url: is it about our site? "
+            "Compare the name it uses "
             "(facility_name_in_source) with ours (site_name), and its town and state (source_place) "
             "with ours (our_place). A page naming it only by its town is ours unless it mentions a "
             "replacement or another place, or a flag names our other site there. If we couldn't "
             "read it, link_status says why.\n"
             "3. If the page says where the site is, source_coordinates shows it on the map and "
             "distance_km how far it is from ours. A point from a street address (coordinates_from) "
-            "can be a kilometre or more off.\n"
+            "can be a kilometre off.\n"
             "4. Read flags, shaded orange: possible problems our checks spotted, such as a quote not "
-            "found on the page, a site over 5 km away or in a different state or town, or another "
-            "page giving a different value. The checks can't read images or maps.\n"
-            "5. would_load lists every value the page gives. Approving the page adds them all except "
-            f"those marked {CHECK_INDEPENDENTLY}: each has its own ↳ row underneath and is added "
-            "only once that row is Correct.\n"
+            "found on the page, a site in a different town, or another page giving a different value. "
+            "The checks can't read images or maps.\n"
+            "5. Approving the page adds the values in attributes; one marked "
+            f"{CHECK_INDEPENDENTLY} only once its ↳ row underneath is Correct. A page giving just "
+            "one such value has no ↳ row: check it too (steps 7-8). "
+            "If it's wrong, type the right value in corrected_value, or pick Junk.\n"
             "6. Pick a decision:\n"
             "- Correct site: it's about our site.\n"
-            "- Different site: it's about another of our sites. Put that site's ID in other_site_id. "
+            "- Different site: it's about another of our sites. Put its ID in other_site_id. "
             "If you can't tell which, leave decision blank and say so in notes.\n"
             "- New site: it's about a landfill that isn't in our database.\n"
             "- Junk: it's no use, or you can't tell which site it's about.\n"
-            "Only Correct site and Different site add anything. If a high-tier page has a value wrong, "
-            "say so in notes.\n"
+            "If a high-tier page has a value wrong, say so in notes.\n"
             "FOR EACH ↳ ROW (skip it if the page is New site or Junk: it turns grey):\n"
             "7. Click source_url: the page opens at the quote, highlighted (Chrome or Edge, not "
             "PDFs). evidence shows the quote. A closure year flagged planned is still to come: "
             "Correct keeps it.\n"
             "8. Pick Correct or Wrong. If it's wrong and you know the right value, type it in "
-            "corrected_value, in would_load's unit. Incoming waste is municipal waste only: mark "
+            "corrected_value, in attributes' unit. Incoming waste is municipal waste only: mark "
             "rubble, soil or tailings Wrong, or type just the municipal part in corrected_value.\n"
-            "9. Put your name in reviewer, the date in reviewed_date, and anything worth saying in "
-            "notes.\n"
-            "A blank decision adds nothing, so leave it blank if you're unsure. Don't change any other "
+            "9. Put your name in reviewer, the date in reviewed_date, and any comments in notes.\n"
+            "Leave a decision blank if you're unsure: it adds nothing. Don't change any other "
             "column. If this tab is empty, there's nothing to review."
         ),
         "editable": (
@@ -391,12 +391,13 @@ def add_validations(wb, ws, kinds: list[str] | None = None, attributes: list[str
         row = offset + 2
         if kind == VALUE_ROW:
             by_list.setdefault(("value_decision", "decision"), []).append(f"{decision}{row}")
-            attribute = (attributes or [])[offset]
-            name = CORRECTION_LISTS.get(attribute) or ("true_false" if attribute in BOOLEAN_TARGET_ATTRIBUTES else "")
-            if name:
-                by_list.setdefault((name, "corrected_value"), []).append(f"{corrected}{row}")
         else:
             by_list.setdefault(("decision", "decision"), []).append(f"{decision}{row}")
+        # A value row's, or a source row's that checks its pair's one value.
+        attribute = (attributes or [])[offset]
+        name = CORRECTION_LISTS.get(attribute) or ("true_false" if attribute in BOOLEAN_TARGET_ATTRIBUTES else "")
+        if name:
+            by_list.setdefault((name, "corrected_value"), []).append(f"{corrected}{row}")
     for (name, header), cells in by_list.items():
         validation = dropdown(wb, name, header)
         ws.add_data_validation(validation)
@@ -473,7 +474,8 @@ def mark_sites(ws) -> None:
 
 def lay_out_site_review(ws, records: list[dict[str, Any]]) -> None:
     """Site_Review's own layout: our site's id and name stay in view; a value row is shaded, folds
-    under its source, and links to the page at its quote; coordinates link to Google Maps."""
+    under its source, and links to the page at its quote, as does a source row that checks its pair's
+    one value, under its URL; coordinates link to Google Maps."""
     headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
     ws.freeze_panes = "C2"
     # The columns a decision is read back by are for accept-reviews, not the SME: hidden, so they
@@ -490,6 +492,9 @@ def lay_out_site_review(ws, records: list[dict[str, Any]]) -> None:
             if target:
                 make_link(cell, target)
         if record.get(KIND) != VALUE_ROW:
+            target = quote_link(record.get("source_url"), record.get("quote")) if record.get("quote") else None
+            if target:
+                make_link(ws.cell(row, headers["source_url"]), target)
             continue
         ws.row_dimensions[row].outlineLevel = 1
         for c in range(1, ws.max_column + 1):

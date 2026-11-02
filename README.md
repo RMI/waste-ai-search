@@ -499,7 +499,7 @@ whether the site closed: in October 2024 Milenio reported that El Huixmí would 
 December, and it was still taking waste in October 2026. An actual closure has to come from a
 source that reports one. Such a year isn't used even where it matches ours, so a Different site
 doesn't weigh it again at the other site. A planned year still to come is used like any other
-closing year: from a Tier 3–5 source it is flagged planned on its ↳ row, and from a Tier 1–2 source
+closing year: from a Tier 3–5 source it is flagged planned where an SME checks it, and from a Tier 1–2 source
 it loads with its page, unmarked. `accepted_values.csv` has no column to say it is planned, so
 ingestion reads it as the year the site closes.
 
@@ -1389,7 +1389,8 @@ with flags come first, then the best tier. An empty tab means nothing needs you.
 closure year, incoming waste, area, gas collection and collection efficiency. Under a source of any
 tier, one for an operator the search worked out rather than read, or found sources disagreeing on
 (`value_basis` Inferred or Conflicting). Check each against the page and mark it Correct or Wrong: it
-loads only once marked Correct, and only with its source.
+loads only once marked Correct, and only with its source. A source giving only one such value has no
+↳ row: its own row checks the value too (see Decide).
 
 Every source whose values would fill an empty field is here, whatever its tier: the flags (below)
 say which need a closer look. Not here: values that confirm or would change one we hold (only fills
@@ -1406,13 +1407,13 @@ approving it would do.
 | `site_id`, `site_name`, `original_site_name`, `source_language`, `country_iso3` | **Our site.** `site_name` is our database's name, machine-translated into English; `original_site_name` is the same name before translation, in `source_language`, and blank where it was never translated. The search uses the original, so a source about *EL HONGO* is the right facility even though `site_name` says *THE FUNGUS*. |
 | `our_coordinates` | Where our database puts the site, as `lat, lon`. Paste it into Google Maps' search box. |
 | `our_place` | The municipality and state our site is in, looked up from `our_coordinates`. |
-| `source_url`, `source_title`, `publisher`, `source_tier`, `link_status` | **The source. Open it.** `link_status` is `OK` where our check opened the page and read it. Where it couldn't, it says why, so you know none of its quotes were checked: `Unverified: the site refuses automated readers (403), so quotes weren't checked` (it may still open for you), or `OK, but it's a scanned PDF, so quotes weren't checked`. |
+| `source_title`, `attributes` | **The source**, and what approving it loads for this site of ours, one line per value, so you know what to look for on the page: `attribute = value`, with the year for a yearly attribute, such as `facility_status = Active (2024)`. A line marked *(check independently)* has its own ↳ row. One value loads per site, attribute and year, so a line can lose to a better-tier value for the same field: the flags say where another source's would. |
+| `source_url`, `publisher`, `source_tier`, `link_status` | **Open the source.** `link_status` is `OK` where our check opened the page and read it. Where it couldn't, it says why, so you know none of its quotes were checked: `Unverified: the site refuses automated readers (403), so quotes weren't checked` (it may still open for you), or `OK, but it's a scanned PDF, so quotes weren't checked`. |
 | `facility_name_in_source`, `facility_name_english`, `source_address`, `source_place`, `stated_coordinates` | The facility the source describes, as the source writes it: its name, address, town and state, and coordinates or grid reference; `facility_name_english` is the name in English. |
 | `source_coordinates`, `coordinates_from`, `distance_km`, `location_note` | Where the source places the facility, as `lat, lon`: paste it into Google Maps beside `our_coordinates`. `coordinates_from` says what it came from: coordinates the source states, a grid reference, or its address placed on the building or only on the street. A street point can be a kilometre or more off. `distance_km` is how far it is from our site. Where the source states a location but `source_coordinates` is blank, `location_note` says why (too coarse, its address and coordinates disagree, copied from the prompt, a postcode centroid), and `distance_km`, if filled, is roughly how far it is. |
 | `flags` | Why the row needs a second look, shaded where there are any (see below). |
-| `would_load` | What approving loads for this site of ours, one line per value: `attribute = value`, with the year for a yearly attribute, such as `facility_status = Active (2024)`. One value loads per site, attribute and year, so a line can lose to a better-tier value for the same field: the flags say where another source's would. |
-| `evidence` | On a source row, the agent's notes on the page's values, each once: where a page names our site only by its town, the agent says so here. On a ↳ row, the quote, the value as the page writes it where that differs, and the agent's note. |
-| `review_id`, `check` | Hidden, at the end. The pair's id, and on a ↳ row which value it checks: your decisions are read back by them. |
+| `evidence` | On a source row, the agent's notes on the page's values, each once: where a page names our site only by its town, the agent says so here. On a ↳ row, the quote, the value as the page writes it where that differs, and the agent's note; on a source row that checks its one value, those too. |
+| `review_id`, `check` | Hidden, at the end. The pair's id, and on a ↳ row which value it checks (`page: ` and the value on a source row that checks its one value): your decisions are read back by them. |
 
 | Flag | What to do |
 |---|---|
@@ -1438,16 +1439,19 @@ Pick `decision` from its dropdown:
 
 | `decision` | When | What happens |
 |---|---|---|
-| **Correct site** | The source is about this site of ours. | Its values load here: everything in `would_load`, a line marked *(check independently)* once its ↳ row is Correct, unless a flag says a better-tier value for the same field loads instead. |
+| **Correct site** | The source is about this site of ours. | Its values load here: everything in `attributes`, a line marked *(check independently)* once its ↳ row is Correct, unless a flag says a better-tier value for the same field loads instead. |
 | **Different site** | It is about another site of ours. Put that site's id in `other_site_id`. | Its values load at that site, where that site's fields are empty. |
 | **New site** | It is about a landfill that isn't in our database. | Nothing loads. The source is listed in `new_facility_candidates.csv` for ingestion. |
 | **Junk** | The source is no use: it isn't about one facility, or you can't tell which. | Nothing loads. |
 | *(blank)* | Not decided yet. | Nothing loads yet. |
 
-- **A decision covers the whole row.** Correct site loads every line of `would_load` that wins its
+- **A decision covers the whole row.** Correct site loads every line of `attributes` that wins its
   field (best tier, then newest, then most sources, among every value approved for that site,
   attribute and year), and the other decisions load none. Where an auto-approved source you don't
   see here would win, a flag says so.
+- **A source giving only one value to check has no ↳ row.** Its own row checks the value: Correct
+  site or Different site says the value is right too. If it is wrong, type the right one in
+  `corrected_value`, which then loads instead; if you don't know it, pick Junk.
 - **If it is about another of our sites but you can't tell which,** leave `decision` blank and say so
   in `notes`. A Different site with no `other_site_id` can't be read back.
 - **A renamed site is fine.** The question is whether it is the same facility, not the same name.
