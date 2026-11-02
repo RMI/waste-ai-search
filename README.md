@@ -1560,7 +1560,7 @@ Tolcayuca"), while Terra and Sol declined some, such as San Ignacio Cerro Gordo'
 other site nearby. Where our name looks like an operator's, only the town's dump counts: 7 of the 8
 sites named "Promotora Ambiental de la Laguna" are outside La Laguna.
 
-The rule adds about 660 characters to every prompt (Thunder Bay's is 20,480, under the size test's
+The rule adds about 660 characters to every prompt (Thunder Bay's is 20,483, under the size test's
 20,600). Where a site has others nearby, the first named adds about 210 more and each further one
 about 65.
 
