@@ -392,7 +392,8 @@ def run_search(
         selected, sites, config.geocode_cache if config.use_geocode_cache else None, geocoder
     )
     save_site_places(config.run_dir, selected)
-    agent = agent_identity(get_client(config))
+    client = get_client(config)
+    agent = agent_identity(client)
 
     work: list[tuple[dict[str, Any], list[str]]] = []
     for site in selected:
@@ -466,8 +467,16 @@ def run_search(
         # Retried as the same pass: without its label, --force would replace the first pass's responses.
         label = f" --pass-label {pass_label}" if pass_label else ""
         print(f"\n!! {len(failures)} site(s) still failing after retries. Try again later:")
-        print(f"   uv run waste-ai-search search --run-id {config.run_id}{label} --force --site-ids {ids}")
+        print(f"   {agent_setting(client)}uv run waste-ai-search search --run-id {config.run_id}{label} --force --site-ids {ids}")
     return config.run_dir
+
+
+def agent_setting(client: Any) -> str:
+    """The agent a client asks, as the setting to put before a command that searches again, or ""
+    where it has none (a fake). The agent may have been named in the shell rather than in .env, and
+    a retry asking another would add that model's answer, and its tokens, to this pass's."""
+    name = normalize_scalar(getattr(getattr(client, "config", None), "agent_name", ""))
+    return f"AZURE_AI_AGENT_NAME={name} " if name else ""
 
 
 def search_one_site(

@@ -16,6 +16,7 @@ from openpyxl import load_workbook
 from waste_ai_search import cli, search
 from waste_ai_search.arbitrate import run_arbitration
 from waste_ai_search.costs import Usage, model_cost, run_cost
+from waste_ai_search.foundry_client import FoundryClientConfig
 from waste_ai_search.input_loader import write_csv_records
 from waste_ai_search.run_context import PipelineConfig
 from waste_ai_search.schema import FOUNDRY_RUN_LOG_HEADERS
@@ -140,9 +141,13 @@ def test_a_log_from_before_passes_had_rows_reads_as_the_first_pass(tmp_path):
     assert [(row.get("pass_label", ""), row["web_searches"]) for row in merged] == [("", 10), ("sol", 6)]
 
 
-def test_a_pass_still_failing_is_retried_as_that_pass(tmp_path, monkeypatch, capsys):
-    """Without its label, the retry's --force would replace the first pass's responses."""
+def test_a_pass_still_failing_is_retried_as_that_pass_by_the_same_agent(tmp_path, monkeypatch, capsys):
+    """Without its label, the retry's --force would replace the first pass's responses. Without its
+    agent, a shell that doesn't name one would search with .env's, and add that model's tokens to
+    this pass's row."""
     class Failing:
+        config = FoundryClientConfig(agent_name="waste-ai-search-gpt-5-6-sol")
+
         def search_site(self, site, prompt):  # noqa: ARG002
             return {"sources": [], "search_notes": "The search_query tool did not return usable results."}
 
@@ -151,7 +156,11 @@ def test_a_pass_still_failing_is_retried_as_that_pass(tmp_path, monkeypatch, cap
     config = PipelineConfig(input_csv=seed(tmp_path), run_dir=tmp_path / "run", run_id="batch3", site_delay_seconds=0,
                             site_ids=["2"])
     search.run_search(config, pass_label="sol")
-    assert "search --run-id batch3 --pass-label sol --force --site-ids 2" in capsys.readouterr().out
+    assert (
+        "   AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search --run-id batch3 "
+        "--pass-label sol --force --site-ids 2\n"
+    ) in capsys.readouterr().out
+    assert search.agent_setting(object()) == ""  # a client that names no agent
 
 
 def test_the_search_command_takes_a_pass_label_and_a_minimum_tonnage(tmp_path, monkeypatch):

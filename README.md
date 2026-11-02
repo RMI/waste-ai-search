@@ -856,9 +856,11 @@ uv run waste-ai-search arbitrate --run-id batch3
   waste. It applies after the other rules, like `--limit`, so with `--batch 3` it takes the large
   sites the first pass searched, and says how many. `--site-ids` works too, for a list of your own.
 - `--pass-label sol` keeps each response beside the first, as `site_<id>__sol.json`, and
-  arbitration merges every pass's sources. Retry a site that failed as the same pass, as the search
-  prints: `--pass-label sol --force --site-ids ...`. Without the label, `--force` would replace the
-  first pass's response.
+  arbitration merges every pass's sources. Retry a site that failed as the same pass, with the same
+  agent, as the search prints: `AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run
+  waste-ai-search search --run-id batch3 --pass-label sol --force --site-ids ...`. Without the
+  label, `--force` would replace the first pass's response; without the agent, `.env`'s would
+  answer, and its tokens would be added to Sol's.
 - The search checks the new pages' links and locates their sources, as every search does. If it
   ran with `--no-link-check` or `--no-locate`, run `check-links` and `locate` before arbitrating.
 - The run log has a row for each site and pass, each priced at its own model (see
