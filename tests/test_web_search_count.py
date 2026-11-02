@@ -157,14 +157,9 @@ def test_each_search_query_and_page_opened_is_kept_in_order():
     assert count_web_searches(response) == 3
 
 
-def test_the_client_keeps_each_sites_actions_and_only_its_own():
-    """Each worker thread has its own client, which starts each site afresh, as it does its counts."""
+def _live_client(queued):
+    """The real client, answered by these responses in turn instead of Foundry."""
     from waste_ai_search.foundry_client import AzureFoundryAgentClient, FoundryClientConfig
-
-    queued = [
-        _response({"type": "search", "queries": ["a"]}, {"type": "open_page", "url": "https://a.example"}),
-        _response({"type": "search", "queries": ["b"]}),
-    ]
 
     class FakeOpenAI:
         responses = SimpleNamespace(create=lambda **kwargs: queued.pop(0))
@@ -176,10 +171,39 @@ def test_the_client_keeps_each_sites_actions_and_only_its_own():
     client = AzureFoundryAgentClient.__new__(AzureFoundryAgentClient)
     client.config = FoundryClientConfig(project_endpoint="x", agent_name="agent")
     client.project_client = SimpleNamespace(agents=SimpleNamespace(), get_openai_client=lambda agent_name: FakeOpenAI())  # noqa: ARG005
+    return client
+
+
+def test_the_client_keeps_each_sites_actions_and_only_its_own():
+    """Each worker thread has its own client, which starts each site afresh, as it does its counts."""
+    client = _live_client([
+        _response({"type": "search", "queries": ["a"]}, {"type": "open_page", "url": "https://a.example"}),
+        _response({"type": "search", "queries": ["b"]}),
+    ])
     client.search_site({}, "prompt")
-    assert client.search_actions == [{"type": "search", "queries": ["a"]}, {"type": "open_page", "url": "https://a.example"}]
+    assert client.search_actions == [
+        {"type": "search", "queries": ["a"], "attempt": 1}, {"type": "open_page", "url": "https://a.example", "attempt": 1},
+    ]
     client.search_site({}, "prompt")
-    assert client.search_actions == [{"type": "search", "queries": ["b"]}]
+    assert client.search_actions == [{"type": "search", "queries": ["b"], "attempt": 1}]
+
+
+def test_each_action_says_which_attempt_made_it(monkeypatch):
+    """An answer that can't be read is asked for again, with a fresh cap of tool calls. Both attempts'
+    calls are kept, each with its attempt, so the answer doesn't seem to have made more than the cap."""
+    import time
+
+    from waste_ai_search import foundry_client
+
+    unreadable = _response({"type": "search", "queries": ["a"]}, {"type": "open_page", "url": "https://a.example"})
+    unreadable.output_text = "I could not finish the search."
+    client = _live_client([unreadable, _response({"type": "search", "queries": ["b"]})])
+    monkeypatch.setattr(foundry_client, "time", SimpleNamespace(sleep=lambda seconds: None, monotonic=time.monotonic))
+    assert client.search_site({}, "prompt") == {"sources": []}
+    assert client.search_actions == [
+        {"type": "search", "queries": ["a"], "attempt": 1}, {"type": "open_page", "url": "https://a.example", "attempt": 1},
+        {"type": "search", "queries": ["b"], "attempt": 2},
+    ]
 
 
 def test_a_saved_response_keeps_its_actions_and_the_log_counts_its_tool_calls(tmp_path, monkeypatch):

@@ -93,6 +93,7 @@ class AzureFoundryAgentClient:
         # failed every site on an empty loop).
         attempts = max(1, self.config.max_retries)
         for attempt in range(1, attempts + 1):
+            made = len(self.search_actions)
             try:
                 remaining = None if deadline is None else deadline - time.monotonic()
                 text = self._invoke_agent(prompt, remaining)
@@ -106,6 +107,11 @@ class AzureFoundryAgentClient:
                 if deadline is not None and time.monotonic() + delay >= deadline:
                     break
                 time.sleep(delay)
+            finally:
+                # Which attempt made each tool call: each has its own cap (max_tool_calls), and an
+                # answer read only on a retry keeps the calls of the attempts before it too.
+                for action in self.search_actions[made:]:
+                    action["attempt"] = attempt
         assert last_error is not None
         raise last_error
 
