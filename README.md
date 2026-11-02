@@ -1434,8 +1434,8 @@ beside an SME's edited copy, never over it, and `accept-reviews` reads the edite
 appears only in the new workbook stays undecided until someone copies the decisions across: nothing
 does that yet. So does a ↳ row that appears only in the new workbook, under a pair already approved:
 its value loads nothing, and `accept-reviews` says how many values wait on a row the reviewed
-workbook doesn't have. Without a SharePoint folder, arbitrating again overwrites the run folder's workbook,
-decisions and all, so keep a copy of a reviewed workbook and pass it with `--workbook`.
+workbook doesn't have. Without a SharePoint folder, arbitrating again overwrites the run folder's
+workbook, decisions and all, so keep a copy of a reviewed workbook and pass it with `--workbook`.
 
 A workbook from before Site_Review has a Review_Queue tab instead, and `accept-reviews` says it
 can't read it. Batch 1's reviewed Review_Queue is for a one-off conversion script (build step 5 of
