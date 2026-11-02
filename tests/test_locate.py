@@ -1071,6 +1071,14 @@ def test_a_plainer_form_gets_the_same_town_and_state_and_a_kilometre_marker_stil
     assert len(geocoder.calls) == 2
 
 
+def test_a_plainer_form_placed_in_another_state_isnt_used_either():
+    elsewhere = GeocodeMatch(19.51, -99.02, STREET, "", "Estado de México")
+    geocoder = FakeGeocoder({"Calle Libramiento 12, Yautepec, Morelos": elsewhere})
+    plainer = source(address="Calle Libramiento 12 at the end of the road", stated_municipality="Yautepec", stated_state="Morelos")
+    located = locate_source(plainer, OJO_SECO, {}, geocoder, live=True, states=STATES)
+    assert len(geocoder.calls) == 2 and (located.basis, located.point) == (NONE, None)
+
+
 def test_the_locate_step_and_arbitration_look_up_the_same_text():
     """Both read the run's state names, so the state the locate step sent is the one arbitration
     looks for. Without them, arbitration would look for "Edo. Méx." and find nothing."""

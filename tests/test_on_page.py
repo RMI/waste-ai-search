@@ -289,6 +289,11 @@ def test_a_quote_missing_from_an_html_page_that_kept_only_its_menu_is_no_page_te
     missing, title, address = "Fue clausurado en su totalidad el basurero municipal", "Clausuran en su totalidad basurero municipal", "Carretera Veracruz-Xalapa, El Guayabo"
     assert check("https://xeu.example/menu", missing, address) == (NO_PAGE_TEXT, NO_PAGE_TEXT)
     assert check("https://xeu.example/menu", title) == (FOUND, "")
+    # The title with a word more is only partly found, which says nothing on a menu either.
+    partly = "Clausuran en su totalidad el basurero municipal de Veracruz"
+    assert (check("https://xeu.example/menu", partly), check("https://xeu.example/menu.pdf", partly)) == (
+        (NO_PAGE_TEXT, ""), (PARTLY, ""),
+    )
     assert check("https://xeu.example/menu.pdf", missing, address) == (NOT_FOUND, NOT_FOUND)
     assert check("https://xeu.example/nota", "basurero municipal de Veracruz fue abierto en 1990") == (NOT_FOUND, "")
 

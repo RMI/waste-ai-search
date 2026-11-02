@@ -121,16 +121,23 @@ def test_a_second_pass_has_its_own_row_priced_at_its_own_model_and_arbitration_m
 def test_a_retried_pass_replaces_only_its_own_row(tmp_path):
     path = tmp_path / "foundry_run_log.csv"
     write_csv_records(path, [
-        {"site_id": "2", "pass_label": "", "status": "Succeeded", "web_searches": 10, "model": "gpt-5.6-terra", "input_tokens": 30000},
-        {"site_id": "2", "pass_label": "sol", "status": "Failed", "web_searches": 4, "model": "gpt-5.6-sol", "input_tokens": 9000},
+        {"site_id": "2", "pass_label": "", "status": "Succeeded", "web_searches": 10, "tool_calls": 6, "model": "gpt-5.6-terra",
+         "input_tokens": 30000},
+        {"site_id": "2", "pass_label": "sol", "status": "Failed", "web_searches": 4, "tool_calls": 3, "model": "gpt-5.6-sol",
+         "input_tokens": 9000},
     ], FOUNDRY_RUN_LOG_HEADERS)
     merged = merge_run_log(path, [
-        {"site_id": "2", "pass_label": "sol", "status": "Succeeded", "web_searches": 6, "model": "gpt-5.6-sol", "input_tokens": 40000},
+        {"site_id": "2", "pass_label": "sol", "status": "Succeeded", "web_searches": 6, "tool_calls": 5, "model": "gpt-5.6-sol",
+         "input_tokens": 40000},
     ])
     first, second = merged
-    assert (first["pass_label"], first["status"], first["web_searches"], first["input_tokens"]) == ("", "Succeeded", "10", "30000")
+    assert (first["pass_label"], first["status"], first["web_searches"], first["tool_calls"], first["input_tokens"]) == (
+        "", "Succeeded", "10", "6", "30000",
+    )
     # Every attempt is billed, so the retry's counts add to the pass's own.
-    assert (second["pass_label"], second["status"], second["web_searches"], second["input_tokens"]) == ("sol", "Succeeded", 10, 49000)
+    assert (second["pass_label"], second["status"], second["web_searches"], second["tool_calls"], second["input_tokens"]) == (
+        "sol", "Succeeded", 10, 8, 49000,
+    )
 
 
 def test_a_log_from_before_passes_had_rows_reads_as_the_first_pass(tmp_path):
@@ -179,11 +186,20 @@ def test_the_search_command_takes_a_pass_label_and_a_minimum_tonnage(tmp_path, m
 
 
 def test_name_yield_counts_a_site_searched_in_two_passes_once(tmp_path):
-    from waste_ai_search.name_yield import one_row_per_site
+    from waste_ai_search import name_yield
 
-    rows = one_row_per_site([
+    run_dir = tmp_path / "run"
+    write_csv_records(run_dir / "seed.csv", [
+        {"site_id": "2", "site_name": "Relleno Sanitario Grande", "country_iso3": "MEX"},
+        {"site_id": "3", "site_name": "Tiradero Sin Dato", "country_iso3": "MEX"},
+    ], ["site_id", "site_name", "country_iso3"])
+    write_csv_records(run_dir / "foundry_run_log.csv", [
         {"site_id": "2", "pass_label": "", "status": "Succeeded", "web_searches": "10"},
         {"site_id": "2", "pass_label": "sol", "status": "Succeeded", "web_searches": "6"},
         {"site_id": "3", "pass_label": "", "status": "Failed", "web_searches": ""},
-    ])
-    assert [(row["site_id"], row["web_searches"], row["status"]) for row in rows] == [("2", "16", "Succeeded"), ("3", "", "Failed")]
+    ], FOUNDRY_RUN_LOG_HEADERS)
+    write_csv_records(run_dir / "found_values.csv", [], ["site_id", "status"])
+    run = name_yield.load_run("run", name_yield.local_reader(run_dir))
+    # The first pass's row, with every pass's Bing queries.
+    rows = name_yield.site_rows(run)
+    assert [(row["site_id"], row["web_searches"], row["status"]) for row in rows] == [("2", 16, "Succeeded"), ("3", 0, "Failed")]

@@ -479,6 +479,27 @@ def test_retry_unverified_fetches_again_only_what_may_pass_with_longer_to_answer
     assert [results[url].status for url in list(before)[6:]] == ["403", "BlockedDestination", "SSLError", "200", "404"]
 
 
+def test_a_page_that_loads_when_fetched_again_has_its_text_kept(tmp_path):
+    """So its quotes are checked against it, as a page that loaded the first time would be."""
+    from waste_ai_search.link_check import RETRY_TIMEOUT_SECONDS, Fetched, save_results
+    from waste_ai_search.page_text import read_page_text, text_file_name
+
+    url, cache, text_dir = "https://scielo.example/a", tmp_path / LINK_CHECK_FILE, tmp_path / "page_text"
+    save_results(cache, {url: LinkResult(url, UNVERIFIED, "ConnectTimeout", url)})
+    asked = []
+
+    def fetch(session, url, throttle, keep_text=False, timeout=None):
+        asked.append((keep_text, timeout))
+        return Fetched(200, b"<html><body><p>El relleno recibe 300 toneladas al dia.</p></body></html>", "text/html")
+
+    fetch.keeps_text = True
+    result = check_urls([url], cache_path=cache, fetch=fetch, text_dir=text_dir, retry_unverified=True)[url]
+    assert asked == [(True, RETRY_TIMEOUT_SECONDS)]
+    assert (result.verdict, result.text_file) == (OK, text_file_name(url))
+    assert read_page_text(text_dir, result.text_file) == "El relleno recibe 300 toneladas al dia."
+    assert load_results(cache)[url].text_file == result.text_file
+
+
 def test_the_check_links_command_retries_unverified_links_when_asked(tmp_path, monkeypatch):
     from waste_ai_search import cli, search
 
