@@ -125,7 +125,10 @@ def test_with_no_word_on_containment_neither_engineered_type_is_chosen():
 def test_the_directive_prior_holds_where_no_source_describes_the_engineering():
     """Otherwise an EU landfill no source describes would be left out rather than typed by the prior."""
     text = guidance(corroborated_site())  # ESP
-    assert "a Sanitary Landfill unless a source says it lacks that engineering, even where no source describes it;" in text
+    assert (
+        "a Sanitary Landfill unless a source says it lacks that engineering, even where no source describes its "
+        "engineering;"
+    ) in text
 
 
 def test_an_eu_site_gets_the_landfill_directive_prior():

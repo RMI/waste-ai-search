@@ -237,8 +237,8 @@ LANDFILL_DIRECTIVE_GUIDANCE = (
     " This site is in a country bound by the EU Landfill Directive (1999/31/EC), which requires "
     "every landfill accepting non-hazardous waste to have a liner and leachate management. A "
     "landfill that accepted waste after July 2009 is therefore a Sanitary Landfill unless a source "
-    "says it lacks that engineering, even where no source describes it; in this country that "
-    "includes every landfill reporting to E-PRTR. A site that "
+    "says it lacks that engineering, even where no source describes its engineering; in this "
+    "country that includes every landfill reporting to E-PRTR. A site that "
     "closed before July 2009 may predate these requirements; classify it from its described "
     "engineering instead."
 )
