@@ -198,8 +198,7 @@ REVIEW_INSTRUCTIONS = [
             "job is to say whether the page is really about that site. Indented rows (↳) are values to "
             "check too: from low-tier pages (Tier 3-5), site type, closure year, incoming waste, area, "
             "gas collection and collection efficiency; from any page, an operator the search wasn't "
-            "sure of. We trust the other values of high-tier pages (Tier 1-2). Under each site, flagged "
-            "pages come first."
+            "sure of. We trust the other values of high-tier pages (Tier 1-2)."
         ),
         "sme_action": (
             "Work down the sheet. The - and + at the far left hide or show the ↳ rows.\n"
@@ -208,7 +207,8 @@ REVIEW_INSTRUCTIONS = [
             "2. Click source_url: is it about our site? Compare the name it uses "
             "(facility_name_in_source) with ours (site_name), and its town and state (source_place) "
             "with ours (our_place). A page naming it only by its town is ours unless it mentions a "
-            "replacement or another place. If we couldn't read it, link_status says why.\n"
+            "replacement or another place, or a flag names our other site there. If we couldn't "
+            "read it, link_status says why.\n"
             "3. If the page says where the site is, source_coordinates shows it on the map and "
             "distance_km how far it is from ours. A point from a street address (coordinates_from) "
             "can be a kilometre or more off.\n"

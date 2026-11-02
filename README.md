@@ -1422,6 +1422,7 @@ approving it would do.
 | more than 5 km from our site | Compare `source_coordinates`, or where it is blank `stated_coordinates`, with `our_coordinates`. |
 | in a different state from our site: the source says X | The source puts the facility in another state or province than `our_place`. States are compared as Nominatim names them, so "N.L." and "Nuevo León" are one state. A site near a border may be described from the next state, so look at the map before rejecting it. |
 | the source puts the site in X; ours is in Y - check it is our site | In our state, or where the source's state is unknown, the source names a municipality that shares no word with ours or with our site's name. Accents, case and words such as *ciudad*, *villa*, *municipio*, *de*, *San* and *Santa* don't count, so San Juan Mixtepec and San Sebastián Tecomaxtlahuaca are two towns. It may be about the dump that town uses rather than ours: at 9233, four pages about El Guayabo in Medellín de Bravo were cited for our landfill in Veracruz. But a landfill can serve one town from the next, and our municipality is looked up from our coordinates, so it can be the city rather than the municipio ("Ciudad Obregón" for Cajeme). Check, don't reject on the flag alone. |
+| we also hold X in T: check the page is about this site | Another of our sites is in the same municipality. A page naming the site only by its town could be about either; the agent takes such a page for ours only where we hold no other site in the town. Look for the page's name, place or history. |
 | the source names no facility | The source gives no name for the facility it describes. Check that it is about one facility, and that it is ours. |
 | says Not a Waste Facility | Approving loads that verdict. Check the source says the site was never a waste site: a closed landfill still is one. Where the run also found the site closed, the flag says so. |
 | a Tier N source here gives `attribute = value`; if both are approved, that one loads (or this one loads) | Another source on this tab gives a different value for the same field and year. One value loads, the best tier first, so the flag says which would if you approve both. If you think the one that loses is right, say so in `notes`. Two spellings of one operator's name are not different values: names are compared without small words, legal forms such as "S.A. de C.V.", a council's "H." and its years, so "H. Ayuntamiento de Tixkokob 2024-2027" and "Ayuntamiento de Tixkokob" are one operator. So are two names where one's words are all in the other, and a name and its bracketed acronym. |
@@ -1451,8 +1452,9 @@ Pick `decision` from its dropdown:
   in `notes`. A Different site with no `other_site_id` can't be read back.
 - **A renamed site is fine.** The question is whether it is the same facility, not the same name.
 - **A page may name the site only by its town** ("basurero municipal de Tolcayuca"). It is ours
-  unless it mentions a replacement or another place, as the agent is told; `evidence` says where the
-  agent took a page on that basis, and a flag says where the town the page names isn't ours.
+  unless it mentions a replacement or another place, or we hold another site in that town, as the
+  agent is told: a flag names our other sites there, `evidence` may say where the agent took a page
+  on that basis, and another flag says where the town the page names isn't ours.
 - **The same page under two sites** is decided under each on its own: Correct site under one, and
   Different site or Junk under the other, say.
 

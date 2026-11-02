@@ -129,6 +129,7 @@ def site_review_rows(
         for row in rows:
             if row["status"] == SME_REVIEW and normalize_scalar(row.get("value")):
                 loading.setdefault(decision_key(row["site_id"], row["attribute_name"], int(row["year"])), []).append(row)
+    neighbours = same_town(sites_by_id)
     listed = []
     for order, pair in enumerate(pairs):
         rows = of_pair.get(pair.review_id, [])
@@ -139,6 +140,8 @@ def site_review_rows(
         unchecked = [row for row in waiting if not needs_check(row)]
         flags = pair_flags(pair, rows, unchecked, closed.get(pair.site_id, []))
         flags += [flag for row in unchecked if (flag := rival_flag(row, loading))]
+        if neighbours.get(pair.site_id):
+            flags.append(neighbours[pair.site_id])
         # Our site and the source as found_values.csv gives them, from the pair's first value.
         record = {column: waiting[0].get(column, "") for column in SITE_REVIEW_HEADERS}
         record.update({
@@ -150,7 +153,7 @@ def site_review_rows(
             "our_place": place_text(sites_by_id.get(pair.site_id, {})),
             "flags": "\n".join(dict.fromkeys(flags)),
             "would_load": would_load(waiting),
-            "evidence": agent_notes(waiting),
+            "evidence": agent_notes(rows),
             "quote": "",
             **{column: "" for column in SITE_REVIEW_EDITABLE},
         })
@@ -193,6 +196,26 @@ def value_record(row: dict[str, Any], loading: dict[tuple[str, str, Any], list[d
         "_attribute": row["attribute_name"],
     })
     return record
+
+
+def same_town(sites_by_id: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """For each of our sites with others in its municipality, the flag naming them. The agent takes a
+    page about the town's dump for ours only where we hold no other site in that town
+    (prompt_builder's identity rule), so the SME is told where we do."""
+    towns: dict[tuple[str, str], list[str]] = {}
+    for site_id, site in sites_by_id.items():
+        municipality = normalize_scalar(site.get("municipality")).lower()
+        if municipality:
+            towns.setdefault((municipality, normalize_scalar(site.get("admin1")).lower()), []).append(site_id)
+    flags = {}
+    for (_municipality, _state), ids in towns.items():
+        for site_id in ids:
+            others = [f"{other} {normalize_scalar(sites_by_id[other].get('site_name'))}" for other in ids if other != site_id]
+            if others:
+                named = "; ".join(others[:3]) + (f"; and {len(others) - 3} more" if len(others) > 3 else "")
+                town = normalize_scalar(sites_by_id[site_id].get("municipality"))
+                flags[site_id] = f"we also hold {named} in {town}: check the page is about this site"
+    return flags
 
 
 def agent_notes(rows: list[dict[str, Any]]) -> str:

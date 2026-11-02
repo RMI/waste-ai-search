@@ -144,6 +144,22 @@ def test_a_tier_3_to_5_pair_has_a_row_for_each_key_value_and_a_tier_1_2_pair_non
     )
 
 
+def test_a_page_row_names_our_other_sites_in_the_same_town():
+    """The agent takes a page about the town's dump for ours only where we hold no other site in that
+    town, so the SME is told where we do."""
+    from waste_ai_search.site_review import same_town
+    sites = {
+        "1": {"site_name": "BASURERO MUNICIPAL", "municipality": "Naucalpan de Juárez", "admin1": "México"},
+        "2": {"site_name": "RELLENO RINCÓN VERDE", "municipality": "Naucalpan de Juárez", "admin1": "México"},
+        "3": {"site_name": "TIRADERO", "municipality": "Atizapán", "admin1": "México"},
+    }
+    flags = same_town(sites)
+    assert flags == {
+        "1": "we also hold 2 RELLENO RINCÓN VERDE in Naucalpan de Juárez: check the page is about this site",
+        "2": "we also hold 1 BASURERO MUNICIPAL in Naucalpan de Juárez: check the page is about this site",
+    }
+
+
 def test_one_page_giving_an_area_for_two_years_has_one_row_to_check(tmp_path):
     """An area isn't yearly, so two years of it from one page would be two ↳ rows under one
     (review_id, check), and a decision on one would be read as both: the newer is kept."""
