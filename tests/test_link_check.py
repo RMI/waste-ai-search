@@ -507,3 +507,46 @@ def test_a_name_that_does_not_resolve_is_its_own_status_and_an_internal_address_
     assert classify("DoesNotResolve") == UNVERIFIED
     assert lc.retryable(verdict("https://www.mide.example/indicador", UNVERIFIED, status="DoesNotResolve"))
     assert not lc.retryable(verdict("https://internal.example/x", UNVERIFIED, status="BlockedDestination"))
+
+
+# --- Site_Review's link_status says why a page had no automatic check (#25) ----------------------
+@pytest.mark.parametrize("result, words", [
+    (LinkResult("u", OK, "200", "u", text_file="WAISRC-1.txt.gz", text_kind="html", text_chars=5000), "OK"),
+    (LinkResult("u", UNVERIFIED, "403", "u"), "Unverified: the site refuses automated readers (403), so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "ConnectTimeout", "u"), "Unverified: the site timed out, so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "DoesNotResolve", "u"), "Unverified: the address doesn't resolve, so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "500", "u"), "Unverified: the site had a server error (500), so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "429", "u"), "Unverified: the site turned away too many requests (429), so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "406", "u"), "Unverified: the site answered 406, so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "ChunkedEncodingError", "u"), "Unverified: the check failed (ChunkedEncodingError), so quotes weren't checked"),
+    (LinkResult("u", BROKEN, "404", "u"), "Broken: the page is gone (404), so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u", text_kind="pdf", text_note="a PDF with no text layer, probably scanned"),
+     "OK, but it's a scanned PDF, so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u", text_file="WAISRC-1.txt.gz", text_kind="html", text_chars=19,
+                text_note="little text: the page may be built by JavaScript"),
+     "OK, but it has almost no text: it may be built by JavaScript, so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u", text_note="not read (binary content)"),
+     "OK, but its text couldn't be read (binary content), so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u", text_kind="pdf", text_note="an encrypted PDF"),
+     "OK, but its text couldn't be read (an encrypted PDF), so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u"), "OK, but its text wasn't kept, so quotes weren't checked"),
+    (None, ""),
+])
+def test_link_status_says_in_words_why_a_page_had_no_automatic_check(result, words):
+    from waste_ai_search.link_check import describe_link
+
+    assert describe_link(result) == words
+
+
+def test_a_page_whose_text_is_only_its_menu_says_so():
+    from waste_ai_search.link_check import describe_link
+
+    menu = LinkResult("u", OK, "200", "u", text_file="WAISRC-1.txt.gz", text_kind="html", text_chars=593)
+    assert describe_link(menu, menu_only=True) == "OK, but its text is only the site's menu, so quotes weren't checked"
+
+
+def test_the_workbook_readme_says_what_link_status_tells_an_sme():
+    from waste_ai_search.workbook_io import REVIEW_INSTRUCTIONS
+
+    [site_review] = [tab for tab in REVIEW_INSTRUCTIONS if tab["tab_name"] == "Site_Review"]
+    assert "link_status says why, if we couldn't read it." in site_review["sme_action"]

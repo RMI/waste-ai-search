@@ -250,3 +250,92 @@ def test_found_values_says_whether_each_quote_and_location_is_on_its_page(tmp_pa
     # closing_year is a key value from a Tier 3 source, so its quote is flagged on its own row.
     [checked] = [row for row in listed if row["check"] == "closing_year"]
     assert checked["flags"] == "quote not found on the page"
+
+
+# --- a page whose kept text is only its menu (#25) ------------------------------------------------
+# As the link check kept xeu.mx's page for site 9233: the title, then its menu.
+MENU = "Clausuran en su totalidad basurero municipal de Veracruz - xeu noticias veracruz\n" + "\n".join(
+    ["Portada", "Veracruz", "Boca del Río", "Estado", "Nacional", "Internacional", "Deportes", "Policiaca", "Espectáculos",
+     "Sociedad", "Tecnociencia", "Al minuto", "Finanzas", "Destacadas", "Viral", "Videos", "Opinión", "Sondeo",
+     "XEU 98.1 FM", "ESCUCHA EN VIVO", "Servicios Informativos", "Radio en vivo", "Mensaje a Cabina",
+     "Teléfonos de Emergencia", "Programación xeu 98.1 FM", "Redes Sociales"]
+)
+ARTICLE = MENU + (
+    "\nFue clausurado en su totalidad el basurero municipal de Veracruz la tarde de este martes, tras una "
+    "revisión de la Procuraduría de Medio Ambiente junto con representantes del ayuntamiento."
+)
+
+
+def test_a_quote_missing_from_an_html_page_that_kept_only_its_menu_is_no_page_text(tmp_path):
+    """The article was built after the page loaded, so the three quotes read "not found" and flagged
+    a page the judges called ours. A quote that is there is still found; a PDF or an article with
+    prose is checked as before."""
+    from waste_ai_search.on_page import menu_only
+    from waste_ai_search.page_text import text_file_name
+
+    assert len(MENU) < 1000 and menu_only(MENU) and not menu_only(ARTICLE)
+    pages = {"https://xeu.example/menu": MENU, "https://xeu.example/menu.pdf": MENU, "https://xeu.example/nota": ARTICLE}
+    for url, text in pages.items():
+        save_page_text(tmp_path / PAGE_TEXT_DIR, url, text)
+    kinds = {text_file_name(url): "pdf" if url.endswith(".pdf") else "html" for url in pages}
+    checker = PageChecker(tmp_path, {}, kinds)
+
+    def check(url, quote, address=""):
+        row = {"source_id": text_file_name(url).removesuffix(".txt.gz"), "quoted_evidence_short": quote,
+               "stated_address": address, "stated_coordinates": ""}
+        checker.check(row)
+        return row["quote_on_page"], row["location_on_page"]
+
+    missing, title, address = "Fue clausurado en su totalidad el basurero municipal", "Clausuran en su totalidad basurero municipal", "Carretera Veracruz-Xalapa, El Guayabo"
+    assert check("https://xeu.example/menu", missing, address) == (NO_PAGE_TEXT, NO_PAGE_TEXT)
+    assert check("https://xeu.example/menu", title) == (FOUND, "")
+    assert check("https://xeu.example/menu.pdf", missing, address) == (NOT_FOUND, NOT_FOUND)
+    assert check("https://xeu.example/nota", "basurero municipal de Veracruz fue abierto en 1990") == (NOT_FOUND, "")
+
+
+def test_site_review_says_why_a_page_had_no_automatic_check_and_found_values_keeps_the_verdict(tmp_path):
+    from waste_ai_search.link_check import LINK_CHECK_FILE, LinkResult, save_results
+    from waste_ai_search.page_text import text_file_name
+
+    run_dir = tmp_path / "run"
+    write_csv_records(run_dir / "seed.csv", [seed("9233", "Veracruz Sanitary Landfill", 19.2329, -96.2254, iso3="MEX")], seed_headers())
+    urls = {
+        "refused": "https://oem.example/nota", "scan": "https://gob.example/acta.pdf",
+        "menu": "https://xeu.example/menu", "read": "https://diario.example/nota",
+    }
+    raw = run_dir / "raw_foundry_responses"
+    raw.mkdir(parents=True)
+    (raw / "site_9233.json").write_text(json.dumps({"site_id": "9233", "sources": [
+        source(url, [value("operator", "Ayuntamiento de Veracruz", "Fue clausurado en su totalidad el basurero municipal")],
+               name="Basurero municipal de Veracruz", source_type="News report")
+        for url in urls.values()
+    ]}))
+    save_page_text(run_dir / PAGE_TEXT_DIR, urls["menu"], MENU)
+    save_page_text(run_dir / PAGE_TEXT_DIR, urls["read"], ARTICLE)
+    save_results(run_dir / LINK_CHECK_FILE, {
+        urls["refused"]: LinkResult(urls["refused"], "Unverified", "403", urls["refused"]),
+        urls["scan"]: LinkResult(urls["scan"], "OK", "200", urls["scan"], text_kind="pdf",
+                                 text_note="a PDF with no text layer, probably scanned"),
+        urls["menu"]: LinkResult(urls["menu"], "OK", "200", urls["menu"], text_file=text_file_name(urls["menu"]),
+                                 text_kind="html", text_chars=len(MENU)),
+        urls["read"]: LinkResult(urls["read"], "OK", "200", urls["read"], text_file=text_file_name(urls["read"]),
+                                 text_kind="html", text_chars=len(ARTICLE)),
+    })
+    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
+
+    sheet = load_workbook(run_dir / "run_review.xlsx")["Site_Review"]
+    header = [cell.value for cell in sheet[1]]
+    listed = {row["source_url"]: row for row in (dict(zip(header, r)) for r in sheet.iter_rows(min_row=2, values_only=True)) if not row["check"]}
+    assert {name: listed[url]["link_status"] for name, url in urls.items()} == {
+        "refused": "Unverified: the site refuses automated readers (403), so quotes weren't checked",
+        "scan": "OK, but it's a scanned PDF, so quotes weren't checked",
+        "menu": "OK, but its text is only the site's menu, so quotes weren't checked",
+        "read": "OK",
+    }
+    # Its quote isn't flagged on the menu's row, as it was when it read "not found".
+    assert not listed[urls["menu"]]["flags"]
+    found = {row["source_url"]: row for row in rows(run_dir, "found_values.csv")}
+    assert {name: found[url]["link_status"] for name, url in urls.items()} == {
+        "refused": "Unverified", "scan": "OK", "menu": "OK", "read": "OK",
+    }
+    assert (found[urls["menu"]]["quote_on_page"], found[urls["read"]]["quote_on_page"]) == (NO_PAGE_TEXT, FOUND)

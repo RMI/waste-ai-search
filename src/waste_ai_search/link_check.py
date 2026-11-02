@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import socket
 import threading
 import time
@@ -54,6 +55,7 @@ from .page_text import (
     READ_SECONDS,
     RETRIED_NOTES,
     extract_text,
+    little_text,
     save_page_text,
 )
 
@@ -355,6 +357,62 @@ def with_new_text(previous: LinkResult, fresh: LinkResult) -> LinkResult:
         previous.text_file, previous.text_kind = fresh.text_file, fresh.text_kind
         previous.text_chars, previous.text_note = fresh.text_chars, fresh.text_note
     return previous
+
+
+# Why the link check couldn't read a page, as Site_Review's link_status says it (describe_link).
+UNREAD = {
+    "401": "the page needs a login (401)",
+    "403": "the site refuses automated readers (403)",
+    "429": "the site turned away too many requests (429)",
+    "404": "the page is gone (404)",
+    "410": "the page is gone (410)",
+    "TooManyRedirects": "the page redirects in a loop",
+    "ConnectTimeout": "the site timed out",
+    "ReadTimeout": "the site timed out",
+    "Timeout": "the site timed out",
+    "ConnectionError": "the connection to the site failed",
+    "SSLError": "the site's secure connection failed",
+    "DoesNotResolve": "the address doesn't resolve",
+    "BlockedDestination": "the address is an internal one, which is never opened",
+    "InvalidURL": "the link is malformed",
+    "MissingSchema": "the link is malformed",
+    "InvalidSchema": "the link is malformed",
+}
+NOT_CHECKED = "so quotes weren't checked"
+# What the note on a page that gave no text says, without its "not read" (page_text.extract_text).
+_NOT_READ = re.compile(r"^(?:could )?not (?:be )?read\W*|\W+$")
+
+
+def describe_link(result: LinkResult | None, menu_only: bool = False) -> str:
+    """Site_Review's link_status: the link check's verdict, and where it couldn't read the page, why,
+    so an SME knows the page's quotes and location weren't checked against it. "" where the link
+    wasn't checked. `menu_only` says the text kept of a page that loaded is only its menu
+    (on_page.menu_only)."""
+    if result is None:
+        return ""
+    status = result.status
+    if result.verdict != OK:
+        if status in UNREAD:
+            why = UNREAD[status]
+        elif status.isdigit():
+            why = f"the site had a server error ({status})" if status.startswith("5") else f"the site answered {status}"
+        else:
+            why = f"the check failed ({status})"
+        return f"{result.verdict}: {why}, {NOT_CHECKED}"
+    note = result.text_note
+    if menu_only:
+        why = "its text is only the site's menu"
+    elif little_text(note):
+        why = "it has almost no text: it may be built by JavaScript"
+    elif result.text_file:
+        return OK
+    elif "scanned" in note:
+        why = "it's a scanned PDF"
+    elif not note or note == "not read":
+        why = "its text wasn't kept"
+    else:
+        why = f"its text couldn't be read ({_NOT_READ.sub('', note) or note})"
+    return f"OK, but {why}, {NOT_CHECKED}"
 
 
 def load_results(path: Path) -> dict[str, LinkResult]:

@@ -86,7 +86,7 @@ from .schema import (
     parse_tristate_bool,
     validate_foundry_payload,
 )
-from .site_review import site_review_rows
+from .site_review import say_link_status, site_review_rows
 from .workbook_io import write_review_workbook
 
 
@@ -587,7 +587,9 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     # The text the link check kept of each page that loaded: each quote and stated location is
     # checked against it, and one that isn't there is flagged for the SME (on_page.py).
     pages = PageChecker(
-        config.run_dir, {result.text_file: result.text_note for result in link_results.values() if result.text_file}
+        config.run_dir,
+        {result.text_file: result.text_note for result in link_results.values() if result.text_file},
+        {result.text_file: result.text_kind for result in link_results.values() if result.text_file},
     )
 
     # A site may have several cached responses - one per pass - and all of them count as evidence.
@@ -760,7 +762,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "quotes_on_page", "value": describe_results([row.get("quote_on_page", "") for row in found])},
             {"setting": "locations_on_page", "value": describe_results(stated_on_page(evidence_rows))},
         ],
-        site_review=site_review_rows(found, sorting.pairs, sites_by_id),
+        # Where a page couldn't be checked against, its link_status says why.
+        site_review=say_link_status(site_review_rows(found, sorting.pairs, sites_by_id), pages.link_words(link_results)),
         parse_warnings=parse_warnings,
     )
 

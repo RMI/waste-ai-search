@@ -86,6 +86,16 @@ def our_coordinates(site: dict[str, Any]) -> str:
     return format_point(*point) if point is not None else ""
 
 
+def say_link_status(records: list[dict[str, Any]], words: dict[str, str]) -> list[dict[str, Any]]:
+    """Each source row's link_status in words, by its URL (on_page.PageChecker.link_words): where
+    our check couldn't read the page, why, so the SME knows its quotes weren't checked. A value row
+    has none."""
+    for record in records:
+        if record.get(KIND) == SOURCE_ROW and words.get(record.get("source_url", "")):
+            record["link_status"] = words[record["source_url"]]
+    return records
+
+
 def check_label(row: dict[str, Any]) -> str:
     """Which value a value row checks: the attribute, with the year for a yearly attribute, since
     one value is loaded per site and attribute otherwise. With review_id, it names the row."""

@@ -222,7 +222,7 @@ without spaces, such as Chinese, Japanese and Thai, are matched anywhere in the 
 | `partly found` | Not as written, but 80% of its words and every number in it are on the page, or one of its two coordinates is. A quote with a figure the page doesn't have is `not found`, however many of its words are there. |
 | `not found` | Neither. |
 | `not in the part read` | Not found, but only part of the page was read (a long PDF or spreadsheet, a cut body), so it may be in the rest. Not flagged. |
-| `no page text` | No text was kept: the page didn't load, refuses automated reading, is a scan, is built by JavaScript, or wasn't checked. Not flagged. |
+| `no page text` | No text was kept: the page didn't load, refuses automated reading, is a scan, is built by JavaScript, or wasn't checked. Or the page is HTML whose text kept is under 1,000 characters with no line over 100, which is the site's menu, not the article, and the quote or location isn't in it: xeu.mx's page for site 9233 kept 593 characters of menu. Not flagged. |
 
 A quote of fewer than three words ("Open", "Status Operational") is not checked: finding it would
 say nothing. Where a source states both coordinates and an address, the one its point was read from
@@ -235,6 +235,16 @@ Nothing is dropped or downgraded for it, since a page can say something in a way
 follow, in an image or a map, say. An auto-approved source isn't on Site_Review, so its page checks
 are only in `found_values.csv`. Run_Config counts `page_text_kept`, `quotes_on_page` and
 `locations_on_page`.
+
+**Site_Review's `link_status` says why a page wasn't checked.** Where the check couldn't read a page,
+it says so in words rather than as a flag, so the SME knows its quotes weren't checked against it:
+
+- `Unverified: the site refuses automated readers (403), so quotes weren't checked`, or `the site
+  timed out`, `the address doesn't resolve`, `the site had a server error (500)`, and so on;
+- `OK, but it's a scanned PDF, so quotes weren't checked`, or `it has almost no text: it may be built
+  by JavaScript`, or `its text is only the site's menu`.
+
+A page that loaded and was read says `OK`. `found_values.csv` keeps the verdict alone.
 
 **Is a page-reading agent worth adding?** The search agent sees only what Bing hands it, which may be
 part of a page. A second pass, a model reading each kept page for the facility's address or
@@ -1361,7 +1371,7 @@ approving it would do.
 | `site_id`, `site_name`, `original_site_name`, `source_language`, `country_iso3` | **Our site.** `site_name` is our database's name, machine-translated into English; `original_site_name` is the same name before translation, in `source_language`, and blank where it was never translated. The search uses the original, so a source about *EL HONGO* is the right facility even though `site_name` says *THE FUNGUS*. |
 | `our_coordinates` | Where our database puts the site, as `lat, lon`. Paste it into Google Maps' search box. |
 | `our_place` | The municipality and state our site is in, looked up from `our_coordinates`. |
-| `source_url`, `source_title`, `publisher`, `source_tier`, `link_status` | **The source. Open it.** `link_status` says whether the link was checked and found working (`OK`) or couldn't be verified (`Unverified`, usually a site refusing automated checks, so it may still open for you). |
+| `source_url`, `source_title`, `publisher`, `source_tier`, `link_status` | **The source. Open it.** `link_status` is `OK` where our check opened the page and read it. Where it couldn't, it says why, so you know none of its quotes were checked: `Unverified: the site refuses automated readers (403), so quotes weren't checked` (it may still open for you), or `OK, but it's a scanned PDF, so quotes weren't checked`. |
 | `facility_name_in_source`, `facility_name_english`, `source_address`, `source_place`, `stated_coordinates` | The facility the source describes, as the source writes it: its name, address, town and state, and coordinates or grid reference; `facility_name_english` is the name in English. |
 | `source_coordinates`, `coordinates_from`, `distance_km`, `location_note` | Where the source places the facility, as `lat, lon`: paste it into Google Maps beside `our_coordinates`. `coordinates_from` says what it came from: coordinates the source states, a grid reference, or its address placed on the building or only on the street. A street point can be a kilometre or more off. `distance_km` is how far it is from our site. Where the source states a location but `source_coordinates` is blank, `location_note` says why (too coarse, its address and coordinates disagree, copied from the prompt, a postcode centroid), and `distance_km`, if filled, is roughly how far it is. |
 | `flags` | Why the row needs a second look, shaded where there are any (see below). |

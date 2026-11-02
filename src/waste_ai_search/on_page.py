@@ -18,7 +18,7 @@ read as "percent", and the usual road abbreviations written out ("Rd" is "road")
 | partly found | Not as written, but 80% of its words, and every number in it, are on the page; or one of its two coordinates is. |
 | not found | Neither. A quote with a number the page doesn't have is not found, however many of its words are there. |
 | not in the part read | Not found, but the link check read only part of the page, so it may be in the rest. Not flagged. |
-| no page text | The link check kept no text for the page: it didn't load, refuses automated reading, is a scan, is built by JavaScript, or wasn't checked. Not flagged. |
+| no page text | The link check kept no text for the page: it didn't load, refuses automated reading, is a scan, is built by JavaScript, or wasn't checked. Or the text it kept of an HTML page is only the site's menu, which the quote or location isn't in. Not flagged. |
 
 A quote of fewer than three words ("Open", "Status Operational") is not checked: finding it says
 nothing.
@@ -32,8 +32,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from .link_check import LinkResult, describe_link
 from .locate import COORDINATES, GRID_REFERENCE, ROOFTOP, STREET, haversine_km, parse_coordinates
-from .page_text import PAGE_TEXT_DIR, little_text, read_in_part, read_page_text
+from .page_text import HTML, PAGE_TEXT_DIR, little_text, read_in_part, read_page_text
 from .payload import PART_SEPARATOR
 
 
@@ -52,6 +53,12 @@ MIN_QUOTE_WORDS = 3
 NEARBY_KM = 0.25
 # How many numbers on one page are tried as coordinates: a register can hold thousands.
 MAX_CANDIDATES = 5000
+# The text kept of an HTML page this short, with no line longer than MENU_LINE_CHARS, is the site's
+# menu, not the article, which was built after the page loaded or held back from automated readers.
+# xeu.mx's page for site 9233 kept 593 characters of menu, its longest line 80, so its three quotes
+# read "not found". A quote or location missing from it says nothing.
+MENU_PAGE_CHARS = 1000
+MENU_LINE_CHARS = 100
 
 _ELLIPSIS = re.compile(r"\.\s?\.\s?\.|…|\[\s*\.\.\.\s*\]")
 _NOT_WORD = re.compile(r"[\W_]+")
@@ -235,6 +242,11 @@ def location_on_page(
     return ""
 
 
+def menu_only(text: str) -> bool:
+    """Whether the text kept of a page is only the site's menu: short, with no line of prose."""
+    return len(text) < MENU_PAGE_CHARS and all(len(line) <= MENU_LINE_CHARS for line in text.split("\n"))
+
+
 def _point(row: dict[str, Any]) -> tuple[float, float] | None:
     try:
         return float(row["located_latitude"]), float(row["located_longitude"])
@@ -247,11 +259,13 @@ class PageChecker:
 
     `notes` maps each kept text file to the link check's note on it: a page that gave so little text
     it is probably built by JavaScript counts as no text, and on a page read only in part, something
-    not found may be in the rest."""
+    not found may be in the rest. `kinds` maps it to the kind of page it was: on an HTML page whose
+    text is only the site's menu (menu_only), something not found counts as no page text."""
 
-    def __init__(self, run_dir: Path, notes: dict[str, str] | None = None) -> None:
+    def __init__(self, run_dir: Path, notes: dict[str, str] | None = None, kinds: dict[str, str] | None = None) -> None:
         self.directory = run_dir / PAGE_TEXT_DIR
         self.notes = notes or {}
+        self.kinds = kinds or {}
         self.load = lru_cache(maxsize=256)(self._load)
 
     def _load(self, source_id: str) -> Page | None:
@@ -272,7 +286,26 @@ class PageChecker:
         if read_in_part(self.notes.get(f"{source_id}.txt.gz", "")):
             quote = NOT_IN_PART_READ if quote in (NOT_FOUND, PARTLY) else quote
             location = NOT_IN_PART_READ if location in (NOT_FOUND, PARTLY) else location
+        elif self.menu_only(source_id):
+            quote = NO_PAGE_TEXT if quote in (NOT_FOUND, PARTLY) else quote
+            location = NO_PAGE_TEXT if location in (NOT_FOUND, PARTLY) else location
         row["quote_on_page"], row["location_on_page"] = quote, location
+
+    def menu_only(self, source_id: str) -> bool:
+        """Whether a page is HTML whose kept text is only the site's menu (menu_only)."""
+        page = self.load(source_id)
+        return page is not None and self.kinds.get(f"{source_id}.txt.gz") == HTML and menu_only(page.raw)
+
+    def link_words(self, results: dict[str, LinkResult]) -> dict[str, str]:
+        """Site_Review's link_status for each page the link check saw, by the URL its rows carry,
+        the one that loaded: its verdict, and why its quotes weren't checked where they weren't
+        (link_check.describe_link)."""
+        return {
+            result.resolved_url: describe_link(
+                result, bool(result.text_file) and self.menu_only(result.text_file.removesuffix(".txt.gz"))
+            )
+            for result in results.values()
+        }
 
 
 def describe_results(results: list[str]) -> str:
