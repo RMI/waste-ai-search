@@ -1580,10 +1580,10 @@ noise-level.
 
 **What each search did is kept.** The run log's `tool_calls` counts each site's calls of the web
 search tool: its searches, and the pages it opened or found text in, every attempt added up like
-`web_searches`. The response saved for each site lists them in order, in `_search_actions`: each
-search with its queries, and each page with its URL and any text it looked for, each with the
-attempt that made it, as each attempt has its own cap. Nothing reads them back. They show how often
-the cap binds, and which pages the agent opened.
+`web_searches`. The response saved for each site lists them in order, in `_search_actions`: a search
+with its queries, a page with its URL and any text it looked for, and with each the attempt that made
+it, since every attempt has its own cap. Nothing reads them back. They show how often the cap binds,
+and which pages the agent opened.
 
 ### If a site could not be searched
 
