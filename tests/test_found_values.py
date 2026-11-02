@@ -434,6 +434,102 @@ def test_a_lead_keeps_its_value_date_quote_note_and_reason_however_the_agent_nam
     assert {row["status"] for row in found} == {NOT_USED}
 
 
+# Two of gpt-5.4's leads as it wrote them: whole sources. At 4005 in round 2, a news report of the
+# state regulator closing La Estación, with its values in a list, each with its own note; at 6781 in
+# round 1, a page about another landfill, with its reason as an "issue". Read as other leads are,
+# each was a bare link.
+GPT54_4005 = {
+    "url": "https://www.digitalmex.mx/municipios/story/69835/clausuran-relleno-sanitario-estacion-protestas-anos-denuncias-vecinos-calimaya",
+    "source_title": "Clausuran relleno sanitario La Estación tras protestas y años de denuncias de vecinos de Calimaya",
+    "publisher": "DigitalMex",
+    "source_type": "News report",
+    "publication_date": "2026-08-12",
+    "language": "local language",
+    "paywall_flag": False,
+    "facility_name_in_source": "La Estación",
+    "facility_name_english": "La Estación",
+    "stated_address": "",
+    "stated_coordinates": "",
+    "stated_municipality": "Calimaya y San Antonio la Isla",
+    "stated_state": "Estado de México",
+    "values": [
+        {
+            "attribute_name": "facility_status", "value": "Inactive", "unit": "", "value_basis": "Direct",
+            "confidence_score": "Low", "value_date": "2026-08-12",
+            "evidence_summary": (
+                "News says PROPAEM clausured the landfill on 2026-08-12, but this source names the site as La "
+                "Estación and does not link it to RED RECOLECTOR SA. DE CV."
+            ),
+            "search_terms_used": "\"La Estación\" relleno sanitario Calimaya San Antonio la Isla operador",
+            "quoted_evidence_short": (
+                "La Procuraduría de Protección al Ambiente del Estado de México (PROPAEM) clausuró este miércoles el "
+                "relleno sanitario La Estación, ubicado en los límites de Calimaya y San Antonio la Isla"
+            ),
+            "planned": False, "not_municipal": False,
+        },
+        {
+            "attribute_name": "closing_year", "value": "2026", "unit": "year", "value_basis": "Direct",
+            "confidence_score": "Low", "value_date": "2026-08-12",
+            "evidence_summary": "Closure reported on 2026-08-12, but identity linkage to RED RECOLECTOR SA. DE CV. is unconfirmed.",
+            "search_terms_used": "\"La Estación\" relleno sanitario Calimaya San Antonio la Isla operador",
+            "quoted_evidence_short": "PROPAEM) clausuró este miércoles el relleno sanitario La Estación",
+            "planned": False, "not_municipal": False,
+        },
+        {
+            "attribute_name": "facility_type", "value": "Sanitary Landfill", "unit": "", "value_basis": "Direct",
+            "confidence_score": "Low", "value_date": "2026-08-12",
+            "evidence_summary": (
+                "Source explicitly calls La Estación a relleno sanitario, but does not confirm it is the WasteMAP "
+                "target named RED RECOLECTOR SA. DE CV."
+            ),
+            "search_terms_used": "\"La Estación\" relleno sanitario Calimaya San Antonio la Isla operador",
+            "quoted_evidence_short": "el relleno sanitario La Estación",
+            "planned": False, "not_municipal": False,
+        },
+    ],
+}
+GPT54_6781 = {
+    "url": "https://periodismohoy.com/relleno-sanitario-chiltepeque-sigue-operando-con-restricciones/",
+    "source_title": "Relleno sanitario de Chiltepeque sigue operando pero con restricciones por fallas ambientales",
+    "publisher": "PeriodismoHoy",
+    "source_type": "News report",
+    "publication_date": "2026-10-26",
+    "language": "local language",
+    "paywall_flag": False,
+    "facility_name_in_source": "relleno sanitario de Chiltepeque",
+    "facility_name_english": "Chiltepeque sanitary landfill",
+    "stated_address": "",
+    "stated_coordinates": "",
+    "stated_municipality": "Puebla",
+    "stated_state": "Puebla",
+    "issue": (
+        "Recent status evidence, but explicitly about the Puebla city landfill at Santo Tomás Chautla/Chiltepeque, "
+        "not this Xochiltepec site."
+    ),
+}
+
+
+def test_a_lead_written_as_a_whole_source_gives_each_of_its_values_and_its_issue(tmp_path):
+    estacion = seed("4005", "RED RECOLECTOR SA. DE CV.", 19.167215, -99.586588, "MEX")
+    xochiltepec = seed("6781", "RELLENO SANITARIO XOCHILTEPEC", 18.656165, -98.318337, "MEX")
+    found = rows(arbitrate(tmp_path, [estacion, xochiltepec], {
+        "4005": {"site_id": "4005", "sources": [], "unverified_leads": [GPT54_4005]},
+        "6781": {"site_id": "6781", "sources": [], "unverified_leads": [GPT54_6781]},
+    }))
+    columns = ("site_id", "source_url", "attribute_name", "value", "value_as_written", "value_date", "quote", "agent_note", "status_reason")
+    *estacion_leads, chiltepeque = [tuple(row[column] for column in columns) for row in found]
+    assert estacion_leads == [
+        (
+            "4005", GPT54_4005["url"], given["attribute_name"], given["value"], f"{given['value']} {given['unit']}".strip(),
+            "2026-08-12", given["quoted_evidence_short"], given["evidence_summary"], "The agent reported it as unverified.",
+        )
+        for given in GPT54_4005["values"]
+    ]
+    assert chiltepeque == (
+        "6781", GPT54_6781["url"], "", "", "", "", "", "", f"The agent reported it as unverified: {GPT54_6781['issue']}",
+    )
+
+
 # --- every source stays with the site searched -----------------------------------------------------
 def test_a_source_placing_the_facility_at_another_site_of_ours_stays_with_the_site_searched(tmp_path):
     """The matcher once filed this permit under Brady Road, 0.1 km from where it places the facility.

@@ -439,7 +439,9 @@ def read_listed_candidates(path: Path) -> list[dict[str, str]]:
 # The parts of an unverified lead, and the keys each may come under. The prompt's template names the
 # first of each; responses from before it named them as the agent chose, in 23 shapes in round 2 of
 # the Mexico tests, where reading only the first lost the value and the note of 157 of 174 leads. The
-# reason keys say why the agent didn't stand behind it; the rest of its text is the note.
+# reason keys say why the agent didn't stand behind it; the rest of its text is the note. gpt-5.4 also
+# wrote leads as whole sources, its reason as their "issue" and its values in a list (lead_values),
+# each with its own note.
 LEAD_KEYS = {
     "url": ("url", "source_url", "supporting_url"),
     "attribute_name": ("attribute_name",),
@@ -447,8 +449,8 @@ LEAD_KEYS = {
     "unit": ("unit",),
     "value_date": ("value_date",),
     "quote": ("quoted_evidence_short",),
-    "why_unverified": ("why_unverified", "reason_unverified", "reason"),
-    "lead_summary": ("lead_summary", "summary", "note", "lead", "finding", "description"),
+    "why_unverified": ("why_unverified", "reason_unverified", "reason", "issue"),
+    "lead_summary": ("lead_summary", "summary", "note", "lead", "finding", "description", "evidence_summary"),
 }
 
 
@@ -457,13 +459,22 @@ def lead_part(lead: dict[str, Any], part: str) -> str:
     return next((text for key in LEAD_KEYS[part] if (text := normalize_scalar(lead.get(key)))), "")
 
 
+def lead_values(lead: dict[str, Any]) -> list[dict[str, Any]]:
+    """A lead's values, one lead each: a lead written as a whole source gives each value in its
+    values list with the source's link (4005's DigitalMex closure gave three); any other lead is one."""
+    values = lead.get("values")
+    values = [value for value in values if isinstance(value, dict)] if isinstance(values, list) else []
+    return [{**lead, **value} for value in values] or [lead]
+
+
 def payload_leads(
     cached: list[Path],
     sites_by_id: dict[str, dict[str, Any]],
     run_id: str,
 ) -> list[dict[str, Any]]:
     """The agent's own unverified_leads, which found_values.csv lists as not used: each with its parts
-    (LEAD_KEYS), however the response named them. A lead given as text only is all note.
+    (LEAD_KEYS), however the response named them, and one per value for a lead written as a whole
+    source (lead_values). A lead given as text only is all note.
 
     A lead pointing at a dropped map site is skipped, like a citation of one; extract_evidence
     counts it in the site's parse warnings.
@@ -478,12 +489,15 @@ def payload_leads(
             continue
         for lead in payload["unverified_leads"]:
             if isinstance(lead, dict):
-                parts = {part: lead_part(lead, part) for part in LEAD_KEYS}
-                if dropped_source_site(parts["url"]):
+                if dropped_source_site(lead_part(lead, "url")):
                     continue
+                entries = [{part: lead_part(value, part) for part in LEAD_KEYS} for value in lead_values(lead)]
             else:
-                parts = {**{part: "" for part in LEAD_KEYS}, "lead_summary": normalize_scalar(lead)}
-            out.append({"run_id": run_id, "site_id": site_id, "site_name": normalize_scalar(site.get("site_name")), **parts})
+                entries = [{**{part: "" for part in LEAD_KEYS}, "lead_summary": normalize_scalar(lead)}]
+            out.extend(
+                {"run_id": run_id, "site_id": site_id, "site_name": normalize_scalar(site.get("site_name")), **parts}
+                for parts in entries
+            )
     return out
 
 
