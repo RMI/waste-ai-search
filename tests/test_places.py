@@ -4,7 +4,8 @@ Site 6086, "BASURERO MUNICIPAL" in San Sebastián Tecomaxtlahuaca, Oaxaca, was m
 page about the dump in Tlapa de Comonfort, Guerrero, about 60 km away. No source placed it on a
 map, so the 5 km check never ran. Each prompt now names our site's municipality and state, looked
 up from our coordinates where the seed has none; each source gives the town and state it puts the
-facility in; and Site_Review shows both and flags a source in another state.
+facility in; and Site_Review shows both and flags a source in another state. Since 1 November it
+also asks an SME to check a source in another municipality of our state, and one naming no facility.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import json
 from openpyxl import load_workbook
 
 from waste_ai_search.arbitrate import run_arbitration
+from waste_ai_search.found_values import place_words
 from waste_ai_search.geocoder import (
     SITE_PLACES_FILE,
     load_geocode_cache,
@@ -58,7 +60,10 @@ class Places:
 
     def state(self, text, iso2):
         self.asked.append(text)
-        return {"Gro.": "Guerrero", "Guerrero": "Guerrero", "Oaxaca": "Oaxaca", "Oax.": "Oaxaca"}.get(text, "")
+        return {
+            "Gro.": "Guerrero", "Guerrero": "Guerrero", "Oaxaca": "Oaxaca", "Oax.": "Oaxaca", "Veracruz": "Veracruz",
+            "Ver.": "Veracruz", "Estado de México": "Estado de México", "Chihuahua": "Chihuahua",
+        }.get(text, "")
 
 
 def site(site_id="6086", **extra):
@@ -143,11 +148,11 @@ def seed_row(site_id, name, lat, lon):
     }
 
 
-def source(url, town, state):
+def source(url, town, state, name="basurero municipal"):
     return {
         "url": url, "source_title": "Page", "publisher": "Congreso", "source_type": "Legislative record",
-        "publication_date": "2024-03-01", "facility_name_in_source": "basurero municipal",
-        "facility_name_english": "municipal dump", "stated_address": "", "stated_coordinates": "",
+        "publication_date": "2024-03-01", "facility_name_in_source": name,
+        "facility_name_english": "municipal dump" if name else "", "stated_address": "", "stated_coordinates": "",
         "stated_municipality": town, "stated_state": state,
         "values": [{"attribute_name": "operator", "value": "Ayuntamiento", "unit": "", "value_basis": "Direct",
                     "confidence_score": "High", "value_date": "2024", "evidence_summary": "Says so.",
@@ -155,13 +160,16 @@ def source(url, town, state):
     }
 
 
-def run(tmp_path, sources):
+def run(tmp_path, sources, ours=None, place=("San Sebastián Tecomaxtlahuaca", "Oaxaca")):
+    """Arbitrate one site of ours, 6086 unless `ours` is another seed row, in `place` (its
+    municipality and state), against the sources its search cited."""
+    ours = ours or seed_row("6086", "BASURERO MUNICIPAL", 17.38, -98.021)
     run_dir = tmp_path / "run"
-    write_csv_records(run_dir / "seed.csv", [seed_row("6086", "BASURERO MUNICIPAL", 17.38, -98.021)], seed_headers())
+    write_csv_records(run_dir / "seed.csv", [ours], seed_headers())
     raw = run_dir / "raw_foundry_responses"
     raw.mkdir(parents=True)
-    (raw / "site_6086.json").write_text(json.dumps({"site_id": "6086", "sources": sources}))
-    save_site_places(run_dir, [site(municipality="San Sebastián Tecomaxtlahuaca", admin1="Oaxaca")])
+    (raw / f"site_{ours['site_id']}.json").write_text(json.dumps({"site_id": ours["site_id"], "sources": sources}))
+    save_site_places(run_dir, [site(ours["site_id"], municipality=place[0], admin1=place[1])])
     config = PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v")
     locate_run(config, geocoder=Places())
     run_arbitration(config)
@@ -196,3 +204,70 @@ def test_a_source_in_another_state_is_flagged_beside_both_places(tmp_path):
     }
     found = list(csv.DictReader((run_dir / "found_values.csv").open(encoding="utf-8-sig")))
     assert {row["source_place"] for row in found} == {"Tlapa de Comonfort, Gro.", "Tecomaxtlahuaca, Oax.", "Somewhere"}
+
+
+def test_a_source_in_another_state_says_so_in_its_status_reason(tmp_path):
+    """It once read "it says the site is Not a Waste Facility"."""
+    run_dir = run(tmp_path, [source("https://congreso.example/tlapa", "Tlapa de Comonfort", "Gro.")])
+    [row] = list(csv.DictReader((run_dir / "found_values.csv").open(encoding="utf-8-sig")))
+    assert row["status_reason"].endswith("filling an empty field; it puts the facility in another state, Guerrero.")
+
+
+# --- municipalities and names ---------------------------------------------------------------------
+VERACRUZ = seed_row("9233", "VERACRUZ SANITARY LANDFILL", 19.232865, -96.225432)
+
+
+def test_a_source_in_another_municipality_of_our_state_is_flagged_for_an_sme_to_check(tmp_path):
+    """At 9233 gpt-5.4 returned four pages about the El Guayabo landfill in Medellín de Bravo for our
+    landfill in Veracruz, judged not ours: the same state, and no address to place. Their
+    municipality shares no word with ours or our site's name. A landfill can serve one town from the
+    next, so the flag only asks an SME to check; flagged pages come first."""
+    run_dir = run(tmp_path, [
+        source("https://veracruz.example/relleno", "Veracruz", "Ver.", name="relleno sanitario de Veracruz"),
+        source("https://oem.example/el-guayabo", "Medellín de Bravo", "Veracruz", name="relleno sanitario El Guayabo"),
+    ], ours=VERACRUZ, place=("Veracruz", "Veracruz"))
+    rows = site_review(run_dir)
+    assert [(row["source_url"], row["flags"]) for row in rows] == [
+        ("https://oem.example/el-guayabo", "the source puts the site in Medellín de Bravo; ours is in Veracruz - check it is our site"),
+        ("https://veracruz.example/relleno", None),
+    ]
+    found = {row["source_url"]: row for row in csv.DictReader((run_dir / "found_values.csv").open(encoding="utf-8-sig"))}
+    assert found["https://oem.example/el-guayabo"]["status_reason"].endswith(
+        "filling an empty field; it puts the facility in Medellín de Bravo, and our site is in Veracruz."
+    )
+    config = {row[0]: row[1] for row in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].values}
+    assert config["pairs_with_warnings"] == "1: in another municipality 1"
+
+
+def test_a_source_in_the_municipality_our_sites_name_gives_is_not_flagged(tmp_path):
+    """Our point for 3892 geocodes to Acolman, but the site's name says Ecatepec, where its sources
+    put it. A source naming no municipality, only our state, isn't compared."""
+    chiconautla = seed_row("3892", "SANTA MARIA CHICONAUTLA MUNICIPAL LANDFILL ECATEPEC DE MORELOS", 19.641089, -98.976384)
+    run_dir = run(tmp_path, [
+        source("https://ecatepec.example/chiconautla", "Ecatepec", "Estado de México", name="vertedero municipal de Chiconautla"),
+        source("https://edomex.example/vertederos", "", "Estado de México", name="vertedero de Chiconautla"),
+    ], ours=chiconautla, place=("Acolman", "Estado de México"))
+    assert [(row["our_place"], row["source_place"], row["flags"]) for row in site_review(run_dir)] == [
+        ("Acolman, Estado de México", "Ecatepec, Estado de México", None),
+        ("Acolman, Estado de México", "Estado de México", None),
+    ]
+
+
+def test_a_source_naming_no_facility_is_flagged_for_an_sme_to_check(tmp_path):
+    """All six of round 2's pages that named no facility were gpt-5.4's, and none was judged ours."""
+    bocoyna = seed_row("247", "BOCOYNA LANDFILL", 27.860113, -107.585116)
+    run_dir = run(tmp_path, [
+        source("https://chihuahua.example/relleno", "Bocoyna", "Chihuahua", name="relleno sanitario de Bocoyna"),
+        source("https://congreso.example/iniciativa", "Bocoyna", "Chihuahua", name=""),
+    ], ours=bocoyna, place=("Bocoyna", "Chihuahua"))
+    assert [(row["source_url"], row["flags"]) for row in site_review(run_dir)] == [
+        ("https://congreso.example/iniciativa", "the source names no facility"),
+        ("https://chihuahua.example/relleno", None),
+    ]
+
+
+def test_places_are_compared_by_their_words_without_accents_case_or_words_like_ciudad():
+    assert place_words("Medellín de Bravo") == {"medellin", "bravo"}
+    assert place_words("H. Matamoros") == place_words("Heroica Matamoros") == {"matamoros"}
+    assert place_words("Ciudad Obregón") == {"obregon"}
+    assert place_words("Municipio de Ecatepec de Morelos") == {"ecatepec", "morelos"}

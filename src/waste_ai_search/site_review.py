@@ -71,6 +71,7 @@ LOCATION_FLAGS = {
 }
 FAR_AWAY_FLAG = f"more than {EXCEPTION_KM:g} km from our site"
 OTHER_STATE_FLAG = "in a different state from our site"
+NO_NAME_FLAG = "the source names no facility"
 NOT_A_FACILITY_FLAG = f"says {NOT_A_WASTE_FACILITY}"
 PLANNED_FLAG = "planned: a closure the page expects, not one that has happened"
 # Said on a source row, which lists every value the page gives, of a key value an SME checks on
@@ -204,8 +205,9 @@ def evidence(row: dict[str, Any]) -> str:
 def pair_flags(
     pair: Pair, rows: list[dict[str, Any]], unchecked: list[dict[str, Any]], closed: list[str]
 ) -> list[str]:
-    """What an SME should look at twice in a pair: what once sent a Tier 1-2 source to an SME, and
-    what the source's own page doesn't bear out.
+    """What an SME should look at twice in a pair: what once sent a Tier 1-2 source to an SME, where
+    the source places the facility apart from our site, whether it names one, and what the source's
+    own page doesn't bear out.
 
     A quote is checked for each value approving would load with no row of its own (`unchecked`), and
     named by its attribute; a key value's is flagged on its own row. The location the source states
@@ -228,6 +230,14 @@ def pair_flags(
         flags.append(FAR_AWAY_FLAG)
     if pair.other_state:
         flags.append(f"{OTHER_STATE_FLAG}: the source says {pair.other_state}")
+    if pair.other_municipality:
+        # A prompt to look, not a reason to reject: a landfill can serve one town from the next.
+        flags.append(
+            f"the source puts the site in {pair.other_municipality}; ours is in {pair.our_municipality} - "
+            "check it is our site"
+        )
+    if not pair.name:
+        flags.append(NO_NAME_FLAG)
     if pair.not_a_waste_facility:
         # The likeliest false verdict is a closed landfill misread as never a waste site.
         if closed:

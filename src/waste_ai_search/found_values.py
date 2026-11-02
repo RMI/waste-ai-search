@@ -25,6 +25,9 @@ What once sent a Tier 1-2 pair to SMEs is now a warning on its row (Pair.excepti
 - the source places the facility more than EXCEPTION_KM from our site's coordinates. A source
   that gives no coordinates, or a site with none, is not checked, as in batch 1. Coordinates too
   coarse to use, or that disagree with the source's own address, are still checked (Pair.measure);
+- the source puts the facility in another state than ours, or in the same state but a municipality
+  that shares no word with ours or our site's name;
+- the source names no facility;
 - the source says the site is "Not a Waste Facility".
 
 An empty field is our value for that site, attribute and year, as arbitration.site_for_year reads
@@ -39,6 +42,8 @@ for accept-reviews to fill, with value_decision and corrected_value.
 from __future__ import annotations
 
 import hashlib
+import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -84,11 +89,16 @@ EXCEPTION_KM = 5.0
 SAME_PAGE = "same page and name as another site"
 FAR_AWAY = f"more than {EXCEPTION_KM:g} km away"
 OTHER_STATE = "in another state"
+OTHER_MUNICIPALITY = "in another municipality"
+NO_NAME = "names no facility"
 SAYS_NOT_A_FACILITY = NOT_A_WASTE_FACILITY
-EXCEPTIONS = [SAME_PAGE, FAR_AWAY, OTHER_STATE, SAYS_NOT_A_FACILITY]
+EXCEPTIONS = [SAME_PAGE, FAR_AWAY, OTHER_STATE, OTHER_MUNICIPALITY, NO_NAME, SAYS_NOT_A_FACILITY]
 # Not a column: a site's or a citation's state as the geocoder names it (locate.canonical_state),
 # set by arbitration from the run's state_names.json.
 STATE_NAME = "_state"
+# Words that don't tell one place from another, left out where a source's municipality is compared
+# with ours and our site's name: "Ciudad Obregón", "Municipio de Ecatepec", "H. Matamoros".
+PLACE_FILLER_WORDS = {"ciudad", "municipio", "de", "del", "la", "las", "los", "el", "y", "h", "heroica"}
 
 # Why a value is not used, as Run_Config counts them.
 CONFIRMS = "confirms our value"
@@ -161,6 +171,10 @@ class Pair:
     roughly: bool = False
     # The state the source puts the facility in, where that isn't our site's state (measure).
     other_state: str = ""
+    # The municipality the source puts the facility in, where it shares no word with ours or our
+    # site's name, in the same state, and ours (measure).
+    other_municipality: str = ""
+    our_municipality: str = ""
 
     @property
     def review_id(self) -> str:
@@ -200,6 +214,16 @@ class Pair:
         ours_state = normalize_scalar(site.get(STATE_NAME))
         theirs_state = next((normalize_scalar(c.get(STATE_NAME)) for c in self.citations if normalize_scalar(c.get(STATE_NAME))), "")
         self.other_state = theirs_state if ours_state and theirs_state and not same_state(ours_state, theirs_state) else ""
+        # A page about the dump a town uses now may not be about ours: at 9233 four pages put El
+        # Guayabo in Medellín de Bravo, and ours is in Veracruz. But a landfill can serve one town
+        # from the next, and our municipality is the geocoder's, which can name the city rather than
+        # the municipio, so this only asks an SME to check. A source in another state has its own flag.
+        ours_town = normalize_scalar(site.get("municipality"))
+        theirs_town = next((normalize_scalar(c.get("stated_municipality")) for c in self.citations if normalize_scalar(c.get("stated_municipality"))), "")
+        theirs_words = place_words(theirs_town)
+        ours_words = place_words(ours_town) | place_words(site.get("site_name")) | place_words(site.get("original_site_name"))
+        apart = ours_town and theirs_words and not theirs_words & ours_words and not self.other_state
+        self.other_municipality, self.our_municipality = (theirs_town, ours_town) if apart else ("", "")
         ours = seed_point(site)
         if ours is None:
             return
@@ -224,6 +248,10 @@ class Pair:
             found.append(FAR_AWAY)
         if self.other_state:
             found.append(OTHER_STATE)
+        if self.other_municipality:
+            found.append(OTHER_MUNICIPALITY)
+        if not self.name:
+            found.append(NO_NAME)
         if self.not_a_waste_facility:
             found.append(SAYS_NOT_A_FACILITY)
         return found
@@ -246,6 +274,12 @@ class Pair:
                 parts.append(f"the same page and name are also cited for site{'s' if len(self.shared_with) > 1 else ''} {others}")
             elif exception == FAR_AWAY:
                 parts.append(f"it places the facility {'roughly ' if self.roughly else ''}{_km(self.distance_km)} from our site")
+            elif exception == OTHER_STATE:
+                parts.append(f"it puts the facility in another state, {self.other_state}")
+            elif exception == OTHER_MUNICIPALITY:
+                parts.append(f"it puts the facility in {self.other_municipality}, and our site is in {self.our_municipality}")
+            elif exception == NO_NAME:
+                parts.append("it names no facility")
             else:
                 parts.append(f"it says the site is {NOT_A_WASTE_FACILITY}")
         return "; ".join(parts) + "."
@@ -259,6 +293,13 @@ class Sorted:
     rows: list[dict[str, Any]]
     pairs: list[Pair]
     shared: dict[tuple[str, Any], list[dict[str, Any]]]
+
+
+def place_words(text: Any) -> set[str]:
+    """The words of a place's name, or of our site's, lowercased and without accents, but for
+    PLACE_FILLER_WORDS."""
+    plain_text = unicodedata.normalize("NFKD", normalize_scalar(text)).encode("ascii", "ignore").decode().lower()
+    return set(re.findall(r"[a-z0-9]+", plain_text)) - PLACE_FILLER_WORDS
 
 
 def same_name(name: Any) -> Any:

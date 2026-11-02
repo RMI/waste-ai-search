@@ -147,7 +147,8 @@ def test_even_a_tier_1_verdict_is_routed_to_review():
     row = row_for(found, "facility_type")
 
     assert row["status"] == SME_REVIEW
-    assert row["status_reason"] == f"Tier 1 source, filling an empty field; it says the site is {NOT_A_WASTE_FACILITY}."
+    # An attribute-first response names a facility only where it gave one as a value.
+    assert row["status_reason"] == f"Tier 1 source, filling an empty field; it names no facility; it says the site is {NOT_A_WASTE_FACILITY}."
 
 
 def test_an_ordinary_tier_1_facility_type_goes_to_an_sme_with_no_value_check():

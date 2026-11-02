@@ -109,7 +109,7 @@ def test_coarse_coordinates_are_a_hint_that_places_nothing_but_is_still_measured
     assert (row["source_coordinates"], row["coordinates_from"], row["distance_km"]) == ("", "", "0.89")
     assert "fewer than 3 decimals" in row["location_note"] and row["status"] == "SME review"
 
-    far = operator({**REGULATOR, "stated_coordinates": "32.61, -116.31"})
+    far = operator({**REGULATOR, "facility_name_in_source": "Tiradero El Hongo", "stated_coordinates": "32.61, -116.31"})
     [row] = found(arbitrate_el_hongo(tmp_path / "far", {"sources": [far]}))
     assert (row["source_coordinates"], row["distance_km"], row["status"]) == ("", "13.76", "SME review")
     assert row["status_reason"] == "Tier 1 source, filling an empty field; it places the facility roughly 14 km from our site."
