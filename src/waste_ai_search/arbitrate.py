@@ -69,7 +69,17 @@ from .payload import (
     source_id_for,
 )
 from .prompt_builder import needs_contradiction_check
-from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
+from .run_context import (
+    FOLLOW_UP_PASS,
+    PASS_SEPARATOR,
+    PipelineConfig,
+    load_json,
+    pass_label_from_path,
+    raw_dir,
+    raw_response_path,
+    search_tool_failed,
+    site_id_from_path,
+)
 from .searchable_names import SKIPPED_NAME_CLASSES, describe_counts, recorded_skips, site_name_class
 from .snapshot import recorded_run
 from .schema import (
@@ -603,6 +613,17 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     source_entries: list[dict[str, Any]] = []
     parse_warnings: list[dict[str, Any]] = []
     retry_sites: list[dict[str, Any]] = []
+    # Who searched each site and pass, for its retry; and the passes that raised and saved nothing,
+    # which no response file shows (a Sol pass at the 240 s limit, say).
+    log_rows = read_run_log(config.run_dir)
+    agents = {(row.get("site_id", ""), row.get("pass_label") or ""): row.get("agent_id") or "" for row in log_rows}
+    for row in log_rows:
+        site_id, label = row.get("site_id", ""), row.get("pass_label") or ""
+        if row.get("status") == "Failed" and not raw_response_path(config.run_dir, site_id, label).exists():
+            retry_sites.append(retry_row(
+                sites_by_id.get(site_id, {}), site_id, label, agents.get((site_id, label), ""),
+                "The search raised an error and saved no response.", row.get("error_message"),
+            ))
 
     def warn(site_id: str, site: dict[str, Any], warning: str) -> None:
         parse_warnings.append(
@@ -618,24 +639,23 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         payloads = []
         for path in paths:
             try:
-                payloads.append(load_json(path))
+                one = load_json(path)
             except (OSError, json.JSONDecodeError) as exc:
                 warn(site_id, site, f"Unreadable cached response {path.name}: {exc}")
+                continue
+            payloads.append(one)
+            # Each pass on its own: Terra's sources must not hide Sol's failed search, and the retry
+            # must name the pass that failed, or --force would replace the first pass's answer.
+            if is_empty(one) and search_tool_failed(one):
+                label = pass_label_from_path(path)
+                retry_sites.append(retry_row(
+                    site, site_id, label, agents.get((site_id, label), ""),
+                    "Agent reported its web-search tool failed; no search was performed.", one.get("search_notes"),
+                ))
+                warn(site_id, site, "Search tool failure reported by the agent; retry this site.")
         if not payloads:
             continue
         payload = merge_payloads(payloads)
-
-        if is_empty(payload) and search_tool_failed(payload):
-            retry_sites.append(
-                {
-                    "site_id": site_id,
-                    "site_name": normalize_scalar(site.get("site_name")),
-                    "country_iso3": normalize_scalar(site.get("country_iso3")),
-                    "reason": "Agent reported its web-search tool failed; no search was performed.",
-                    "search_notes": normalize_scalar(payload.get("search_notes"))[:400],
-                }
-            )
-            warn(site_id, site, "Search tool failure reported by the agent; retry this site.")
 
         for warning in validate_foundry_payload(payload, normalize_scalar(site.get("country_iso3"))):
             warn(site_id, site, warning)
@@ -710,7 +730,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     write_csv_records(paths["sources"], sources, SOURCES_HEADERS)
     write_csv_records(paths["warnings"], parse_warnings, PARSE_WARNING_HEADERS)
     write_csv_records(
-        paths["retry"], retry_sites, ["site_id", "site_name", "country_iso3", "reason", "search_notes"]
+        paths["retry"], retry_sites, ["site_id", "site_name", "country_iso3", "pass_label", "agent", "reason", "search_notes"]
     )
     # For ingestion, which has no path for either: landfills none of our sites is, which only an
     # SME's decision lists now, so arbitrating again keeps theirs and drops any an earlier
@@ -770,18 +790,16 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
         parse_warnings=parse_warnings,
     )
 
-    print_summary(by_site, found, sorted_settings, parse_warnings, retry_sites)
+    print_summary(by_site, found, sorted_settings, parse_warnings, retry_sites, config.run_id)
     return paths
 
 
 def cost_settings(run_dir: Path) -> list[dict[str, Any]]:
     """What the run's searches used and cost, every pass and retry included, from its run log."""
-    path = run_dir / RUN_LOG_FILE
-    if not path.exists():
+    rows = read_run_log(run_dir)
+    if not rows:
         return []
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        cost = run_cost(list(csv.DictReader(handle)))
-    return [{"setting": "search_cost", "value": " ".join(describe_run_cost(cost))}]
+    return [{"setting": "search_cost", "value": " ".join(describe_run_cost(run_cost(rows)))}]
 
 
 def stated_on_page(evidence_rows: list[dict[str, Any]]) -> list[str]:
@@ -794,7 +812,47 @@ def stated_on_page(evidence_rows: list[dict[str, Any]]) -> list[str]:
     return list(seen.values())
 
 
-def print_summary(cached, found, sorted_settings, warnings, retry_sites) -> None:
+def retry_row(site: dict[str, Any], site_id: str, label: str, agent: str, reason: str, notes: Any) -> dict[str, Any]:
+    return {
+        "site_id": site_id,
+        "site_name": normalize_scalar(site.get("site_name")),
+        "country_iso3": normalize_scalar(site.get("country_iso3")),
+        "pass_label": label,
+        "agent": agent,
+        "reason": reason,
+        "search_notes": normalize_scalar(notes)[:400],
+    }
+
+
+def read_run_log(run_dir: Path) -> list[dict[str, Any]]:
+    path = run_dir / RUN_LOG_FILE
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return list(csv.DictReader(handle))
+
+
+def retry_commands(retry_sites: list[dict[str, Any]], run_id: str) -> list[str]:
+    """One command per pass and agent: each pass retried as itself, by the agent that searched it."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    for row in retry_sites:
+        groups.setdefault((row["pass_label"], row["agent"]), []).append(row["site_id"])
+    commands = []
+    for (label, agent), ids in sorted(groups.items()):
+        ids = list(dict.fromkeys(ids))
+        if label == FOLLOW_UP_PASS:
+            # A follow-up asks only the gas attributes, of the refreshed seed: `search` would ask the
+            # first pass's, and its answer would stop `run` ever following the site up again.
+            names = " ".join(f"site_{site_id}{PASS_SEPARATOR}{label}.json" for site_id in ids)
+            commands.append(f"delete raw_foundry_responses/{{{names}}} if present, then run the batch's `run` command again")
+            continue
+        setting = f"AZURE_AI_AGENT_NAME={agent} " if agent else ""
+        flag = f" --pass-label {label}" if label else ""
+        commands.append(f"{setting}uv run waste-ai-search search --run-id {run_id}{flag} --force --site-ids {' '.join(ids)}")
+    return commands
+
+
+def print_summary(cached, found, sorted_settings, warnings, retry_sites, run_id="<run>") -> None:
     from collections import Counter
 
     tiers = Counter(row["source_tier"] for row in found if row.get("source_tier"))
@@ -802,12 +860,13 @@ def print_summary(cached, found, sorted_settings, warnings, retry_sites) -> None
     print(f"Values found:            {len(found)}")
     print(f"Parse warnings:          {len(warnings)}")
     if retry_sites:
-        ids = " ".join(row["site_id"] for row in retry_sites)
         print(
-            f"\n!! {len(retry_sites)} site(s) could not be searched - the agent's search tool failed."
+            f"\n!! {len(retry_sites)} search(es) could not be done - the agent's search tool failed, "
+            "or the search raised an error."
         )
-        print("   These are NOT 'no data found'. Retry them:")
-        print(f"   uv run waste-ai-search search --run-id <run> --force --site-ids {ids}")
+        print("   These are NOT 'no data found'. Retry them, each pass as itself:")
+        for command in retry_commands(retry_sites, run_id):
+            print(f"   {command}")
     print("\nSorted, by site-source pair:")
     for setting in sorted_settings:
         print(f"  {setting['setting']:<20} {setting['value']}")

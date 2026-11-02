@@ -8,6 +8,7 @@ so a page both models cite is one pair to review.
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import replace
 
 import pytest
@@ -170,6 +171,57 @@ def test_a_pass_still_failing_is_retried_as_that_pass_by_the_same_agent(tmp_path
         "--pass-label sol --force --site-ids 2\n"
     ) in capsys.readouterr().out
     assert search.agent_setting(object()) == ""  # a client that names no agent
+
+
+def test_a_pass_that_raised_is_retried_as_that_pass_too(tmp_path, monkeypatch, capsys):
+    """A search that raises (the 240 s site limit, a 429) saves nothing; `run` searches only the first
+    pass again, so a Sol pass that raised would otherwise go without a retry or a word."""
+    class Raising:
+        config = FoundryClientConfig(agent_name="waste-ai-search-gpt-5-6-sol")
+
+        def search_site(self, site, prompt):  # noqa: ARG002
+            raise TimeoutError("site limit")
+
+    monkeypatch.setattr(search, "get_client", lambda _config: Raising())
+    config = PipelineConfig(input_csv=seed(tmp_path), run_dir=tmp_path / "run", run_id="batch3", site_delay_seconds=0,
+                            site_ids=["2"])
+    search.run_search(config, pass_label="sol")
+    assert (
+        "AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search --run-id batch3 "
+        "--pass-label sol --force --site-ids 2"
+    ) in capsys.readouterr().out
+
+
+def test_arbitration_lists_each_failed_pass_with_its_label_and_agent(tmp_path, capsys):
+    """Terra's sources don't hide Sol's failed search, a pass that raised and saved nothing is listed
+    from the run log, and each retry names its pass and the agent that searched it."""
+    run_dir = tmp_path / "run"
+    raw = run_dir / "raw_foundry_responses"
+    raw.mkdir(parents=True)
+    write_csv_records(run_dir / "seed.csv", list(csv.DictReader(seed(tmp_path).open(encoding="utf-8"))),
+                      ["site_id", "internal_facility_id", "site_name", "country_iso3", "latitude", "longitude",
+                       "contributing_data_sources", "reference_year", "annual_incoming_waste_metric_tonnes"])
+    failed = {"sources": [], "search_notes": "The search_query tool did not return usable results."}
+    (raw / "site_2.json").write_text(json.dumps({"site_id": "2", "sources": [BOTH]}))
+    (raw / "site_2__sol.json").write_text(json.dumps({"site_id": "2", **failed}))
+    (raw / "site_1.json").write_text(json.dumps({"site_id": "1", "sources": [TERRA_ONLY]}))
+    write_csv_records(run_dir / "foundry_run_log.csv", [
+        {"site_id": "2", "pass_label": "", "status": "Succeeded", "agent_id": "waste-ai-search-gpt-5-6-terra"},
+        {"site_id": "2", "pass_label": "sol", "status": "Search tool failed after 2 attempt(s)",
+         "agent_id": "waste-ai-search-gpt-5-6-sol"},
+        {"site_id": "1", "pass_label": "", "status": "Succeeded", "agent_id": "waste-ai-search-gpt-5-6-terra"},
+        {"site_id": "1", "pass_label": "sol", "status": "Failed", "agent_id": "waste-ai-search-gpt-5-6-sol",
+         "error_message": "TimeoutError: site limit"},
+    ], FOUNDRY_RUN_LOG_HEADERS)
+    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="batch3", dataset_version="v"))
+    retry = list(csv.DictReader((run_dir / "sites_to_retry.csv").open(encoding="utf-8-sig")))
+    assert sorted((row["site_id"], row["pass_label"], row["agent"]) for row in retry) == [
+        ("1", "sol", "waste-ai-search-gpt-5-6-sol"), ("2", "sol", "waste-ai-search-gpt-5-6-sol"),
+    ]
+    assert (
+        "AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search --run-id batch3 "
+        "--pass-label sol --force --site-ids 1 2"
+    ) in capsys.readouterr().out
 
 
 def test_the_search_command_takes_a_pass_label_and_a_minimum_tonnage(tmp_path, monkeypatch):

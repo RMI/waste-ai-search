@@ -432,6 +432,7 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
     from .arbitrate import run_arbitration
     from .input_loader import resolve_sites
     from .prompt_builder import has_gas_collection
+    from .run_context import FOLLOW_UP_PASS
     from .schema import GCCS_ATTRIBUTES, normalize_scalar
     from .search import run_search
     from .seed_refresh import refresh_sites, write_refreshed_seed
@@ -483,7 +484,7 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
         pilot_size=0,
         force=False,
     )
-    run_search(followup_config, pass_label="gccs", only_attributes=sorted(GCCS_ATTRIBUTES))
+    run_search(followup_config, pass_label=FOLLOW_UP_PASS, only_attributes=sorted(GCCS_ATTRIBUTES))
     after_search()
 
     print("\n== pass 2: arbitrate ==")

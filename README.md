@@ -870,10 +870,18 @@ AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search run \
   out, failed to connect, didn't resolve or had a server error, so its quotes can be checked before
   SMEs review: 8 of the 32 pages the October tests couldn't read. Never a 403 (see
   [Link checking](#link-checking)).
-- The last command is the one every batch runs. It searches only a site that has no response yet,
-  checks the links and locates the sources the searches didn't, arbitrates both passes, runs the gas
-  follow-up on what either model found, with Terra, and publishes the workbook. So SMEs never get
-  one without Sol's pages.
+- Before going on, run the Sol command again until it searches nothing and prints no failure: it
+  resumes, searching only sites with no `__sol` response, and prints a retry, with its agent and
+  label, for any that failed. The last command searches the first pass only, so a Sol search that
+  timed out would otherwise just be missing. Its arbitration lists any pass still failed, each with
+  its own retry command, in `sites_to_retry.csv`.
+- The last command is the one every batch runs. It searches only a site that has no first-pass
+  response yet, checks the links and locates the sources the searches didn't, arbitrates both
+  passes, runs the gas follow-up on what either model found, with Terra, and publishes the
+  workbook. Don't `arbitrate` between these steps, as the commands suggest: it publishes a
+  workbook without Sol's pages.
+- Set `.env`'s `AZURE_AI_AGENT_NAME` to `waste-ai-search-gpt-5-6-terra` for the batch, so a command
+  run without a setting asks Terra.
 - The run log has a row for each site and pass, each priced at its own model (see
   [Bing cost](#bing-cost)).
 - Don't raise `--max-web-searches` instead. The pages one model missed were nearly all ones it
@@ -1273,7 +1281,7 @@ marked on the amount itself.
 | `source_locations.json` | Each stated location's point, keyed by its text and country (see [Locating each source](#locating-each-source)). |
 | `page_text/` | The text of each page that loaded, one gzip file per exact URL named by its `source_id` (see [The text of each page that loads](#the-text-of-each-page-that-loads)). `found_values.csv`'s `quote_on_page` and `location_on_page` say whether each source's quote and stated location are on it. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
-| `sites_to_retry.csv` | Sites whose search tool failed, so nothing was searched (see [If a site could not be searched](#if-a-site-could-not-be-searched)). |
+| `sites_to_retry.csv` | Searches that couldn't be done, one row per site and pass, with the agent to retry it with (see [If a site could not be searched](#if-a-site-could-not-be-searched)). |
 | `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
 | `new_facility_candidates.csv` | For ingestion: landfills none of our sites is, from the sources SMEs mark New site on Site_Review (`found_by` = `SME`). One row per source, with its URL, name as written and in English, stated location, the point and where it came from, our nearest site and its distance, the searches that cited it, and a note of who marked it and the values it gives. `accept-reviews` adds each once; arbitrating again keeps them. |
 | `possible_duplicates.csv` | For ingestion (entity linkage's #225 tackles E-PRTR re-registrations): pairs of our sites whose searches cited the same page under the same facility name (not a blank one), with their names, the distance between them, the pages, the names, and a `reason` that says when the sites are too far apart to be one facility. |
@@ -1591,13 +1599,20 @@ and which pages the agent opened.
 
 ### If a site could not be searched
 
-`sites_to_retry.csv` lists sites where the agent's own web-search tool failed. These are **not**
-"no data found" — nothing was searched. They need a re-run, not review:
+`sites_to_retry.csv` lists each search that couldn't be done: the agent's own web-search tool
+failed, or the search raised an error (a timeout, say) and saved nothing. These are **not** "no data
+found" — nothing was searched. They need a re-run, not review. Each row names its pass
+(`pass_label`, blank for the first) and the agent that searched it, and arbitration prints one
+command per pass, to retry it as itself:
 
 ```bash
-uv run waste-ai-search search --run-id <run_id> --force --site-ids <ids from that file>
+AZURE_AI_AGENT_NAME=<agent> uv run waste-ai-search search --run-id <run_id> [--pass-label <pass_label>] --force --site-ids <ids>
 uv run waste-ai-search arbitrate --run-id <run_id>
 ```
+
+A failed pass is listed even where another pass of the site found pages. A gas follow-up (`gccs`)
+isn't retried with `search`, which would ask the first pass's attributes: delete its
+`site_<id>__gccs.json` and run the batch's `run` command again.
 
 ### Auditing a decision
 

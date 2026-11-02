@@ -96,6 +96,8 @@ def raw_dir(run_dir: Path) -> Path:
 # the same filename would overwrite the first pass's findings, so passes are kept side by side and
 # arbitration merges them.
 PASS_SEPARATOR = "__"
+# The gas follow-up pass, which `run` makes for sites a pass found gas collection at (cli.run_everything).
+FOLLOW_UP_PASS = "gccs"
 
 
 def raw_response_path(run_dir: Path, site_id: Any, pass_label: str = "") -> Path:
@@ -108,6 +110,12 @@ def raw_response_path(run_dir: Path, site_id: Any, pass_label: str = "") -> Path
 def site_id_from_path(path: Path) -> str:
     """Recover the site id from a cached response name, ignoring any pass label."""
     return path.stem.replace("site_", "", 1).split(PASS_SEPARATOR, 1)[0]
+
+
+def pass_label_from_path(path: Path) -> str:
+    """The pass a cached response is from: blank for the first pass, else its label ("sol", "gccs")."""
+    parts = path.stem.split(PASS_SEPARATOR, 1)
+    return parts[1] if len(parts) > 1 else ""
 
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:

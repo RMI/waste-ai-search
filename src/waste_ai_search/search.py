@@ -39,6 +39,8 @@ from .payload import found_attributes, merge_payloads, read_payload
 from .pilot_selector import select_mixed_pilot
 from .prompt_builder import build_site_prompt, requested_attributes
 from .run_context import (
+    FOLLOW_UP_PASS,
+    PASS_SEPARATOR,
     SEARCH_TOOL_RETRY_DELAY_SECONDS,
     PipelineConfig,
     get_client,
@@ -448,7 +450,9 @@ def run_search(
             if f.done() and not f.cancelled() and f.exception() is None and id(f.result()) not in logged
         ])
 
-    failures = [row for row in run_log if str(row["status"]).startswith("Search tool failed")]
+    # A search that raised (a timeout at the site limit, a 429) is a failure too: it saved nothing,
+    # and only the first pass is searched again by `run`, so a second pass's would go unnoticed.
+    failures = [row for row in run_log if str(row["status"]).startswith(("Search tool failed", "Failed"))]
     print(f"\nSearched {len(work)} sites. Run log: {log_path}")
     if any(row["web_searches"] != "" for row in run_log):
         for line in describe_run_cost(run_cost(run_log)):
@@ -465,10 +469,15 @@ def run_search(
         locate_run(config, sites, geocoder)
     if failures:
         ids = " ".join(row["site_id"] for row in failures)
-        # Retried as the same pass: without its label, --force would replace the first pass's responses.
-        label = f" --pass-label {pass_label}" if pass_label else ""
         print(f"\n!! {len(failures)} site(s) still failing after retries. Try again later:")
-        print(f"   {agent_setting(client)}uv run waste-ai-search search --run-id {config.run_id}{label} --force --site-ids {ids}")
+        if pass_label == FOLLOW_UP_PASS:
+            # `search` would ask the first pass's attributes of the pinned seed, and its answer would
+            # stop `run` ever following these sites up.
+            print(f"   delete their site_<id>{PASS_SEPARATOR}{pass_label}.json if present ({ids}), then run the batch's `run` command again")
+        else:
+            # Retried as the same pass: without its label, --force would replace the first pass's responses.
+            label = f" --pass-label {pass_label}" if pass_label else ""
+            print(f"   {agent_setting(client)}uv run waste-ai-search search --run-id {config.run_id}{label} --force --site-ids {ids}")
     return config.run_dir
 
 
