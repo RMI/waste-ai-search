@@ -861,9 +861,11 @@ AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search run \
   use, not what it does. Batch 3 at 16 sites at a time had 130 of its first 147 searches refused
   (429), and at 6 a quarter; at 3 none were, about 5 sites a minute (1,553 in 5 hours). A refused
   search waits out the minute and tries again, with `AZURE_FOUNDRY_MAX_RETRIES=4` in `.env`.
-- About 1% of Mexican sites can't be searched: Azure's content filter stops the agent's answer,
-  probably over violent local news it read (batch 3: 14 of 1,553 with Terra, 1 of 64 with Sol).
-  The search says so (`ContentFiltered`) and doesn't retry; trying again later rarely helps.
+- Azure's content filter sometimes stops the agent's answer, probably over violent local news it
+  read. It depends on the pages an attempt happens to read, so a stopped search is retried like
+  any other failure, and the error names the filter (`ContentFiltered`) when every attempt is
+  stopped. In batch 3, 98 answers came only on a retry, and 15 searches (about 1%) were still
+  stopped after it; running them again later can succeed.
 
 - `--min-tonnes 100000` takes the sites whose seed gives 100,000 t a year or more of incoming
   waste, and lists them. It applies after the other rules, like `--limit`, so with `--batch 3` it

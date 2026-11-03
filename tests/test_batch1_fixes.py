@@ -181,12 +181,16 @@ def test_zero_retries_still_makes_one_attempt():
     assert client.search_site({}, "prompt") == {"attributes": []}
 
 
-def test_an_answer_the_content_filter_stopped_is_said_and_not_retried():
-    """Batch 3: Azure's filter stopped the answer at 2479 Cerro Bastón after the agent read news of the
-    town's dump, every time; four tries paid four times for nothing."""
+def test_an_answer_the_content_filter_stopped_is_said_and_retried(monkeypatch):
+    """Azure's filter stopped the answer at 2479 Cerro Bastón after the agent read news of the town's
+    dump. It depends on the pages an attempt reads, so a stopped search is tried again, and named if
+    every attempt is stopped."""
     from types import SimpleNamespace
 
+    from waste_ai_search import foundry_client
     from waste_ai_search.foundry_client import AzureFoundryAgentClient, ContentFiltered, FoundryClientConfig
+
+    monkeypatch.setattr(foundry_client.time, "sleep", lambda seconds: None)
 
     stopped = SimpleNamespace(
         status="incomplete", incomplete_details=SimpleNamespace(reason="content_filter"), model="gpt-5.6-terra",
@@ -208,7 +212,7 @@ def test_an_answer_the_content_filter_stopped_is_said_and_not_retried():
     )
     with pytest.raises(ContentFiltered, match="content filter"):
         client.search_site({}, "prompt")
-    assert len(calls) == 1
+    assert len(calls) == 4
 
 
 def test_a_rate_limited_call_waits_out_the_minute_before_its_retry():
