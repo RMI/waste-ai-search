@@ -53,9 +53,8 @@ RESOLVED_ID_COLUMNS = (SITE_ID, "internal_facility_id")
 REVIEW_QUEUE_SHEET = "Review_Queue"
 RUN_CONFIG_SHEET = "Run_Config"
 RUN_CONFIG_HEADERS = ["setting", "value"]
-# The raw load's columns are RESOLVED_HEADERS and REVIEW_QUEUE_HEADERS, except that it also takes
-# corrected_value_date, which a workbook from before WP-552 lacks and which then loads empty.
-OPTIONAL_REVIEW_QUEUE_COLUMNS = {"corrected_value_date"}
+# Batch 1's raw load (blob_to_db_raw_ai_search_batch1.py in RMI/waste_data_ingestion_pipeline#261)
+# takes batch 1's columns exactly: RESOLVED_HEADERS, and REVIEW_QUEUE_HEADERS on Review_Queue.
 
 # The Run_Config rows a relabel adds. Finding the first already there means the workbook has been
 # relabelled, and relabelling it again would read wastemap_ids as old IDs.
@@ -341,12 +340,14 @@ def _site_id_column(sheet) -> int | None:
 
 
 def _unnamed_columns_with_values(sheet) -> list[int]:
-    """Columns with no header but some value, which pandas reads as 'Unnamed: N'."""
+    """Columns with no header but some value, which pandas reads as 'Unnamed: N'. A cell of only
+    spaces is blank: the SMEs' copy of batch 1's workbook has some past its last header, and the raw
+    load drops such a column."""
     header = _header(sheet)
     unnamed = set()
     for row in sheet.iter_rows(min_row=2, values_only=True):
         for index, value in enumerate(row):
-            if value not in (None, "") and (index >= len(header) or not header[index]):
+            if normalize_scalar(value) and (index >= len(header) or not header[index]):
                 unnamed.add(index + 1)
     return sorted(unnamed)
 
@@ -365,7 +366,7 @@ def check_layout(resolved_header: list[str], workbook) -> None:
 
     compare(RESOLVED_NAME, resolved_header, set(RESOLVED_HEADERS))
     expected_tabs = {
-        REVIEW_QUEUE_SHEET: (set(REVIEW_QUEUE_HEADERS) | OPTIONAL_REVIEW_QUEUE_COLUMNS, OPTIONAL_REVIEW_QUEUE_COLUMNS),
+        REVIEW_QUEUE_SHEET: (set(REVIEW_QUEUE_HEADERS), set()),
         RUN_CONFIG_SHEET: (set(RUN_CONFIG_HEADERS), set()),
     }
     for name, (expected, optional) in expected_tabs.items():
@@ -378,7 +379,7 @@ def check_layout(resolved_header: list[str], workbook) -> None:
             problems.append(f"{name}: values under columns with no header (columns {unnamed})")
     if problems:
         raise RelabelError(
-            "The files don't have the columns the raw load (blob_to_db_raw_ai_search.py) expects, so "
+            "The files don't have the columns the raw load (blob_to_db_raw_ai_search_batch1.py) expects, so "
             "they would not load even once re-keyed. " + " | ".join(problems)
         )
 

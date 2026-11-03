@@ -276,11 +276,31 @@ def test_numeric_site_id_cells_stay_numeric(tmp_path):
     assert [row[0] for row in rows[1:]] == [101, 103]
 
 
-def test_a_workbook_with_corrected_value_date_is_accepted(tmp_path):
-    """The raw load takes corrected_value_date when a workbook has it, and loads it empty when not."""
+def test_the_smes_copy_is_re_keyed_with_its_stray_tab_and_spaces(tmp_path):
+    """The SMEs' copy of batch 1's workbook has a tab after validation_status and spaces typed past
+    its last header. The raw load tidies both, so they don't stop the re-key, and they are kept."""
+    run_dir = make_run(tmp_path)
+    workbook = load_workbook(run_dir / f"{RUN_ID}_review.xlsx")
+    sheet = workbook["Review_Queue"]
+    status = REVIEW_QUEUE_HEADERS.index("validation_status") + 1
+    sheet.cell(1, status, "validation_status\t")
+    sheet.cell(2, len(REVIEW_QUEUE_HEADERS) + 2, " ")
+    workbook.save(run_dir / f"{RUN_ID}_review.xlsx")
+
+    result = relabel_run(run_dir, crosswalk(CLEAN))
+
+    [workbook_copy] = [path for path in result.written if path.suffix == ".xlsx"]
+    copy = load_workbook(workbook_copy)["Review_Queue"]
+    assert copy.cell(1, status).value == "validation_status\t"
+    assert copy.cell(2, len(REVIEW_QUEUE_HEADERS) + 2).value == " "
+
+
+def test_corrected_value_date_stops_it(tmp_path):
+    """Batch 1's raw load takes batch 1's columns exactly; corrected_value_date came later."""
     run_dir = make_run(tmp_path, extra_queue_column="corrected_value_date")
 
-    assert relabel_run(run_dir, crosswalk(CLEAN)).written
+    with pytest.raises(RelabelError, match=r"unexpected \['corrected_value_date'\]"):
+        relabel_run(run_dir, crosswalk(CLEAN))
 
 
 def test_a_column_the_raw_load_would_refuse_stops_it(tmp_path):
