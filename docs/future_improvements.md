@@ -77,5 +77,15 @@ it, never automatically:
 So it looks worth doing for names where ours is weak (OSM's and other generic ones, mostly in
 English-speaking countries), and rarely for locations or for Mexico.
 
+**But most of those sites aren't searched now.** Batch 1 ran on 6 October, before the rule that
+skips sites whose name gives a search nothing to look for (15 October), so it searched OSM's
+"OpenStreetMap Landfill" and "domestic landfill" sites, which are where its found names helped
+most. The rule now skips 58% of OSM's 6,206 sites outside the US and Brazil (1,877 with no name and
+1,569 with a generic one), including 1,278 of batch 4's 1,950 OSM and Global Plastic Watch sites.
+Searching them for a name would need the rule changed for them, and a way to confirm identity
+without a name, such as a source that places the site within a few hundred metres of ours.
+Batch 3 isn't affected: Mexico's sites are INEGI's, and only 13 come from OSM or Global Plastic
+Watch.
+
 This would also give [Brazil's coordinates](#brazils-coordinates-could-be-corrected-by-a-source-that-locates-the-dump)
 the path they need.
