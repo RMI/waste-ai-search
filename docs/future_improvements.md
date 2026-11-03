@@ -3,6 +3,9 @@
 Ideas we agreed are worth doing, but not yet. Each says what is missing today and what doing it
 would look like. When one is picked up, move it into a plan in `docs/plans/`.
 
+What batch 3 showed, and what to do before the next batches, is in
+[after_batch_3.md](after_batch_3.md).
+
 ## Brazil's coordinates could be corrected by a source that locates the dump
 
 **Added:** 21 October 2026. Parked by Hugh until Brazil is searched again; it is excluded by default.
