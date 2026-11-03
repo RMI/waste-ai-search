@@ -73,9 +73,10 @@ Run the day after batch 3 to see what was being missed. They cost about $17 of s
   - What matters is that searches vary: a second search of an empty mid-sized site found pages a
     quarter of the time.
 - **Azure's content filter is chance, not the site.** It stopped 13 of the 80 searches, but only 2
-  sites both times. In batch 3, 98 answers came only on a retry, 34 of them at sites now on
-  Site_Review. A change on 2 November had stopped retrying a filtered search; it was undone on 3
-  November, so a filtered search is tried again.
+  sites both times. In batch 3's Terra pass, 85 answers came only on a retry after a first try
+  that had searched and then failed, almost certainly the filter. 28 of them gave 44 of the pages
+  on Site_Review, and 25 sites have no pages but theirs. A change on 2 November had stopped
+  retrying a filtered search, which would have lost all 85; it was undone on 3 November.
 - **Another search engine found no more.** The same 40 sites, searched by hand with a different
   engine (3 queries each), gave pages about 2 sites: Rancho Guadalupe, which Bing's second search
   also found, and Cuautolanico, which it didn't. Bing's second searches found 5 that it missed.
