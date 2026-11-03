@@ -151,6 +151,21 @@ The tuning before batch 3 was built for Mexico, so each new language needs the s
     last batch) should be measured before keeping it there, especially Spain, where EU documents are
     often in English.
 
+### Global Plastic Watch sites
+
+Global Plastic Watch finds waste sites from satellite images, so its sites have no facility name:
+the name we hold is an address read from the point ("Nông Cống District, Thanh Hoa province,
+Vietnam"). 1,716 sites come from Global Plastic Watch alone: 662 in batch 2 (499 in India), 70 in
+batch 4 (Turkey), 420 in batch 5 (Indonesia 225, China 195) and 554 in the last batch. Batch 3 had
+none.
+
+The skip rule doesn't catch them, since an address has proper names in it, so they would be
+searched with nothing but a place to go on. That is the same weakness that matched a site called
+only "BASURERO MUNICIPAL" to a dump 60 km away. Before batch 4, decide whether to skip them, or to
+search them by location and accept a page only if it places the site within a few hundred metres
+of ours. A found name would help these sites most of all, if names become something SMEs can
+approve (`future_improvements.md`).
+
 ### Running the batch
 
 - **Speed.** Terra's deployment allows 1M tokens a minute, but refused requests at a fifth of that,
