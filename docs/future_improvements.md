@@ -58,5 +58,24 @@ it, never automatically:
 - A location from a street address can be a kilometre or more off, so only a point a source
   states, or one placed on a building, should be offered.
 
+**What it would have done (checked 3 November).**
+
+- **Batch 1:** its SMEs validated 261 names that differ from ours. All 261 would have replaced
+  ours, because ours came from OSM, Global Plastic Watch or Waste Atlas, which the AI search
+  outranks in consolidation. In a random 40, about 13 were clearly better (ours was a placeholder,
+  an address or a company: "OpenStreetMap Landfill" → "Tirohia Landfill (Paeroa)"), about 12 a
+  little better, about 10 the same, and 3 to 5 worse or possibly another facility. Some drop
+  useful words ("Former Summit Road Landfill" → "Summit Road Landfill").
+- **Batch 3:** its pages rarely give a proper name, mostly a description ("relleno sanitario de
+  Tijuana", "basurero clandestino"). Of a random 40 that differ from ours, about 3 were better and
+  about 22 worse. And 1,500 of its sites take their name from INEGI, which outranks the AI search,
+  so almost none would have been replaced anyway.
+- **Locations:** batch 3's pages stated only 3 points. Batch 1's rules accepted 53, all within
+  0.5 km of ours. Its SMEs validated 17 more, every one 5 to 218 km away, which the search had
+  flagged as failing its 5 km check, so those need a map check before anyone trusts them.
+
+So it looks worth doing for names where ours is weak (OSM's and other generic ones, mostly in
+English-speaking countries), and rarely for locations or for Mexico.
+
 This would also give [Brazil's coordinates](#brazils-coordinates-could-be-corrected-by-a-source-that-locates-the-dump)
 the path they need.
