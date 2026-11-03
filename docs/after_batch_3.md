@@ -16,7 +16,7 @@ item is picked up, give it a plan in [`docs/plans/`](plans/).
   50-60 hours at 3 minutes a page.
 - **Not searched:** 15 searches, 14 by Terra and 1 by Sol (site 5345, which Terra did answer).
   Azure's content filter stopped the agent's answer, probably over violent local news it had read.
-  They are in `sites_to_retry.csv`.
+  They are in `sites_to_retry.csv`, and running them again can succeed (see the tests below).
 
 ## Why only 561 of the 1,539 sites searched have pages
 
@@ -54,8 +54,44 @@ usable.
   164,250 t a year, but our coordinates put it in Moloacán, Veracruz, hundreds of kilometres away.
   The agent found pages about Ocozocoautla and rightly refused them.
 
-Two things below could recover some of these sites: telling Bing the searches are about Mexico, and
-checking a sample of the leads the agent doubted.
+The tests below found pages for some of these sites after all: a second search finds pages that
+the first missed, and about 1 in 5 of the pages the agent doubted are about our site.
+
+## Tests on the sites without pages (3 November)
+
+Run the day after batch 3 to see what was being missed. They cost about $17 of searching.
+
+- **A second search, with and without telling Bing the site is in Mexico.** 40 sites that found
+  nothing in batch 3 (20 under 5,000 t a year, 20 from 5,000 to 20,000) were searched twice more:
+  once by the same Terra agent, and once by a copy whose web search tool is told the user is in
+  Mexico (`waste-ai-search-gpt-5-6-terra-mx`, still in the Foundry project).
+  - Between them they found pages about 6 of the 40 sites: 5 of the 20 mid-sized ones (Jerécuaro,
+    Rancho Guadalupe, Cerro Colorado, La Caliza, Barrancas) and 1 of the 20 small ones (El Raicero),
+    and one page about another town's dump. Batch 3 had found none.
+  - Telling Bing the country made no clear difference: on the 29 sites both searches answered, the
+    copy found pages for 4 and the same agent for 2. That's too few to tell.
+  - What matters is that searches vary: a second search of an empty mid-sized site found pages a
+    quarter of the time.
+- **Azure's content filter is chance, not the site.** It stopped 13 of the 80 searches, but only 2
+  sites both times. In batch 3, 98 answers came only on a retry, 34 of them at sites now on
+  Site_Review. A change on 2 November had stopped retrying a filtered search; it was undone on 3
+  November, so a filtered search is tried again.
+- **Another search engine found no more.** The same 40 sites, searched by hand with a different
+  engine (3 queries each), gave pages about 2 sites: Rancho Guadalupe, which Bing's second search
+  also found, and Cuautolanico, which it didn't. Bing's second searches found 5 that it missed.
+  Bing's results are not the problem.
+- **About 1 in 5 doubted pages are ours.** 30 pages the agent set aside because it doubted they were
+  about our site (one each from 30 of the 158 sites) were read without its reasons: 4 are ours,
+  13 aren't, and 13 couldn't be settled, 10 of them because the page wouldn't open. The 4 it got
+  wrong carry useful facts:
+  - 10595 Cuauhtémoc (Zacatecas): a 2020 study's map puts its active dump within 40 m of our point.
+    It opened in 2008, covers 2.5 ha and takes 13 t a day.
+  - 20 (ADDO, Tijuana): closed in full by the state in 2024.
+  - 288 El Cebollín (Guadalupe y Calvo): a business-register entry pinned 10 m from our point.
+  - 7121 La Estación (Peñamiller): closed temporarily by the state in October 2025.
+
+  Two of the four give a location next to ours, which the agent didn't weigh: a doubted page whose
+  stated location is close to our site could go to SMEs instead of being set aside.
 
 ## While the SMEs review batch 3
 
@@ -120,21 +156,27 @@ The tuning before batch 3 was built for Mexico, so each new language needs the s
   probably because Azure counts the largest possible reply. Batch 3 ran 3 sites at a time (the
   README's commands say so). Capping the agent's reply length, or asking Azure for more quota, might
   allow 6 or more at once; a 50-site test would show it.
-- **Content filter.** About 1% of Mexican sites were unsearchable. Some countries may lose more.
-  Azure lets a deployment use a less strict filter, which may need IT's agreement.
-- **Tell Bing where the site is.** The agent's web search tool uses its defaults
-  (`WebSearchTool()` in `waste-ai-search-infra/scripts/create_foundry_agent.py`). It can be given an
-  approximate location (a country) and a larger search context, which might surface more local
-  pages. Test it on about 40 small Mexican sites that found nothing (about $10-20) before batch 4.
+- **Content filter.** It stops searches by chance, depending on the pages an attempt reads, so
+  retries rescue most: in batch 3, 98 answers needed a retry and 15 searches still failed after
+  it. Some countries may lose more. Azure lets a deployment use a less strict filter, which would
+  cut both the failures and the cost of retrying; that may need IT's agreement.
+- **Search the empty mid-sized sites again.** A second search of an empty site taking 5,000 t a
+  year or more found pages a quarter of the time (above). For batch 3 that is 48 sites, about $12,
+  and could run as a small run of its own with its own workbook, so it doesn't disturb the SMEs'
+  copy. Do the same in each later batch, with the searches the content filter stopped.
+- **Telling Bing the country** (`user_location` on the agent's web search tool) made no clear
+  difference in the test above. It costs nothing to leave on, but it isn't worth a separate agent
+  per country. The tool can also be given a larger search context, which wasn't tested.
 
 ## Ideas worth testing
 
 - **A cheaper first look at small sites.** Bing's searches are about two-thirds of the cost, and
   sites under 5,000 t a year find pages 22% of the time. Three searches first, and more only when
   something turns up, could cut the cost of the biggest batches. Test it before batch 5.
-- **Check a sample of the leads the agent doubted.** Of the 273 sites with only leads, 158 have one
-  where the agent wasn't sure the page was about our site. If a sample shows many are, those pages could go to SMEs as
-  low-confidence pages. It costs no searching.
+- **Send some doubted pages to SMEs.** About 1 in 5 of the pages the agent doubted are about our
+  site (above). Sending all of them would cost SMEs far more time than it saves, but a doubted
+  page whose stated location is near our site, or that names our site's operator, is worth a
+  look. Locations are already read from cited pages; they would need reading from leads too.
 - **A place for location fixes.** Batch 1's SMEs typed better coordinates into `corrected_value`,
   having nowhere else. Batch 3's workbook has no place to say "our location is wrong" either.
 - **Check our names against our locations** before searching, to catch mismatches like site 9859's.
