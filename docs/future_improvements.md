@@ -24,3 +24,39 @@ places it to an SME as a proposed correction, never approved automatically. Matc
 OSM and Global Plastic Watch landfills within the municipality may be the likelier fix. Brazil's
 generic names are also skipped by the unsearchable-names rule unless
 `--include-unsearchable-names` is passed, so both need deciding together.
+
+## A source could correct a site's name or location, with an SME's approval
+
+**Added:** 3 November 2026, at Hugh's ask, after batch 3.
+
+Today a source's name and location are only used to check that it is about our site. They never
+replace ours: the search doesn't send them as values, and ingestion leaves batch 1's out. But our
+names and locations are often the weakest thing we hold:
+
+- **Names.** Many sites carry a generic or wrong name ("OpenStreetMap Landfill", "Resource Recovery
+  Centre", an operator's name). Of the 635 names batch 1's search proposed, 634 differed from ours,
+  and SMEs validated 261 of them, such as "Resource Recovery Centre" → "Lobster Creek Resource
+  Recovery Centre". Whether those are new names or confirmations is now with batch 1's SMEs; until
+  they answer, ingestion leaves them out.
+- **Locations.** Some of our points are far from the site. Site 9859 is named Ocozocoautla, a town
+  in Chiapas, but our coordinates are hundreds of kilometres away in Veracruz. Batch 1's SMEs typed
+  better coordinates for two sites into `corrected_value`, having nowhere else to put them. Some
+  sources pin a site precisely: in the 3 November tests, two pages the agent doubted were pinned
+  within 40 m of our point (see [after_batch_3.md](after_batch_3.md)).
+
+**What to do.** Let a source propose a new name or location, and load it only once an SME approves
+it, never automatically:
+
+- The search would send the name and location it reads as proposals, as batch 1's did.
+- Site_Review would show a proposed change on its own row, like a key value's ↳ row: our name or
+  point beside the source's, with a map link for a location.
+- An SME would mark it Correct or Wrong, or type the right one, and `accept-reviews` would hand
+  the approved ones to ingestion.
+- Ingestion would need a rule for whether an approved name or point beats a regulator's, and the
+  ingestion repository's entity linkage keeps the search's locations out of its registry, so that
+  would need agreeing with its owners.
+- A location from a street address can be a kilometre or more off, so only a point a source
+  states, or one placed on a building, should be offered.
+
+This would also give [Brazil's coordinates](#brazils-coordinates-could-be-corrected-by-a-source-that-locates-the-dump)
+the path they need.
