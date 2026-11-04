@@ -48,7 +48,7 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any
 
-from .arbitration import baseline_for, site_for_year
+from .arbitration import baseline_for, is_year_exact, site_for_year
 from .costs import RUN_LOG_FILE
 from .arbitration import decision_key, same_value
 from .credibility import TIER_5, TIER_BY_LABEL
@@ -530,6 +530,7 @@ def accepted_row(row: dict[str, Any], sites_by_id: dict[str, dict[str, Any]]) ->
         "value": row["value"],
         "unit": row.get("unit", ""),
         "year": row["year"],
+        "is_year_exact": "TRUE" if is_year_exact(row.get("value_date"), row["year"]) else "FALSE",
         "source_url": row.get("source_url", ""),
         "source_tier": row.get("source_tier", ""),
         "approved_by": decision.approved_by if decision is not None else AUTO,

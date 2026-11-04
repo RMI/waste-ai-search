@@ -593,6 +593,8 @@ FOUND_VALUES_HEADERS = [
 # or the reviewer.
 ACCEPTED_VALUES_HEADERS = [
     "run_id", "site_id", "site_name", "country_iso3", "attribute_name", "value", "unit", "year",
+    # Whether the source dates the value to that year (TRUE) or the run's year was assumed (FALSE).
+    "is_year_exact",
     "source_url", "source_tier", "approved_by", "reviewed_date", "review_id",
 ]
 

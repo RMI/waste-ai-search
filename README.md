@@ -525,6 +525,8 @@ sources give (a page cited twice counts once), then the agent's order. Tier alwa
 however the values are dated. For an attribute that isn't yearly, it is one value per site and
 attribute, as ingestion keys it, and `accepted_values.csv`'s `year` is then the winning value's own
 year, for the record, not part of the key.
+`is_year_exact` beside it is `TRUE` when the source dates the value to that year and `FALSE` when
+the value is undated and took the run's year, the standardized spec's column of that name.
 
 Run_Config counts `site_source_pairs`, `pairs_auto_approved` and `pairs_sme_review`, each with its
 values. Pairs for review are split into Tier 3–5 and the Tier 1–2 pairs each exception sent.

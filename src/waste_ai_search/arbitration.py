@@ -120,6 +120,13 @@ def value_year(value_date: Any, run_year: int) -> int:
     return run_year
 
 
+def is_year_exact(value_date: Any, year: Any) -> bool:
+    """Whether a value's year is the one its source dates it to, rather than the run's year assumed
+    for an undated value (`value_year`): the spec's is_year_exact, which ingestion loads."""
+    match = re.match(r"\s*(\d{4})", normalize_scalar(value_date))
+    return match is not None and match.group(1) == normalize_scalar(year)
+
+
 def decision_key(site_id: str, attribute: str, year: Any) -> tuple[str, str, Any]:
     """(site, attribute, year): what one value is loaded for, the year only for a yearly attribute,
     as ingestion keys it."""

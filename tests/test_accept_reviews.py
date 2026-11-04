@@ -217,6 +217,20 @@ def test_a_pages_one_key_value_is_decided_by_the_pages_own_decision(tmp_path, ce
     assert closing["value_decision"] == value_decision
 
 
+def test_a_value_says_whether_its_source_dated_it_to_its_year(tmp_path):
+    """An undated value takes the run's year, which ingestion records as assumed (is_year_exact)."""
+    permit = source("https://manitoba.example/permit", "Brady Road Landfill", source_type="Regulator",
+                    values=[value("facility_type", "Sanitary Landfill", value_date="2019-05"),
+                            value("operator", "RM of Springfield", value_date="")])
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [permit]})
+    decide(run_dir, {permit["url"]: {"decision": CORRECT_SITE, **SME}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+
+    loads = {r["attribute_name"]: (r["year"], r["is_year_exact"]) for r in accepted(run_dir)}
+    assert loads["facility_type"] == ("2019", "TRUE")
+    assert loads["operator"][1] == "FALSE"
+
+
 def test_a_pages_one_key_value_loads_at_the_site_an_sme_says_it_is_about(tmp_path):
     other = seed("901", "Springfield landfill", 49.9, -96.9)
     run_dir = arbitrate(tmp_path, [BRADY, other], {"13413": [CLOSURE]})
