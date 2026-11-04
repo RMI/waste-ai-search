@@ -974,7 +974,7 @@ spend a request and a prompt to receive nothing.
 
 The agent finds a facility by its name and location. A name that is filler, stray text or only a
 kind of site gives it nothing to search for, so its queries are wasted or find a different
-facility nearby. Four classes of name are skipped
+facility nearby. Five classes of name are skipped
 ([the plan](docs/plans/2026-10-15-skip-unsearchable-names.md);
 [`searchable_names.py`](src/waste_ai_search/searchable_names.py) holds the test):
 
@@ -984,6 +984,7 @@ facility nearby. Four classes of name are skipped
 | Not a name | A URL, a bare number or a survey note that ended up as the name | `update the tag landuse after survey`, `4000` |
 | Generic label | Only says what kind of site it is (`is_generic_site_name`), in English or Spanish. Initials and route codes count as a name: `K & W Landfill` and `SR 85 Landfill` are searched | `domestic landfill`, `Municipal Landfill`, `Landfill II`, `Basurero Municipal`, `Relleno Sanitario Tipo C` |
 | Mining feature | A spoil heap or similar, matched in the English name or the original (отвал, террикон, відвал) | `Overburden Blade`, `Terrikon` |
+| Address only | A site only Global Plastic Watch records (`contributing_data_sources` is `gpw_2021`). It maps sites from satellite images and names none; the name is an address worked out from the point. Skipped from 4 November 2026: 662 sites in batch 2, 70 in batch 4, 420 in batch 5, 468 in the last batch, none in batch 3 | `Nông Cống District, Thanh Hoa province, Vietnam` |
 
 Nothing in the database changes: a skipped site stays in WasteMAP and Climate TRACE. It just isn't
 web-searched until it has a name worth searching for. Words that only describe the kind of site,

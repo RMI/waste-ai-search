@@ -82,6 +82,8 @@ skips sites whose name gives a search nothing to look for (15 October), so it se
 "OpenStreetMap Landfill" and "domestic landfill" sites, which are where its found names helped
 most. The rule now skips 58% of OSM's 6,206 sites outside the US and Brazil (1,877 with no name and
 1,569 with a generic one), including 1,278 of batch 4's 1,950 OSM and Global Plastic Watch sites.
+Since 4 November it also skips the 1,716 sites only Global Plastic Watch records, whose name is an
+address worked out from the point.
 Searching them for a name would need the rule changed for them, and a way to confirm identity
 without a name, such as a source that places the site within a few hundred metres of ours.
 Batch 3 isn't affected: Mexico's sites are INEGI's, and only 13 come from OSM or Global Plastic

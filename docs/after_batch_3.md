@@ -159,12 +159,14 @@ Vietnam"). 1,716 sites come from Global Plastic Watch alone: 662 in batch 2 (499
 batch 4 (Turkey), 420 in batch 5 (Indonesia 225, China 195) and 554 in the last batch. Batch 3 had
 none.
 
-The skip rule doesn't catch them, since an address has proper names in it, so they would be
+The skip rule didn't catch them, since an address has proper names in it, so they would have been
 searched with nothing but a place to go on. That is the same weakness that matched a site called
-only "BASURERO MUNICIPAL" to a dump 60 km away. Before batch 4, decide whether to skip them, or to
-search them by location and accept a page only if it places the site within a few hundred metres
-of ours. A found name would help these sites most of all, if names become something SMEs can
-approve (`future_improvements.md`).
+only "BASURERO MUNICIPAL" to a dump 60 km away. **Decided 4 November 2026: they are skipped**, as a
+fifth class, "address only" (`searchable_names.py`). After the other selection rules that drops 662
+sites from batch 2, 70 from batch 4, 420 from batch 5 and 468 from the last batch. The 4 sites
+Global Plastic Watch shares with another dataset are still searched under that dataset's name. A
+found name would help these sites most of all, if names become something SMEs can approve
+(`future_improvements.md`); `--include-unsearchable-names` searches them anyway.
 
 ### Running the batch
 

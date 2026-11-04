@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .schema import CONTRADICTION_CHECK_SOURCES, LAST_BATCH, NOT_A_WASTE_FACILITY, normalize_scalar
-from .searchable_names import NAME_CLASSES, NAMED, name_class, name_reason
+from .searchable_names import NAME_CLASSES, NAMED, site_name_class, site_name_reason
 from .snapshot import MANIFEST_NAME, SNAPSHOT_DIR_NAME, describe_manifest_run
 
 
@@ -297,7 +297,7 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
             "country_iso3": normalize_scalar(site.get("country_iso3")) or normalize_scalar(log.get("country_iso3")),
             "site_name": name,
             "original_site_name": normalize_scalar(site.get("original_site_name")),
-            "name_class": name_class(name, site.get("original_site_name")),
+            "name_class": site_name_class({**site, "site_name": name}),
             "source_group": source_group(site),
             "status": status,
             "answered": status.startswith(ANSWERED_STATUSES),
@@ -437,7 +437,7 @@ def skip_candidates(selections: dict[int, list[dict[str, Any]]]) -> list[dict[st
     rows = []
     for batch, selected in selections.items():
         for site in selected:
-            cls, reason = name_reason(site.get("site_name"), site.get("original_site_name"))
+            cls, reason = site_name_reason(site)
             if cls == NAMED:
                 continue
             lat, lon = normalize_scalar(site.get("latitude")), normalize_scalar(site.get("longitude"))
@@ -488,7 +488,7 @@ def forecast(
     """
     rows = []
     for batch, selected in batch_selections(sites).items():
-        counts = Counter(name_class(site.get("site_name"), site.get("original_site_name")) for site in selected)
+        counts = Counter(site_name_class(site) for site in selected)
         for cls in NAME_CLASSES:
             queries = counts[cls] * per_site.get(cls, fallback)
             rows.append({

@@ -1,5 +1,5 @@
 """Sites whose name gives a search nothing to look for are not searched (step 3 of
-docs/plans/2026-10-15-skip-unsearchable-names.md). All four classes are skipped, at site selection,
+docs/plans/2026-10-15-skip-unsearchable-names.md). All five classes are skipped, at site selection,
 beside the US and Brazil rule and in the same way: the run says what it dropped, an explicit request
 wins, and the workbook's Run_Config records it."""
 from __future__ import annotations
@@ -13,6 +13,7 @@ import pytest
 
 from waste_ai_search.run_context import PipelineConfig
 from waste_ai_search.searchable_names import (
+    ADDRESS,
     GENERIC,
     MINING,
     NAMED,
@@ -21,6 +22,7 @@ from waste_ai_search.searchable_names import (
     SKIPPED_SITES_FILE,
     describe_counts,
     name_class,
+    site_name_class,
 )
 
 # (site_id, site_name, original_site_name): one of each class, then a site named after a mining
@@ -117,6 +119,38 @@ def test_a_pilot_sample_includes_them_only_with_the_flag(tmp_path):
         )
     reasons = {s["site_id"]: s["pilot_selection_reason"] for s in opted_in}
     assert reasons["6"] == "generic_name_hard_case"
+
+
+# --- Global Plastic Watch: an address, not a name -------------------------------------------------
+@pytest.mark.parametrize(
+    "sources, expected",
+    [
+        ("gpw_2021", ADDRESS),
+        (" gpw_2021 ", ADDRESS),
+        # Another dataset supplies the name.
+        ("gpw_2021 + osm_2022", NAMED),
+        ("osm_2022", NAMED),
+        ("", NAMED),
+    ],
+)
+def test_a_site_only_global_plastic_watch_records_is_address_only(sources, expected):
+    site = {"site_name": "Nông Cống District, Thanh Hoa province, Vietnam", "contributing_data_sources": sources}
+    assert site_name_class(site) == expected
+
+
+def test_address_only_sites_are_skipped_and_counted(tmp_path):
+    path = write_seed(tmp_path, names=[("1", "Hartland Landfill", ""), ("2", "Karimnagar Bypass, Telangana, India", "")])
+    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    rows[1]["contributing_data_sources"] = "gpw_2021"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=[*rows[0], "contributing_data_sources"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+    ids, printed = select(path)
+    assert ids == ["1"]
+    assert "(address only 1;" in printed
+    assert select(path, include_unsearchable_names=True)[0] == ["1", "2"]
 
 
 def test_the_cli_flag_reaches_the_config_for_search_and_run():
