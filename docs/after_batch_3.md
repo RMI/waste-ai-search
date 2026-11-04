@@ -64,7 +64,7 @@ Run the day after batch 3 to see what was being missed. They cost about $17 of s
 - **A second search, with and without telling Bing the site is in Mexico.** 40 sites that found
   nothing in batch 3 (20 under 5,000 t a year, 20 from 5,000 to 20,000) were searched twice more:
   once by the same Terra agent, and once by a copy whose web search tool is told the user is in
-  Mexico (`waste-ai-search-gpt-5-6-terra-mx`, still in the Foundry project).
+  Mexico (`waste-ai-search-gpt-5-6-terra-mx`, deleted from the Foundry project on 4 November).
   - Between them they found pages about 6 of the 40 sites: 5 of the 20 mid-sized ones (Jerécuaro,
     Rancho Guadalupe, Cerro Colorado, La Caliza, Barrancas) and 1 of the 20 small ones (El Raicero),
     and one page about another town's dump. Batch 3 had found none.
