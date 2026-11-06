@@ -259,6 +259,34 @@ def test_one_shared_word_never_stretches_a_match():
     assert filing.outcome == NEW_FACILITY
 
 
+# --- a point only on its street ------------------------------------------------------------------
+LICENCE = "https://www.gov.mb.ca/sd/eal/registries/5597brandoneastview/licence3149.pdf"
+# Where Nominatim put the licence's "3610 Victoria Avenue East, Brandon, Manitoba": somewhere on
+# Victoria Avenue East, since it has no house numbers for the road, 2.4 km from Brandon's Eastview.
+VICTORIA_AVENUE = (49.842103, -99.927913)
+
+
+def test_a_street_level_point_more_than_2_km_from_every_site_counts_as_no_location():
+    licence = cite("13338", LICENCE, "Eastview Landfill", VICTORIA_AVENUE, basis="street")
+    filing = match([licence], [BRANDON]).filings[("13338", 1)]
+    assert (filing.site_id, filing.outcome) == ("13338", NO_LOCATION)
+    assert filing.match.startswith(
+        "No location: the source's location can't be used (its address is placed only on its street, 2.4 km "
+        "from the site searched: too rough to match beyond 2 km), so it stays with the site searched."
+    )
+    # A point on the building, or stated coordinates, that far out is still a new facility.
+    for basis in ("rooftop", "coordinates"):
+        placed = cite("13338", LICENCE, "Eastview Landfill", VICTORIA_AVENUE, basis=basis)
+        assert match([placed], [BRANDON]).filings[("13338", 1)].outcome == NEW_FACILITY
+
+
+def test_a_street_level_point_within_2_km_still_locates_the_source():
+    on_street = cite("13339", BRANDON_PAGE, "Eastview Landfill", (49.8426, -99.8644), basis="street")
+    filing = match([on_street], [BRANDON, NEAR_BRANDON]).filings[("13339", 1)]
+    assert (filing.site_id, filing.outcome) == ("13338", LOCATED)
+    assert filing.match.startswith("Located: by its address, placed on its street, the source places it 1.3 km")
+
+
 # --- new facilities ----------------------------------------------------------------------------
 def test_located_sources_far_from_every_site_are_grouped_into_candidates():
     ours = [seed("1", "domestic landfill", 50.0, -100.0)]

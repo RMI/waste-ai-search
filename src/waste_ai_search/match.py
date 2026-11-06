@@ -12,7 +12,9 @@ with no area is its point.
 
 A source has a location when the locate step read it as coordinates, a grid reference, or an
 address placed on its building or its street. A hint, a location copied from the prompt and a
-doubtful one count as none. The same exact page, under the same facility name, is one source
+doubtful one count as none. So does an address placed only on its street more than 2 km from every
+site of ours: a geocoder with no house numbers for a road returns a point anywhere along it, so that
+far out it can't tell a new facility from one of ours. The same exact page, under the same facility name, is one source
 however many searches cited it, and a source with a location is matched once. A name the page
 gives to places more than 2 km apart, a list of "Closed Landfill"s say, is one source per place.
 
@@ -489,13 +491,14 @@ class Matcher:
 
         for cited in by_key.values():
             for entry in entries(cited):
-                located = next((citation for citation in entry if citation.located), None)
+                rough = {id(citation): self._too_rough(citation) for citation in entry if citation.located}
+                located = next((citation for citation in entry if citation.located and not rough[id(citation)]), None)
                 if located is not None:
                     self._match_located(located, entry)
                 else:
                     for citation in entry:
                         others = pages.get(normalize_url(citation.url), set()) - {citation.searched_site_id}
-                        self._match_unlocated(citation, sorted(others, key=_id_order))
+                        self._match_unlocated(citation, sorted(others, key=_id_order), rough.get(id(citation), ""))
         self._same_page_duplicates(pages, citations)
         return Matching(
             filings=self.filings,
@@ -504,6 +507,16 @@ class Matcher:
             outside=self.outside,
             counts=self.counts,
         )
+
+    def _too_rough(self, citation: Citation) -> str:
+        """Why a located citation's point is too rough to match by, or "": an address placed only on
+        its street, with no site of ours within 2 km of it."""
+        if citation.basis != STREET or self.index.within_edge(citation.point, MATCH_KM):
+            return ""
+        searched = self.sites.get(citation.searched_site_id)
+        km = searched.edge_km(citation.point) if searched is not None else None
+        where = f"{_km(km)} from the site searched" if km is not None else f"more than {MATCH_KM:g} km from our sites"
+        return f"its address is placed only on its street, {where}: too rough to match beyond {MATCH_KM:g} km"
 
     def _match_located(self, source: Citation, cited: list[Citation]) -> None:
         """Rules 1-4, once for the source, whichever searches cited it."""
@@ -586,8 +599,9 @@ class Matcher:
         if listed:
             self.new_sources.append((source, cited))
 
-    def _match_unlocated(self, citation: Citation, other_searches: list[str]) -> None:
-        """Rules 5 and 6, for one search's citation of a source with no location."""
+    def _match_unlocated(self, citation: Citation, other_searches: list[str], rough: str = "") -> None:
+        """Rules 5 and 6, for one search's citation of a source with no location. `rough` says why
+        a point it has is too rough to match by (_too_rough)."""
         searched = self.sites.get(citation.searched_site_id)
         own = name_fit(citation, searched)
         namesakes: list[tuple[float, Site, NameFit]] = []
@@ -611,8 +625,8 @@ class Matcher:
             self._file(key, citation, site, MOVED_BY_NAME, match, [site.site_id, citation.searched_site_id])
             return
 
-        if normalize_scalar(citation.stated_location) and citation.location_reason:
-            opening = f"the source's location can't be used ({citation.location_reason})"
+        if rough or (normalize_scalar(citation.stated_location) and citation.location_reason):
+            opening = f"the source's location can't be used ({rough or citation.location_reason})"
         else:
             opening = "the source gives no location"
         match = f"{NO_LOCATION}: {opening}, so it stays with the site searched."

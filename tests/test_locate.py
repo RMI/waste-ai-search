@@ -37,6 +37,7 @@ from waste_ai_search.locate import (
     parse_coordinates,
     parse_grid_reference,
     parse_point,
+    plainer_address,
     save_locations,
 )
 
@@ -297,6 +298,58 @@ def test_a_leading_facility_name_is_taken_off_the_address():
     )
     locate_source(stated, SITE, {}, geocoder, live=True)
     assert geocoder.calls == [("1777 Brady Road, Winnipeg", "CA")]
+
+
+@pytest.mark.parametrize(("stated", "plainer"), [
+    ("765 33rd Street East in Brandon, Manitoba", "765 33rd Street East, Brandon, Manitoba"),
+    ("3610 Victoria Avenue East on NW 1\u20444 17-10-18 WPM in Brandon, Manitoba", "3610 Victoria Avenue East, Brandon, Manitoba"),
+    ("110 Dunlop Drive in the southeast part of Guelph", "110 Dunlop Drive, Guelph"),
+    ("Lots 1 & 2, 16 Ball Road in Heatherton", "16 Ball Road, Heatherton"),
+    ("Reynolds Bach Drive, accessed from Eastern Hutt Road in Silverstream.", "Reynolds Bach Drive, Silverstream"),
+    (
+        "4 Sand Dam Road, North Bay, approximately 21 kilometers from downtown North Bay, off Highway 11 at the "
+        "end of Sand Dam Road",
+        "4 Sand Dam Road, North Bay",
+    ),
+    ("5494 Mapleward Road, City of Thunder Bay, Thunder Bay", "5494 Mapleward Road, Thunder Bay"),
+    ("Eastview Landfill at 3000 Victoria Avenue East in Brandon", "3000 Victoria Avenue East, Brandon"),
+])
+def test_an_address_written_as_a_sentence_has_a_plainer_form(stated, plainer):
+    # Each is as the agent copied it from a source in the 10-site test runs.
+    assert plainer_address(stated, ["Eastview Landfill"]) == plainer
+
+
+@pytest.mark.parametrize("stated", [
+    "1777 Brady Road, Winnipeg, MB",
+    # Without its land description the street has no place, and one in another town could match.
+    "3610 Victoria Avenue East, on NW1/4 Sec. 17, Twp. 10, and Rge. 18 W.",
+    "SW-02-17-26-W2M",
+    "Burnfort, Mallow, Co. Cork",
+])
+def test_an_address_with_nothing_to_take_out_or_no_street_and_place_left_has_no_plainer_form(stated):
+    assert plainer_address(stated, []) == ""
+
+
+def test_an_address_the_geocoder_cannot_find_as_written_is_sent_again_plainer():
+    geocoder = FakeGeocoder({
+        "765 33rd Street East, Brandon, Manitoba": GeocodeMatch(49.82644, -99.89425, STREET, "highway=residential"),
+    })
+    cache = {}
+    stated = source("765 33rd Street East in Brandon, Manitoba", "street address")
+    located = locate_source(stated, SITE, cache, geocoder, live=True)
+    assert (located.basis, located.value()) == (STREET, "49.82644, -99.89425")
+    assert [address for address, _country in geocoder.calls] == [
+        "765 33rd Street East in Brandon, Manitoba", "765 33rd Street East, Brandon, Manitoba",
+    ]
+    # Arbitration reads both answers back from the cache, and asks nothing.
+    assert locate_source(stated, SITE, cache).value() == "49.82644, -99.89425"
+    assert len(geocoder.calls) == 2
+
+
+def test_an_address_found_as_written_is_not_sent_again():
+    geocoder = FakeGeocoder({"765 33rd Street East in Brandon, Manitoba": GeocodeMatch(49.8, -99.9, ROOFTOP, "")})
+    locate_source(source("765 33rd Street East in Brandon, Manitoba", "street address"), SITE, {}, geocoder, live=True)
+    assert len(geocoder.calls) == 1
 
 
 def test_coordinates_win_over_an_address_unless_it_lands_more_than_2_km_away():
