@@ -40,6 +40,10 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     )
 
 
+PAGE_TEXT_HELP = (
+    "Keep only link verdicts: don't keep the text of the pages that load (page_text/), so quotes and "
+    "stated locations aren't checked against them."
+)
 GEOCODER_CHOICES = ["azure-maps", "nominatim", "none"]
 GEOCODER_HELP = (
     "Geocoder for addresses sources state: azure-maps, nominatim or none. Default: "
@@ -139,6 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip fetching cited URLs after the search (no link_check.json is written).",
     )
+    search.add_argument("--no-page-text", action="store_true", help=PAGE_TEXT_HELP)
     add_locate_options(search)
 
     arbitrate = subparsers.add_parser(
@@ -158,6 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fetch a run's cited URLs and write link_check.json (network; no agent calls).",
     )
     add_common(links)
+    links.add_argument("--no-page-text", action="store_true", help=PAGE_TEXT_HELP)
 
     locate = subparsers.add_parser(
         "locate",
@@ -193,6 +199,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the gas-capture follow-up pass.",
     )
     full.add_argument("--no-link-check", action="store_true", help="Skip fetching cited URLs.")
+    full.add_argument("--no-page-text", action="store_true", help=PAGE_TEXT_HELP)
     add_locate_options(full)
     full.add_argument(
         "--keep-broken-link-evidence",
@@ -342,6 +349,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         use_geocode_cache=getattr(args, "use_geocode_cache", False),
         check_links=not getattr(args, "no_link_check", False),
         keep_broken_links=getattr(args, "keep_broken_link_evidence", False),
+        keep_page_text=not getattr(args, "no_page_text", False),
         locate=not getattr(args, "no_locate", False),
         geocoder=getattr(args, "geocoder", "") or "",
     )
@@ -503,7 +511,7 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
     if args.command == "check-links":
         from .search import check_run_links
 
-        check_run_links(config.run_dir)
+        check_run_links(config.run_dir, keep_text=config.keep_page_text)
         print(f"\nNow arbitrate to apply the verdicts:\n  uv run waste-ai-search arbitrate --run-id {config.run_id}")
         return 0
 

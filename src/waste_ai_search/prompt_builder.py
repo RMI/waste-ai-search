@@ -521,7 +521,7 @@ Names:
                         "value_date": "YYYY-MM-DD, YYYY-MM, or YYYY",
                         "evidence_summary": "Short source-backed explanation",
                         "search_terms_used": "Search terms and languages used",
-                        "quoted_evidence_short": "Short quote from the source",
+                        "quoted_evidence_short": "A short passage copied word for word from the source, in its own language",
                     }
                 ],
             }
@@ -592,6 +592,8 @@ Location:
 
 Source requirements:
 - Every source needs a clickable URL.
+- quoted_evidence_short is copied word for word from the source, in the source's own language and
+  with its own figures: never translated, reworded or summarised. It is checked against the page.
 - Classify each source with source_type from Definitions.source_type. Do not invent
   new source types and do not combine two with a slash. There is no catch-all: if no
   listed type genuinely fits the source, put the finding in unverified_leads rather

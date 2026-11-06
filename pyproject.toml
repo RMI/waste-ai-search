@@ -12,6 +12,8 @@ dependencies = [
   "requests",
   "azure-storage-blob",
   "pyproj>=3.7.1",
+  "pypdf>=6.21.1",
+  "xlrd>=2.0.2",
 ]
 
 [dependency-groups]

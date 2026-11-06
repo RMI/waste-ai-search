@@ -63,6 +63,9 @@ class PipelineConfig:
     # the verdicts. keep_broken_links lets a dead source stay promotable instead of going to leads.
     check_links: bool = True
     keep_broken_links: bool = False
+    # The link check also keeps the text of each page that loads, in page_text/, so arbitration can
+    # check a source's quote and stated location against it (on_page.py).
+    keep_page_text: bool = True
     # Build step 4 of the source-matching plan. Locate each source's stated location after the
     # link check (geocoding addresses is network); arbitration only reads source_locations.json.
     # `geocoder` names one (azure-maps, nominatim or none); blank reads WASTE_AI_SEARCH_GEOCODER.
