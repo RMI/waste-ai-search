@@ -28,13 +28,12 @@ themselves.
 
 ## Setting it up
 
-Signed in as yourself (`az login`, on RMI-PROJECT-WASTEMAP-SUB):
+Signed in as yourself (`az login`, on RMI-PROJECT-WASTEMAP-SUB), from the repository root:
 
 ```bash
-cd infra
-terraform init
-terraform plan -out foundry.tfplan
-terraform apply foundry.tfplan
+terraform -chdir=infra init
+terraform -chdir=infra plan -out foundry.tfplan
+terraform -chdir=infra apply foundry.tfplan
 ```
 
 Then create the agent, a prompt on the model with the web search tool, and point the search at it:
