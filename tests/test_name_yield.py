@@ -111,6 +111,49 @@ def test_each_searched_site_says_what_its_search_found(tmp_path):
     assert rows["4"]["web_searches"] == 0
 
 
+def test_a_site_whose_values_only_confirmed_ours_is_still_flagged_by_the_identity_warning(tmp_path):
+    """Nothing is accepted automatically, so a confirmation is never queued and resolved.csv is
+    header-only: the gate's note is on no row. Its parse warning still flags the site."""
+    from waste_ai_search.arbitrate import run_arbitration
+    from waste_ai_search.input_loader import write_csv_records
+    from waste_ai_search.run_context import PipelineConfig
+    from waste_ai_search.seed_source import seed_headers
+
+    run_dir = tmp_path / "run"
+    write_csv_records(run_dir / "seed.csv", [{
+        "facility_id": "7", "site_id": "7", "internal_facility_id": "7", "year": "2022",
+        "site_name": "Seaton Meadows", "facility_name": "Seaton Meadows", "country_iso3": "GBR",
+        "iso3c_plus": "GBR", "latitude": "54.6", "longitude": "-1.2", "facility_type": "Sanitary Landfill",
+        "contributing_data_sources": "osm_2022", "reference_year": "2022",
+    }], seed_headers())
+    _write(run_dir / "foundry_run_log.csv", [
+        {"site_id": "7", "site_name": "Seaton Meadows", "country_iso3": "GBR", "status": "Succeeded", "web_searches": "4"},
+    ], ["site_id", "site_name", "country_iso3", "status", "web_searches"])
+
+    def found(name, value, url, source_type, unit=""):
+        source = {"source_title": "Page", "publisher": "Publisher", "source_type": source_type,
+                  "publication_date": "2024-03-01", "url": url}
+        return {"attribute_name": name, "value": value, "unit": unit, "value_basis": "Direct",
+                "confidence_score": "High", "value_date": "2024", "evidence_summary": "Says so.",
+                "sources": [source]}
+
+    mapcarta = "https://mapcarta.com/W9"  # a page about a landfill 89 km north
+    raw = run_dir / "raw_foundry_responses"
+    raw.mkdir()
+    (raw / "site_7.json").write_text(json.dumps({"site_id": "7", "attributes": [
+        found("found_latitude", "55.4", mapcarta, "Map or coordinate directory", "decimal degrees"),
+        found("found_longitude", "-1.2", mapcarta, "Map or coordinate directory", "decimal degrees"),
+        found("facility_type", "sanitary landfill", "https://regulator.example.gov/permit/7", "Regulator"),
+    ]}))
+    run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
+
+    run = ny.load_run("run", ny.local_reader(run_dir))
+    assert run.review == [] and run.resolved == []
+    [row] = ny.site_rows(run)
+    assert row["identity_not_confirmed"]
+    assert (row["new_values_accepted"], row["new_values_to_review"]) == (0, 0)
+
+
 def test_the_summary_compares_each_class_with_named_sites_from_the_same_sources(tmp_path):
     run = ny.load_run("batch1", ny.local_reader(_fake_run(tmp_path / "batch1")))
     summary = {(row["source_group"], row["name_class"]): row for row in ny.summarize(ny.site_rows(run))}

@@ -10,7 +10,6 @@ from waste_ai_search.credibility import (
     baseline_tier,
     best_source,
     is_promotable,
-    may_auto_validate,
     may_override_baseline,
     normalize_source_type,
 )
@@ -69,7 +68,6 @@ def test_tier_5_sits_below_tier_4_on_one_ordered_scale():
     assert TIER_4 < TIER_5
     assert not is_promotable(TIER_5)
     assert not may_override_baseline(TIER_5)
-    assert not may_auto_validate(TIER_5)
 
 
 def test_legacy_free_text_source_types_are_recognized():
@@ -104,7 +102,6 @@ def test_unknown_baseline_dataset_is_tier_5():
 def test_gating_thresholds():
     assert is_promotable(TIER_3) and not is_promotable(TIER_4)
     assert may_override_baseline(TIER_2) and not may_override_baseline(TIER_3)
-    assert may_auto_validate(TIER_2) and not may_auto_validate(TIER_3)
 
 
 def test_staleness_penalty_only_past_the_three_year_gap():
@@ -158,7 +155,6 @@ def test_coordinate_exception_cannot_override_a_baseline():
     tier = assign_source_tier(source("Map or coordinate directory"), "found_latitude")[0]
     assert is_promotable(tier)
     assert not may_override_baseline(tier)
-    assert not may_auto_validate(tier)
 
 
 def test_there_is_no_catch_all_source_type():

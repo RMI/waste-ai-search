@@ -43,7 +43,7 @@ def test_vendored_spec_matches_its_pin(provenance: dict) -> None:
 
 def test_spec_columns_match_the_code(provenance: dict) -> None:
     """Guard the binding itself: every spec column must exist in STANDARDIZED_FACILITY_COLUMNS."""
-    from waste_ai_search.standardized import STANDARDIZED_FACILITY_COLUMNS
+    from waste_ai_search.schema import STANDARDIZED_FACILITY_COLUMNS
 
     # Column rows carry at least 4 pipes (name/type/range/description). The enum value
     # tables are single-column and carry 2, so this count alone separates them -- names
@@ -60,11 +60,11 @@ def test_spec_columns_match_the_code(provenance: dict) -> None:
 
     assert not missing, (
         f"Spec defines columns the code does not declare: {missing}. "
-        "Update STANDARDIZED_FACILITY_COLUMNS and the code that populates it."
+        "Update STANDARDIZED_FACILITY_COLUMNS and the attribute bindings in schema.py."
     )
 
     # `point` is a real column on all 11 transformed.* tables that the spec does not document;
-    # standardized.py derives it from latitude/longitude. It is the ONLY accepted extra, so that
+    # it is derived from latitude/longitude. It is the ONLY accepted extra, so that
     # a genuinely invented column cannot slip in beside it.
     extra = [c for c in STANDARDIZED_FACILITY_COLUMNS if c not in in_spec]
     assert extra == ["point"], (
@@ -73,9 +73,22 @@ def test_spec_columns_match_the_code(provenance: dict) -> None:
     )
 
 
+def test_column_set_matches_the_spec() -> None:
+    """43 spec columns plus `point`."""
+    from waste_ai_search.schema import STANDARDIZED_FACILITY_COLUMNS
+
+    assert len(STANDARDIZED_FACILITY_COLUMNS) == 44
+    assert STANDARDIZED_FACILITY_COLUMNS[0] == "facility_id"
+    assert STANDARDIZED_FACILITY_COLUMNS[-3:] == ["data_source", "created_date", "git_sha"]
+    # Grouped with the other cover columns, where the spec puts it.
+    assert STANDARDIZED_FACILITY_COLUMNS.index("has_biocover") == (
+        STANDARDIZED_FACILITY_COLUMNS.index("cover_types") + 1
+    )
+
+
 def test_spec_column_order_is_preserved() -> None:
-    """A positional COPY against a mismatched DDL would misalign every column after the first."""
-    from waste_ai_search.standardized import STANDARDIZED_FACILITY_COLUMNS
+    """The code lists the spec's columns in the spec's order, so the two read side by side."""
+    from waste_ai_search.schema import STANDARDIZED_FACILITY_COLUMNS
 
     in_spec = []
     for line in SPEC.read_text().splitlines():

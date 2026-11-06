@@ -81,7 +81,7 @@ UNSEARCHED_ATTRIBUTES = {
 }
 
 # Always requested. These are how we know the agent found the *right* facility, so they are not
-# gap-filled: identity confirmation is what makes an auto-validated fill defensible (Q30).
+# gap-filled: the identity check rests on them (Q34).
 IDENTITY_ATTRIBUTES = [
     "found_facility_name",
     "found_latitude",
@@ -130,6 +130,12 @@ COORDINATES_ONLY_ISO3 = {"BRA"}
 
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
 
+# The agent reports latitude and longitude separately, and each is resolved against the seed on
+# its own, but a location is one fact. Arbitration combines the two into this attribute, valued
+# "lat, lon", so a location is accepted, reviewed and loaded as a pair, from one source, or not
+# at all.
+LOCATION_ATTRIBUTE = "found_location"
+
 # The full run in six batches, run in order (F30). Batches 1-2 are English-speaking, so SMEs learn
 # the review process on familiar sources: English as the main language, then as an official one.
 # Batches 3-5 follow the most blank core fields (searchable sites x share of status, type, opening
@@ -164,13 +170,11 @@ def in_batch(iso3: str, batch: int) -> bool:
 # a quarry, a mine, a yard that never took waste. It is a contradiction, not a verification:
 # finding nothing leaves facility_type empty, never "Not a Waste Facility".
 #
-# It is promoted like any other facility_type value, so it reaches the standardized table and the
-# next pass's seed. It is also always routed to review, so every such verdict is seen by a human.
+# It is handled like any other facility_type value: it goes to review, as every found value that
+# differs from ours does, and it reaches the next pass's seed.
 #
 # PENDING UPSTREAM: the database's `facility_type` enum and chk_facility_type do not carry this
-# value yet, so a load containing it will be rejected - and COPY is all-or-nothing, so one such
-# row blocks the whole run's load. transformed.transformed_ai_search does not exist yet either,
-# so no load runs today; the enum value should land upstream with that table.
+# value yet, so consolidating a validated one will be rejected until it is added upstream.
 NOT_A_WASTE_FACILITY = "Not a Waste Facility"
 # A site where recyclables are dropped off, sorted or processed and nothing is disposed of. Like
 # "Not a Waste Facility" it is PENDING UPSTREAM: requested for the database enum and spec, and
@@ -203,11 +207,6 @@ CORROBORATING_ATTRIBUTES = [
     "annual_incoming_waste_metric_tonnes",
     "waste_in_place_metric_tonnes",
 ]
-
-# (attribute, value) pairs never signed off by the pipeline, whatever the tier. A Tier 1 regulator
-# calling a site a quarry would otherwise auto-validate as an ordinary empty-baseline fill. This
-# only sets validation_status - the value is still promoted.
-ALWAYS_REVIEW_VALUES = {("facility_type", NOT_A_WASTE_FACILITY)}
 
 
 # Computed locally from found coordinates. No source, no tier (Q12).
@@ -379,7 +378,7 @@ GCCS_CURRENT_PROJECT_STATUS_MAP = {
 }
 
 # F31. No database enum or standardized column exists yet, so these values are this project's own;
-# like `operator`, bulk_waste_type reaches resolved.csv and review but not the standardized table.
+# like `operator`, bulk_waste_type reaches review but has no standardized column.
 BULK_WASTE_TYPE_VALUES = ["municipal solid waste", "inert waste", "others"]
 # The distinction that matters is municipal solid waste, which decomposes and generates methane,
 # against inert waste, which does not; the prompt defines each and classifies by the bulk received.
@@ -504,6 +503,9 @@ EVIDENCE_HEADERS = [
     "exclusion_reason", "record_created_date",
 ]
 
+# resolved.csv is written with this header and no rows. Nothing is accepted automatically, so every
+# value goes to review, and ingestion reads the SMEs' decisions from the review workbook. The file
+# stays because ingestion's loader expects it, and runs from before still carry rows.
 RESOLVED_HEADERS = [
     "site_id", "internal_facility_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name",
     "baseline_value", "baseline_source", "baseline_tier",
@@ -514,8 +516,10 @@ RESOLVED_HEADERS = [
     "researcher_notes",
 ]
 
-# Who is recorded as having signed off a row the pipeline decided without a human.
-AUTO_REVIEWER = "AI Agent"
+# The validation_status of a row that leaves our database as it is: a source confirmed our value,
+# or nothing was found. It is neither queued nor loaded. A found value that differs from ours is
+# "Needs review", and one weaker than ours "Routed to leads": nothing is accepted automatically.
+NOTHING_TO_REVIEW = "Nothing to review"
 
 SOURCES_HEADERS = [
     "source_id", "url_normalized", "url", "source_title", "publisher", "source_type",
@@ -535,9 +539,11 @@ REVIEW_QUEUE_HEADERS = [
     "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
     "agreeing_source_count",
     # corrected_value is the right value when the found one is wrong. resolved_value is never
-    # edited, so the AI's own answer survives for measuring its error rate.
-    "evidence_summary", "validation_status", "rejection_reason", "corrected_value", "reviewer",
-    "reviewed_date",
+    # edited, so the AI's own answer survives for measuring its error rate. corrected_value_date
+    # is the date a correction applies to, where that isn't the source's value_date - a current
+    # figure replacing one rejected as outdated, say.
+    "evidence_summary", "validation_status", "rejection_reason", "corrected_value",
+    "corrected_value_date", "reviewer", "reviewed_date",
     "researcher_notes",
 ]
 
@@ -558,10 +564,10 @@ PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 # --- standardized facility table (Q19) --------------------------------------------------------
 AI_SEARCH_DATA_SOURCE = "ai_search_2026"
 
-# Column order follows StandardizedFacilityTableSpecification.md, which as of upstream 8c0bb3fe
-# defines `has_biocover` beside the other cover columns - where this table had already placed it.
-# Order still matters: the generated load statement names every column, but a positional COPY
-# against a table whose DDL disagrees would misalign everything after the first mismatch.
+# The columns of the standardized facility table, in the order StandardizedFacilityTableSpecification.md
+# defines them (as of upstream 8c0bb3fe, `has_biocover` sits beside the other cover columns). This
+# repository no longer writes the table: ingestion builds it from reviewed values. The list stays so
+# the attribute bindings above can be checked against the vendored spec and the database.
 STANDARDIZED_FACILITY_COLUMNS = [
     "facility_id", "year", "facility_name", "iso3c_plus", "area_square_meters", "facility_status",
     "facility_type", "opening_year", "closing_year", "has_landfill_gas_collection",
@@ -606,11 +612,11 @@ DEFINITION_VALUES = {
     "confidence_score": ["High", "Medium", "Low", "Excluded candidate"],
     "resolution": RESOLUTION_VALUES,
     "source_tier": ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Tier 5"],
-    "validation_status": ["Needs review", "Validated", "Rejected", "Auto-validated", "Routed to leads"],
+    "validation_status": ["Needs review", "Validated", "Rejected", NOTHING_TO_REVIEW, "Routed to leads"],
     # What a reviewer may choose. The other statuses are set by the pipeline, not by hand.
     "review_decision": ["Validated", "Rejected"],
     # Why a reviewer rejected a value. A fixed list, so rejections can be counted by cause to find
-    # where the AI goes wrong and where auto-validation is safe; detail goes in researcher_notes.
+    # where the AI goes wrong; detail goes in researcher_notes.
     "rejection_reason": ["Wrong facility", "Not in source", "Wrong value", "Outdated", "Other"],
     # Booleans as resolved_value shows them, so a correction reads like the value it replaces.
     "true_false": ["TRUE", "FALSE"],

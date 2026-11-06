@@ -193,7 +193,7 @@ def test_a_run_counts_its_drops_in_parse_warnings_and_cites_none_of_them(tmp_pat
 
 
 # --- the identity gate still reads a map site's coordinates -----------------------------------
-# Until build step 3 replaces the 5 km identity gate, a dropped map page's coordinates still say
+# Until build step 5 replaces the 5 km identity gate, a dropped map page's coordinates still say
 # whether the agent researched another landfill. In batch 1 they were the only found coordinates at
 # 34 of the 46 sites the gate flagged, among them three "domestic landfill" sites that each got East
 # Prince Waste Management Facility's values.
@@ -208,7 +208,7 @@ def map_page(lat, lon, url="https://mapcarta.com/W9"):
     ]
 
 
-def test_a_far_map_page_still_withdraws_auto_validation(tmp_path):
+def test_a_far_map_page_still_flags_the_sites_values(tmp_path):
     """The East Prince pattern: a map page of another landfill, and a Tier 1 operator from its register."""
     operator = attribute("operator", "Island Waste Management Corporation", REGULATOR)
     out = arbitrate(build_run(tmp_path, attributes=[*map_page(*FAR), operator], leads=[]))
@@ -227,10 +227,11 @@ def test_a_far_map_page_still_withdraws_auto_validation(tmp_path):
     assert not any(row["attribute_name"].startswith("found_l") for row in out["review_queue"])
 
 
-def test_a_near_map_page_leaves_auto_validation_alone(tmp_path):
+def test_a_near_map_page_adds_no_identity_note(tmp_path):
     operator = attribute("operator", "City of Brandon", REGULATOR)
     out = arbitrate(build_run(tmp_path, attributes=[*map_page(*NEAR), operator], leads=[]))
-    assert [row["attribute_name"] for row in out["resolved"]] == ["operator"]
+    [queued] = [row for row in out["review_queue"] if row["attribute_name"] == "operator"]
+    assert "Identity" not in queued["researcher_notes"]
     assert not any("Identity" in row["warning"] for row in out["parse_warnings"])
 
 
@@ -242,7 +243,8 @@ def test_a_far_map_page_counts_even_beside_near_kept_coordinates(tmp_path):
     ]
     operator = attribute("operator", "City of Brandon", REGULATOR)
     out = arbitrate(build_run(tmp_path, attributes=[*kept, *map_page(*FAR), operator], leads=[]))
-    assert "operator" not in [row["attribute_name"] for row in out["resolved"]]
+    [queued] = [row for row in out["review_queue"] if row["attribute_name"] == "operator"]
+    assert queued["researcher_notes"].startswith("Identity not confirmed: coordinates on a mapcarta.com page")
     warnings = [row["warning"] for row in out["parse_warnings"]]
     assert any(warning.startswith("Identity not confirmed: mapcarta.com page's") for warning in warnings)
 

@@ -140,52 +140,47 @@ REVIEW_INSTRUCTIONS = [
     {
         "tab_name": "Review_Queue",
         "purpose": (
-            "YOUR WORKLIST. The values the pipeline would not sign off itself: a value from a "
-            "weak or unclassifiable source, or a candidate that disagrees with the existing "
-            "baseline. Values it did sign off (reviewer = AI Agent) are in resolved.csv instead "
-            "and are not shown here. These rows are not in resolved.csv: this tab is the only "
-            "place they live until you validate them."
+            "YOUR WORKLIST. Every value the search found for an empty field, whatever the "
+            "source's tier, and every value that disagrees with the database's from a Tier 1-3 "
+            "source at least as credible as the database's own (for status, a Tier 1-3 source at "
+            "least 3 years newer). Nothing is accepted without review. A weaker disagreement, a "
+            "source whose link is dead and a unit that could not be converted are on the Leads tab "
+            "instead. A source that only confirms the database's value is not shown, and nothing "
+            "from it is loaded. Ingestion reads your decisions from this tab."
         ),
         "sme_action": (
             "Work top to bottom. To see where the database puts the site, paste "
             "baseline_coordinates into Google Maps. Compare site_name with original_site_name - the source's own "
             "spelling - and note any translation problem in translation_note. Open "
-            "winning_source_url and check the source says this, about THIS facility. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields) - never edit resolved_value. Put your name in "
+            "winning_source_url and check the source says this, about THIS facility. A found_location row is one point, "
+            "lat, lon: paste it into Google Maps beside baseline_coordinates, and accept or reject the pair. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields; for a location, lat, lon) - never edit resolved_value. If your corrected value is for a different date than value_date, a current figure replacing an outdated one say, put that date in corrected_value_date (YYYY, YYYY-MM or YYYY-MM-DD). Put your name in "
             "reviewer and the date in reviewed_date, and say why in researcher_notes. An empty "
             "queue means nothing needs you."
         ),
         "editable": (
-            "validation_status, rejection_reason, corrected_value, reviewer, reviewed_date, "
+            "validation_status, rejection_reason, corrected_value, corrected_value_date, reviewer, reviewed_date, "
             "researcher_notes, "
             "translation_note - "
             "nothing else"
         ),
     },
     {
-        "tab_name": "(file) resolved.csv",
-        "purpose": (
-            "One row per value the agent found and the rules auto-validated: what the pipeline "
-            "now believes and why. Values awaiting your decision are in Review_Queue instead, and "
-            "attributes that were searched but not found are not written anywhere."
-        ),
-        "sme_action": "Read only. Open it to see what was accepted without review.",
-        "editable": "nothing",
-    },
-    {
         "tab_name": "(file) evidence.csv",
-        "purpose": "One row per source-backed claim, with the tier rule applied to each source.",
+        "purpose": (
+            "One row per source-backed claim, with the tier rule applied to each source. Sources "
+            "that only confirm the database's value are here too."
+        ),
         "sme_action": "Read only. Open it to see why a value won or lost.",
         "editable": "nothing",
     },
     {
-        "tab_name": "(file) std_facility_tbl_ai_search_*.csv",
-        "purpose": "The 43-column standardized facility table - only promoted values, ready to merge.",
-        "sme_action": "Read only.",
-        "editable": "nothing",
-    },
-    {
         "tab_name": "Leads",
-        "purpose": "Findings whose only sources fell below the credibility floor, plus the agent's own unverified leads.",
+        "purpose": (
+            "Findings that lost: a disagreement with the database's value from a source below the "
+            "credibility floor (Tier 4-5) or weaker than the database's, a source whose link is "
+            "dead, a unit that could not be converted, half a location; plus the agent's own "
+            "unverified leads."
+        ),
         "sme_action": "Read only. Promote something by hand if you judge the source good enough.",
         "editable": "nothing",
     },
@@ -323,8 +318,8 @@ def write_review_workbook(
 ) -> Path:
     """The SME-facing artifact: only rows that need a human decision (Q31).
 
-    Evidence, Resolved and the standardized table stay as CSV sidecars for audit. They are far too
-    large to review by hand at full scale, and nothing in them requires a decision.
+    Evidence and sources stay as CSV sidecars for audit. They are far too large to review by hand at
+    full scale, and nothing in them requires a decision.
     """
     wb = Workbook()
     wb.remove(wb.active)

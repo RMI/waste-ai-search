@@ -46,20 +46,20 @@ def test_a_unit_abbreviation_is_not_read_as_a_magnitude():
     assert convert("waste_depth", "500", "mm").value == "500"  # millimetres, not million
 
 
-def test_a_lone_far_coordinate_still_withdraws_auto_validation():
+def test_a_lone_far_coordinate_still_flags_the_sites_values():
     from waste_ai_search.arbitrate import flag_identity_mismatch, single_axis_offset_km
 
     site = {"latitude": "52.5", "longitude": "13.4"}
     resolved = [
         {"attribute_name": "found_latitude", "resolved_value": "50.5", "resolution": "Filled empty baseline",
-         "validation_status": "Auto-validated"},
+         "validation_status": "Needs review"},
         {"attribute_name": "facility_status", "resolved_value": "Active", "resolution": "Filled empty baseline",
-         "validation_status": "Auto-validated"},
+         "validation_status": "Needs review"},
     ]
     km = single_axis_offset_km(site, resolved)
     assert km == pytest.approx(222.4, abs=0.5)
     assert flag_identity_mismatch(resolved, km)
-    assert resolved[1]["validation_status"] == "Needs review"
+    assert resolved[1]["researcher_notes"].startswith("Identity not confirmed")
 
 
 def test_the_workbook_does_not_point_smes_at_rows_resolved_csv_no_longer_holds():

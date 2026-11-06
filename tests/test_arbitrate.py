@@ -2,6 +2,7 @@ from datetime import date
 
 from waste_ai_search.arbitration import needs_review, resolve, routed_to_leads
 from waste_ai_search.arbitrate import dedupe_sources, extract_evidence, normalize_url
+from waste_ai_search.schema import NOTHING_TO_REVIEW
 
 
 REGULATOR = {
@@ -146,12 +147,13 @@ def test_tier_4_against_a_stronger_baseline_routes_to_leads():
     assert not needs_review(resolved)
 
 
-def test_empty_baseline_filled_by_tier_1_auto_validates():
+def test_empty_baseline_filled_by_tier_1_goes_to_review():
+    """Reversed on purpose: Tier 1-2 fills once auto-validated (Q30). Nothing is accepted automatically."""
     by_attr, _rows, _sources, _warn = extract(site(), payload(attribute("facility_status", "active")))
 
     resolved = resolve(site(), "facility_status", by_attr["facility_status"])
     assert resolved["resolution"] == "Filled empty baseline"
-    assert resolved["validation_status"] == "Auto-validated"
+    assert resolved["validation_status"] == "Needs review"
 
 
 def test_tier_3_fill_goes_to_review():
@@ -171,6 +173,7 @@ def test_tier_1_source_overrides_a_tier_4_baseline():
     resolved = resolve(s, "facility_type", by_attr["facility_type"])
     assert resolved["resolution"] == "Overrides baseline"
     assert resolved["credibility_margin"] == 3
+    assert resolved["validation_status"] == "Needs review"
 
 
 def test_equal_tier_disagreement_goes_to_review():
@@ -184,12 +187,14 @@ def test_equal_tier_disagreement_goes_to_review():
 
 
 def test_agreement_with_baseline_is_recorded_as_confirmation():
+    """A confirmation changes nothing, so it is neither queued nor loaded."""
     s = site(facility_type="Sanitary Landfill", contributing_data_sources="osm_2022")
     by_attr, _rows, _sources, _warn = extract(s, payload(attribute("facility_type", "sanitary landfill")))
 
     resolved = resolve(s, "facility_type", by_attr["facility_type"])
     assert resolved["resolution"] == "Confirmed baseline"
-    assert resolved["validation_status"] == "Auto-validated"
+    assert resolved["validation_status"] == NOTHING_TO_REVIEW
+    assert not needs_review(resolved)
 
 
 def test_corroboration_is_counted():
@@ -289,7 +294,7 @@ def test_gazetteer_coordinates_promote_and_confirm_identity():
 
     lat = resolve(s, "found_latitude", by_attr["found_latitude"])
     assert lat["resolution"] == "Confirmed baseline"
-    assert lat["validation_status"] == "Auto-validated"
+    assert lat["validation_status"] == NOTHING_TO_REVIEW
 
 
 def test_gazetteer_coordinates_that_disagree_become_a_reviewable_conflict():
@@ -337,8 +342,9 @@ def test_gazetteer_metadata_cannot_beat_an_existing_value():
     assert resolved["validation_status"] == "Routed to leads"
 
 
-def test_distant_coordinates_withdraw_auto_validation():
-    """A credible source describing the wrong facility is what tier cannot catch."""
+def test_distant_coordinates_flag_every_value_for_the_sme():
+    """A credible source describing the wrong facility is what tier cannot catch. With nothing
+    accepted automatically, the gate only adds its note; build step 5 replaces it."""
     from waste_ai_search.arbitrate import append_distance_row, flag_identity_mismatch
 
     s = site(latitude="6.5", longitude="3.3")
@@ -355,18 +361,21 @@ def test_distant_coordinates_withdraw_auto_validation():
         for name in ("found_latitude", "found_longitude", "facility_status")
     ]
     status = resolved_rows[-1]
-    assert status["validation_status"] == "Auto-validated"  # tier alone would pass it
+    assert status["validation_status"] == "Needs review"
 
     km = append_distance_row(s, resolved_rows)
     assert flag_identity_mismatch(resolved_rows, km) is True
 
     assert status["validation_status"] == "Needs review"
     assert "Identity not confirmed" in status["researcher_notes"]
+    assert "Check the source is about this facility." in status["researcher_notes"]
+    assert "Auto-validation" not in status["researcher_notes"]
     assert resolved_rows[-1]["resolution"] == "Calculated"
-    assert resolved_rows[-1]["validation_status"] == "Auto-validated"
+    assert resolved_rows[-1]["validation_status"] == NOTHING_TO_REVIEW
+    assert "Identity not confirmed" not in resolved_rows[-1]["researcher_notes"]
 
 
-def test_nearby_coordinates_keep_auto_validation():
+def test_nearby_coordinates_add_no_identity_note():
     from waste_ai_search.arbitrate import append_distance_row, flag_identity_mismatch
 
     s = site(latitude="6.5", longitude="3.3")
@@ -384,13 +393,13 @@ def test_nearby_coordinates_keep_auto_validation():
     ]
     km = append_distance_row(s, resolved_rows)
     assert flag_identity_mismatch(resolved_rows, km) is False
-    assert resolved_rows[-1]["validation_status"] == "Auto-validated"
+    assert not any("Identity not confirmed" in row["researcher_notes"] for row in resolved_rows)
 
 
-def test_sub_threshold_coordinate_difference_stops_going_to_review():
-    """Four of five pilot coordinate conflicts were under 200 m apart (feedback 5)."""
-    from waste_ai_search.arbitrate import settle_near_coordinates
-
+def test_a_coordinate_200_m_from_ours_goes_to_review():
+    """Reversed on purpose. Four of five pilot coordinate conflicts were under 200 m apart, and the
+    1 km rule (feedback 5) settled them as the same place. Every value that differs from ours is
+    now reviewed; one equal to ours to comparison precision is still a confirmation."""
     s = site(latitude="14.844807966", longitude="120.33153842")
     by_attr, _rows, _sources, _warn = extract(
         s,
@@ -401,24 +410,6 @@ def test_sub_threshold_coordinate_difference_stops_going_to_review():
     )
     resolved_rows = [resolve(s, name, by_attr[name]) for name in ("found_latitude", "found_longitude")]
     assert all(needs_review(row) for row in resolved_rows)
-
-    settled = settle_near_coordinates(s, resolved_rows)
-    assert settled == 2
-    assert not any(needs_review(row) for row in resolved_rows)
-    assert "same place" in resolved_rows[0]["resolution_rule"]
-
-
-def test_large_coordinate_difference_still_goes_to_review():
-    from waste_ai_search.arbitrate import settle_near_coordinates
-
-    s = site(latitude="15.140209253", longitude="120.54323141")
-    by_attr, _rows, _sources, _warn = extract(
-        s, payload(attribute("found_latitude", "16.89324", "decimal degrees", sources=[GAZETTEER]))
-    )
-    resolved_rows = [resolve(s, "found_latitude", by_attr["found_latitude"])]
-
-    assert settle_near_coordinates(s, resolved_rows) == 0
-    assert needs_review(resolved_rows[0])
 
 
 def test_single_axis_coordinate_is_judged_without_its_counterpart():
@@ -487,39 +478,25 @@ def test_a_finding_is_never_both_promoted_and_listed_as_a_lead():
     assert leads == []
 
 
-def test_auto_validated_rows_are_signed_by_the_agent():
-    """Three blank columns on a row nobody will review is just a gap; record who decided it."""
-    from datetime import date
+def test_no_row_is_signed_off_by_the_agent():
+    """Reversed on purpose: rows the pipeline once accepted itself carried reviewer = AI Agent.
+    Nothing is accepted automatically now, so the reviewer columns are left for the SME."""
+    s = site(facility_type="Sanitary Landfill", contributing_data_sources="osm_2022")
+    by_attr, _rows, _sources, _warn = extract(
+        s, payload(attribute("facility_status", "active"), attribute("facility_type", "sanitary landfill"))
+    )
+    rows = [
+        resolve(s, "facility_status", by_attr["facility_status"]),  # a Tier 1 fill
+        resolve(s, "facility_type", by_attr["facility_type"]),  # a confirmation
+        resolve(s, "opening_year", []),  # not found
+    ]
 
-    by_attr, _rows, _sources, _warn = extract(site(), payload(attribute("facility_status", "active")))
-    row = resolve(site(), "facility_status", by_attr["facility_status"], reviewed_on=date(2026, 9, 15))
-
-    assert row["validation_status"] == "Auto-validated"
-    assert row["reviewer"] == "AI Agent"
-    assert row["reviewed_date"] == "2026-09-15"
-    assert row["researcher_notes"]  # carries the agent's own evidence summary
-
-
-def test_rows_awaiting_a_human_are_left_unsigned():
-    from datetime import date
-
-    s = site(facility_status="Inactive", contributing_data_sources="usa_ghgrp_2026")
-    by_attr, _rows, _sources, _warn = extract(s, payload(attribute("facility_status", "active")))
-    row = resolve(s, "facility_status", by_attr["facility_status"], reviewed_on=date(2026, 9, 15))
-
-    assert row["validation_status"] == "Needs review"
-    assert row["reviewer"] == ""
-    assert row["reviewed_date"] == ""
-    assert row["researcher_notes"] == ""
-
-
-def test_not_found_rows_are_signed_too():
-    from datetime import date
-
-    row = resolve(site(), "facility_status", [], reviewed_on=date(2026, 9, 15))
-    assert row["resolution"] == "Not found"
-    assert row["reviewer"] == "AI Agent"
-    assert row["researcher_notes"] == "No source-backed evidence returned."
+    assert [row["validation_status"] for row in rows] == ["Needs review", NOTHING_TO_REVIEW, NOTHING_TO_REVIEW]
+    for row in rows:
+        assert (row["reviewer"], row["reviewed_date"]) == ("", "")
+    assert rows[0]["researcher_notes"] == ""
+    assert rows[2]["resolution"] == "Not found"
+    assert not needs_review(rows[2])
 
 
 def test_dropped_columns_are_gone_from_resolved_output():

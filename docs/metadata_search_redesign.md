@@ -126,16 +126,16 @@ Separately, this scan found existing schema drift: responses contain `found_lati
 
 | Candidate tier | Empty baseline | Non-empty baseline |
 |---|---|---|
-| Tier 1–2 | Promote, auto-validated | May override, subject to §5 |
+| Tier 1–2 | Promote, needs review | May override, subject to §5 |
 | Tier 3 | Promote, needs review | Cannot override → `Conflict - needs review` |
 | Tier 4 | Promote, needs review | → leads |
 | Tier 5 | Promote, needs review | → leads |
 
-**This table reflects the final rules, including the later change (F1) that lets any tier fill an
-*empty* baseline.** The original proposal routed Tier 4 and below to leads in both columns. Tier
-still governs auto-validation, so a Tier 3–5 fill always reaches a human. Once a baseline value
-exists the floor applies: only Tier 1–2 may override it, and weaker contradictions go to leads
-rather than consuming review time.
+**This table reflects the final rules, including the later changes that let any tier fill an
+*empty* baseline (F1) and that review every fill (F36).** The original proposal routed Tier 4 and
+below to leads in both columns, and auto-validated Tier 1–2 fills. Once a baseline value exists the
+floor applies: only Tier 1–2 may override it, and weaker contradictions go to leads rather than
+consuming review time. A value equal to the baseline is a confirmation, neither queued nor loaded.
 
 ## 5. Baseline tiering and arbitration (Q6)
 
@@ -243,7 +243,9 @@ run against the new seed.
 
 So the pipeline shape is: `transformed.transformed_<source>` → merge → `consolidation.consolidated_facility`
 (our seed). AI search is another *source*, which means its natural output is a spec-conformant
-standardized table that merges like any other.
+standardized table that merges like any other. **Since F36** ingestion #261 builds that table from
+reviewed values, and this repository no longer writes one, so the mismatches in §10.3 are
+ingestion's to handle.
 
 ### 10.1 Every categorical value the agent returns is invalid (measured)
 
@@ -317,28 +319,28 @@ All settled. Where an answer overrode my recommendation it is marked.
 | Q12 | Calculated distance | `Resolved` with `resolution = Calculated`, no tier |
 | Q13 | Missing tokens | `canada_ghgrp_2021` → T1, `waste_atlas_dumpsites_2013` → T3 |
 | Q14 | Format at scale | Workbook for small runs, CSV above |
-| Q15 / Q30 | Auto-validation | Confirmations auto-validate; Tier 1–2 fills auto-validate; Tier 3 fills reviewed |
+| Q15 / Q30 | Auto-validation | Confirmations auto-validate; Tier 1–2 fills auto-validate; Tier 3 fills reviewed. **Reversed by F36.** |
 | Q17 | Re-run semantics | Split `search` / `arbitrate`; arbitration rebuilds from cache |
 | Q18 | Old constants | Deleted |
-| Q19 | Standardized table | Emitted as a fourth artifact |
+| Q19 | Standardized table | Emitted as a fourth artifact. **Reversed by F36:** ingestion builds it from reviewed values. |
 | Q20 / Q26 | Categorical mapping | Collapse onto DB enums; **`landfill` → `Sanitary Landfill`** (overrode my NULL / lead-only recommendation — see risk note below) |
 | Q21 | Enum source of truth | Generated from the DB into a committed module |
 | Q22 | `has_biocover` | Dropped; `cover_types` searched instead |
 | Q23 | Coordinates | Split into `found_latitude` / `found_longitude` |
-| Q24 | Year | **One record per facility, `year` = latest year of record** (overrode the per-year pivot) |
+| Q24 | Year | **One record per facility, `year` = latest year of record** (overrode the per-year pivot). **Moot since F36:** this repository no longer builds the standardized table. |
 | Q25 | New token | `ai_search_2026`; `sinir_2024` → T1, `manual_entry` → T3 |
-| Q27 | `facility_id` | `internal_facility_id` as text; rows only where something was promoted |
-| Q28 | Confirmations | Included in the standardized table |
+| Q27 | `facility_id` | `internal_facility_id` as text; rows only where something was promoted. **Moot since F36:** this repository no longer builds the standardized table. |
+| Q28 | Confirmations | Included in the standardized table. **Reversed by F36:** a confirmation is neither queued nor loaded. |
 | Q29 | Search mode | **Gap-fill** — only attributes empty for that facility are requested |
 | Q31 | SME artifact | Filtered review queue workbook; other levels are CSV sidecars |
 | Q32 | Cost | Site delay 3s; prompt trimmed to the requested attributes |
 | Q33 | Credibility is attribute-dependent | A coordinate directory is Tier 3 **for coordinates only**, Tier 4 for everything else. Wikis stay Tier 4 even for coordinates. |
-| Q34 | Identity gate | Found coordinates more than 5 km from the seed withdraw auto-validation for that whole site |
-| F1 | Fills bypass the credibility floor | An **empty** baseline is filled at any tier. Tier still decides auto-validation vs review. Reverses part of Q3. |
+| Q34 | Identity gate | Found coordinates more than 5 km from the seed withdraw auto-validation for that whole site. Since F36 nothing is auto-validated, so it only adds its note; build step 5 of the source-matching plan replaces it. |
+| F1 | Fills bypass the credibility floor | An **empty** baseline is filled at any tier. Tier still decides auto-validation vs review (until F36, which reviews every fill). Reverses part of Q3. |
 | F2 | Conflicts route by relative tier | Candidate better than baseline → review. Equal → review. Worse → leads. |
 | F3 | Leads stay out of the queue | Lead-routed rows get `validation_status = Routed to leads` and are excluded from `review_queue.csv`. |
 | F4 | Closure emphasis | `closing_year` is flagged REQUIRED for inactive sites, with upfront emphasis when the baseline or the name already says closed. |
-| F5 | Coordinate review threshold | Coordinate differences under **1 km** auto-validate instead of queueing. |
+| F5 | Coordinate review threshold | Coordinate differences under **0.5 km** auto-validate instead of queueing (1 km until WP-552). **Removed by F36.** |
 | F6 | Widened attribute set | Added `waste_depth_meters`, `has_cover`, 4 GCCS methane quantities, 2 GCCS project enums, `gccs_collection_efficiency`. 20 requestable attributes, up from 11. |
 | F7 | GCCS gated on gas collection | The 7 GCCS attributes are requested **only** where gas collection is known present. Unknown is deferred, not dropped. |
 | F8 | Two-pass seed refresh | `refresh-seed` merges a run's promoted values back into the seed, so a facility whose gas collection is discovered on pass 1 gets its GCCS attributes on pass 2. |
@@ -357,7 +359,7 @@ All settled. Where an answer overrode my recommendation it is marked.
 | F22 | Workbook-safe text and links | Characters openpyxl rejects are replaced with a space in every cell, since one would abort the whole workbook. Hyperlink targets are made safe - raw spaces and non-ASCII percent-encoded, non-ASCII hosts IDNA-encoded - while the cell shows the source's URL unchanged; existing `%` escapes are never decoded (the refining-ai-search RDP-63 lesson). Only `http`/`https` links are clickable, and none beyond Excel's 2,079-character limit. |
 | F23 | Source links checked (WP-533) | Ported from refining-ai-search RDP-63. Cited URLs are fetched at the end of the search phase and given OK / Broken / Unverified verdicts in `link_check.json`; arbitration only reads them, so it stays offline. A Broken source is treated like one with no URL - not promoted, routed to Leads - unless `--keep-broken-link-evidence`. Unverified is never touched. |
 | F24 | Blob storage and SharePoint (WP-534) | Run folders mirror to Azure Blob (adapted from refining-ai-search RDP-52): pull before searching so paid responses are reused, push after each search pass and after arbitration, never overwrite local files on pull. Used once configured, local until then. Review workbooks are copied into a OneDrive-synced SharePoint folder; a copy an SME has edited or has open is never overwritten. |
-| F25 | `resolved.csv` keeps only auto-validated values (WP-542) | Only rows that are promoted (`Confirmed baseline`, `Filled empty baseline`, `Overrides baseline`), `Auto-validated` and carry a value are written - on `pilot10_v7`, 8 of 145 rows are kept; 14 are in the review queue, 120 were `Not found`. Needs-review rows live in the review workbook until an SME promotes them. The full set is still built in memory, so the review queue, Contradictions and the standardized table are unchanged. The pass-2 refresh reads `resolved.csv` plus `review_queue.csv`, so a gas collection system awaiting review still unlocks the follow-up. |
+| F25 | `resolved.csv` keeps only auto-validated values (WP-542). **Superseded by F36:** it is written header-only. | Only rows that are promoted (`Confirmed baseline`, `Filled empty baseline`, `Overrides baseline`), `Auto-validated` and carry a value are written - on `pilot10_v7`, 8 of 145 rows are kept; 14 are in the review queue, 120 were `Not found`. Needs-review rows live in the review workbook until an SME promotes them. The full set is still built in memory, so the review queue, Contradictions and the standardized table are unchanged. The pass-2 refresh reads `resolved.csv` plus `review_queue.csv`, so a gas collection system awaiting review still unlocks the follow-up. |
 | F26 | Brazil SINIR municipality in the prompt (WP-543) | SINIR coordinates are a municipality centre and most names are generic ("Lixão"). The seed now carries SINIR's recorded municipality and state (`facility_city_location` named via `raw_sinir_general_city_data`) into `municipality`/`admin1` - all 3,913 inexact sites. On the same 20 sites: without it, 3 locations came back, all wrong (two other facilities 140 and 237 km away, one city hall); with it, 0 came back, and the agent identified the real facility in research and government reports that publish no readable coordinates. Web search improves precision here but finds no coordinates; matching against OSM/GPW landfills within the municipality is the likelier fix. So Brazil joins the US in `DEFAULT_EXCLUDED_ISO3`; `--iso3 BRA`, `--site-ids` or `--include-excluded-countries` still searches it. |
 | F27 | Bing queries counted; retries capped (WP-545) | Each response's `web_search_call` items list the queries Bing was sent; their count, summed over every attempt, is logged per site as `web_searches` (adding up across resumed runs and follow-up passes) and totalled per run. Foundry-error and search-tool retries both default to 2, so a site runs the agent at most 4 times instead of 9. One live site with 12 attributes made 39 queries. A budget asked for in the prompt was ignored (233 vs 235 queries on the same 10 sites), so searches are capped with the Responses API's `max_tool_calls` (default 6 per attempt, `--max-web-searches`), which Foundry enforces: 189 queries on those sites, with similar values found. Each search sends ~4 queries, so the cap is on searches. |
 | F28 | Sites searched in parallel (WP-546) | `search` runs `--workers` sites at once (default 4) on a thread pool; a search is mostly waiting on Foundry. The WP-545 10 sites took 1 min 36 s with 4 workers against about 4 minutes one at a time (hung site excluded), with no 429s. Each thread has its own client, because a client holds the Bing count of the site it is searching. The SIGALRM site timeout works only on the main thread, so `--hard-site-timeout-seconds` is now enforced in the client: each call runs in a daemon thread and is abandoned at the deadline, and no retry starts past it. That also ends the WP-545 case where a timed-out site was retried for another 15 minutes. Past runs: median call 41 s, p99 98 s, so 240 s cuts off only hung calls. |
@@ -368,6 +370,7 @@ All settled. Where an answer overrode my recommendation it is marked.
 | F33 | Transfer stations and recycling centres (WP-551) | `facility_type` offers `Transfer Station` and `Recycling Center`, both pending upstream: Transfer Station is in every `transformed.*` CHECK but not the enum type or `consolidated_facility`'s CHECK; Recycling Center is in none. The prompt's allowed list is built from the enum, so a regenerated `db_enums.py` reaches the agent without a code edit. A transfer station or recycling centre on a closed landfill is classified as the landfill, since the buried waste still emits. |
 | F34 | One worklist (WP-550) | The Contradictions tab is gone: a "Not a Waste Facility" verdict, or any facility_type that differs from the baseline, is reviewed on the site's own `facility_type` row in Review_Queue. The closure cross-check moved into that row's `evidence_summary`. Separate tabs for overlapping purposes confused reviewers. |
 | F35 | Newer evidence wins (WP-558) | Within a tier the newer `value_date` wins, ahead of corroboration. For `facility_status` only, a lower-tier source down to the promotion floor (Tier 3) may beat a better-tier source or the baseline when at least 3 years newer, always for review: a dated Tier 1 permit against recent Tier 3 news is the common case. `resolution_rule` states the dates. Re-arbitrating batch 1 changed 4 values (pass-1/pass-2 disagreements on gas-project fields). |
+| F36 | Nothing is accepted automatically (source-matching plan, build step 3) | Every found value that fills an empty field, at any tier, or disagrees with ours from a Tier 1–3 source at least as credible as ours goes to the review queue: `Filled empty baseline`, `Overrides baseline` and `Conflict - needs review`. A value equal to ours (`Confirmed baseline`) keeps its evidence in `evidence.csv`, but is not queued and not loaded, so the search never becomes the credited source for a value nobody reviewed. `Not found` stays out. Such rows get `validation_status = Nothing to review`, and no row is signed `AI Agent`. `resolved.csv` is written header-only; ingestion #261 accepts that and reads SME decisions from the workbook. The tier floor and the Leads route are unchanged. The 1 km (later 0.5 km) "same place" coordinate rule is gone: a location equal to ours to comparison precision confirms it, and any other is reviewed. The standardized CSV, its `.load.sql` and Run_Config's `standardized_records` are deleted, since they were built before review and #261 replaces them; arbitrating a run again deletes the copies an earlier arbitration left in its folder, and keeps any in blob. PR #24 is folded in: a location is one `found_location` row valued `lat, lon`, and a correction can carry `corrected_value_date`. The pass-2 gas follow-up and `refresh-seed` read values awaiting review in `review_queue.csv`, so both still work, and a "Not a Waste Facility" verdict still reaches the next pass's seed. In batch 1, 2,932 values had been accepted without review, the 131 a map mirror won among them. Reverses Q15/Q30, Q19, Q28, F5 and F25, and makes Q24 and Q27 moot. |
 | F11 | Tier 5 replaces the Unrated sentinel | An unclassifiable source now sits on the ordered scale at Tier 5 rather than out-of-band at 99. `Other` removed from `source_type`: 15 types, no catch-all. |
 
 ### Accepted risks
@@ -375,7 +378,7 @@ All settled. Where an answer overrode my recommendation it is marked.
 - **No identity check where name and coordinates are both trusted (F29).** Those 4,063 sites
   are the same ones whose name F18 already skips, so neither is searched and the Q34 gate has
   no found coordinates to measure. A search that researched the wrong facility - the pilot's
-  site 2695 resolved 238.6 km away - would auto-validate unflagged. Accepted by decision to cut
+  site 2695 resolved 238.6 km away - would reach the SME with no identity warning. Accepted by decision to cut
   cost; revisit if SME review of batch results finds values belonging to another facility.
 - **`landfill` → `Sanitary Landfill` (Q26).** *Status after 10 sites: not yet triggered.* The
   agent returned exact enum values on every one of the 12 `facility_type` claims, so the generic
@@ -387,9 +390,11 @@ All settled. Where an answer overrode my recommendation it is marked.
   A generic one-word `landfill` will therefore be classified as an engineered facility in exactly
   the countries where that is least likely. Accepted by decision; revisit if modeled emissions in
   non-US countries look high.
-- **Year semantics (Q24).** A value dated 2008 can sit in a record stamped `year = 2026`, which the
-  spec says should not happen. Per-attribute `value_date` is preserved in `resolved.csv`; the
-  43-column spec has nowhere to carry it.
+- **Year semantics (Q24).** *Closed by F36.* A value dated 2008 could sit in a record stamped
+  `year = 2026`, which the spec says should not happen. This repository no longer builds
+  standardized records, so it stamps none. Ingestion #261 builds them from reviewed values, and the
+  review queue carries each value's `value_date`; build step 5 of the source-matching plan gives
+  each year of a yearly attribute its own review row.
 - **Gap-fill makes Q6 mostly latent (Q29).** Because filled fields are never queried, the
   relative-credibility arbitration rarely fires. Wrong values already in the seed will not be
   challenged. Running verification mode on NGA+PHL (198 sites, ~3h) would exercise it cheaply.
@@ -430,7 +435,8 @@ Tier cannot detect a credible source describing the wrong facility; distance can
 coordinates more than **5 km** from the seed now withdraw auto-validation for every row of that
 site and stamp the reason into `researcher_notes`. The threshold is a judgment call — a landfill
 footprint spans at most a couple of km and seed coordinates are polygon centroids — and is a single
-constant, `IDENTITY_DISTANCE_KM_THRESHOLD`.
+constant, `IDENTITY_DISTANCE_KM_THRESHOLD`. Since F36 nothing is auto-validated, so only the note
+remains.
 
 ### Pilot feedback, applied
 
@@ -614,7 +620,7 @@ run_context.py   config, paths, cached-response IO, agent client   <- neither ph
 ```
 
 Supporting modules: `credibility.py` (tier rubric), `arbitration.py` (resolve one attribute),
-`standardized.py` (43-column spec emission), `seed_refresh.py` (two-pass loop),
+`seed_refresh.py` (two-pass loop),
 `unit_converter.py`, `prompt_builder.py`, `schema.py`, `workbook_io.py`, `seed_source.py`,
 `db.py` / `db_enums.py`, `geocoder.py`, `pilot_selector.py`, `input_loader.py`,
 `foundry_client.py`.
@@ -625,24 +631,20 @@ Tests mirror the split: `test_search.py` and `test_arbitrate.py`.
 
 | File | Grain | Who reads it |
 |---|---|---|
-| `<run>_review.xlsx` → **Review_Queue** | Only rows needing a decision | **The SME. This is the worklist.** |
-| `resolved.csv` | One row per value found and auto-validated (F25) | Anyone asking "what do we now believe, and why" |
-| `evidence.csv` | One row per source-backed claim | Anyone asking "why did this value win or lose" |
+| `<run>_review.xlsx` → **Review_Queue** | Every found value for an empty field, and every disagreement from a Tier 1–3 source at least as credible as ours (F36) | **The SME. This is the worklist.** Ingestion reads the decisions from it. |
+| `resolved.csv` | Header only (F36) | Ingestion, which accepts it empty |
+| `evidence.csv` | One row per source-backed claim, confirmations included | Anyone asking "why did this value win or lose" |
 | `sources.csv` | One row per unique URL | Source audit, tier drift monitoring |
-| `std_facility_tbl_ai_search_<run>.csv` | One record per facility, 44 spec columns | The merge into `transformed.*` |
-| `std_facility_tbl_ai_search_<run>.load.sql` | Load statement, every column named | Loading the above without a positional dependency |
 | `supplementary_leads.csv` | Findings that lost | Optional manual promotion |
 | `sites_to_retry.csv` | Sites whose search tool failed | Re-run these; not "no data" |
 
-The review queue and `resolved.csv` are **disjoint** (F25): a row is written to `resolved.csv` only if
-it is auto-validated, and to the queue only if `validation_status = "Needs review"`. `Not found` rows
-go to neither. (Before F25, `resolved.csv` held every facility x attribute searched and the queue
-was a subset of it — on `pilot10_v5`, 12 of 136 rows.)
-
-Rows the pipeline signs off itself now carry `reviewer = "AI Agent"`, the arbitration date, and the
-agent's own evidence summary in `researcher_notes`, so an auto-validated row is distinguishable from
-an unreviewed one rather than showing three blank columns. On `pilot10_v5`: 122 of 136 rows signed by
-the agent, 14 left blank and awaiting a human.
+Since F36 the queue holds every value the search found for an empty field, whatever its tier, and
+every disagreement with ours from a Tier 1–3 source at least as credible as ours (F2); weaker
+disagreements go to Leads, and `resolved.csv` holds none. Confirmations and `Not found` rows go to
+neither. (Under F25 the two were disjoint: a row went to `resolved.csv` only if it was
+auto-validated, signed `reviewer = "AI Agent"`, and to the queue only if it needed review — on
+`pilot10_v5`, 122 of 136 rows were signed by the agent. Before F25, `resolved.csv` held every
+facility x attribute searched.)
 
 Five columns were removed from `resolved.csv` as not useful in review:
 `baseline_carried_from_earlier_year`, `baseline_staleness_note`, `agreeing_source_count`,
@@ -761,7 +763,8 @@ Gap-fill scopes *metadata*, not identity. `found_facility_name`, `found_latitude
 are requested for every site even though the seed already has them, because they are the only
 evidence that the agent researched the right facility. Auto-validating a Tier 1–2 fill (Q30) is
 only defensible if identity is confirmed — a genuine regulator document about a neighbouring
-landfill is the failure mode tier cannot detect.
+landfill is the failure mode tier cannot detect. (F36 stopped auto-validating anything; the gate's
+note still warns the SME.)
 
 **Superseded in part by F18 (WP-531):** `found_facility_name` is no longer requested where the seed's name came from a Tier 1–2 source. Coordinates remain requested for every facility, so the Q34 identity gate is unaffected; what changes is that those facilities' identity rests on coordinates alone.
 

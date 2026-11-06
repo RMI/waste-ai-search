@@ -519,9 +519,10 @@ def test_run_command_follows_up_on_newly_discovered_gas_collection(tmp_path, mon
     cached = sorted(p.name for p in (run_dir / "raw_foundry_responses").glob("*.json"))
     assert cached == ["site_1.json", "site_1__gccs.json"]
 
-    # and the final arbitration sees both findings for the one site
-    resolved = list(_csv.DictReader((run_dir / "resolved.csv").open(encoding="utf-8-sig")))
-    found = {r["attribute_name"]: r["resolved_value"] for r in resolved if r["resolved_value"]}
+    # and the final arbitration sees both findings for the one site, both waiting for review: the
+    # follow-up ran on a finding nobody has validated yet
+    queue = list(_csv.DictReader((run_dir / "review_queue.csv").open(encoding="utf-8-sig")))
+    found = {r["attribute_name"]: r["resolved_value"] for r in queue if r["resolved_value"]}
     assert found.get("has_landfill_gas_collection") == "TRUE"
     assert found.get("gccs_ch4_flared_metric_tonnes") == "1200"
 
@@ -594,6 +595,6 @@ def test_force_does_not_carry_into_the_follow_up_pass(tmp_path, monkeypatch):
     cli.run_everything(PipelineConfig(input_csv=seed, run_dir=run_dir, run_id="t", site_delay_seconds=0, force=True))
 
     assert len(client.prompts) == 3  # pass 1 forced again; the follow-up kept its response
-    resolved = list(_csv.DictReader((run_dir / "resolved.csv").open(encoding="utf-8-sig")))
-    found = {r["attribute_name"]: r["resolved_value"] for r in resolved if r["resolved_value"]}
+    queue = list(_csv.DictReader((run_dir / "review_queue.csv").open(encoding="utf-8-sig")))
+    found = {r["attribute_name"]: r["resolved_value"] for r in queue if r["resolved_value"]}
     assert found.get("gccs_ch4_flared_metric_tonnes") == "1200"
