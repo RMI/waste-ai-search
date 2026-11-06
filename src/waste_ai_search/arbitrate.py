@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .arbitration import needs_review, resolve, routed_to_leads, site_for_year, value_year
+from .costs import RUN_LOG_FILE, describe_run_cost, run_cost
 from .credibility import (
     assign_source_tier,
     dropped_source_site,
@@ -1229,6 +1230,7 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             {"setting": "not_a_waste_facility", "value": not_a_waste_facility},
             *match_settings(matching),
             {"setting": "datasets_found", "value": len(datasets)},
+            *cost_settings(config.run_dir),
             # Counted by file: two spellings of one URL share one.
             {"setting": "page_text_kept", "value": len({result.text_file for result in link_results.values() if result.text_file})},
             {"setting": "quotes_on_page", "value": describe_results([row.get("quote_on_page", "") for row in evidence_rows])},
@@ -1255,6 +1257,16 @@ MATCH_SETTINGS = [
     ("match_no_location", NO_LOCATION),
     ("match_outside_run", OUTSIDE_RUN),
 ]
+
+
+def cost_settings(run_dir: Path) -> list[dict[str, Any]]:
+    """What the run's searches used and cost, every pass and retry included, from its run log."""
+    path = run_dir / RUN_LOG_FILE
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        cost = run_cost(list(csv.DictReader(handle)))
+    return [{"setting": "search_cost", "value": " ".join(describe_run_cost(cost))}]
 
 
 def stated_on_page(evidence_rows: list[dict[str, Any]]) -> list[str]:

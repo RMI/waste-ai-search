@@ -607,6 +607,8 @@ FOUNDRY_RUN_LOG_HEADERS = [
     "request_started_at", "request_finished_at", "status", "raw_response_path",
     "parsed_attribute_count", "parsed_source_count", "error_message", "retry_count",
     "web_searches",
+    # The model that answered, and its tokens, every attempt and pass added up (costs.py).
+    "model", "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens",
 ]
 
 PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
