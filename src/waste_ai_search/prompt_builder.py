@@ -579,6 +579,12 @@ Source requirements:
   and publisher.
 - Attach every supporting source to the attribute. Agreement between independent
   sources is recorded, so list them all rather than only the best one.
+- Never cite mapcarta.com or maptons.com: they copy OpenStreetMap or scrape business
+  listings, and are discarded.
+- Where a directory republishes government data, cite the government source instead.
+  wastebook.co.uk copies the Environment Agency register: its coordinates are postcode
+  centroids, and its "issued" date is a permit date, not a closure date. landfills.ca
+  copies Statistics Canada's infrastructure database.
 - Prefer the most recent source. Facilities open, close, change operator and add gas
   systems, so when sources disagree, or a newer source exists, use the newest one and
   give its publication_date and value_date. Mention an older conflicting source in
