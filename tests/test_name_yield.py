@@ -200,6 +200,8 @@ def test_the_bar():
     wrong = ny.verdict(_stats(rate=0.3, validated=2, rejected=5, wrong=4), named_rate=0.2, is_named=False)
     assert wrong.startswith("below the bar: SMEs rejected most")
     assert ny.verdict(_stats(rate=0.3), named_rate=None, is_named=False) == "no named sites to compare with"
+    # Named sites were answered and none got a new value: the class is compared, not left out.
+    assert ny.verdict(_stats(rate=0.0), named_rate=0.0, is_named=False) == "clears the bar"
 
 
 def test_sme_decisions_come_from_the_reviewed_workbook(tmp_path):

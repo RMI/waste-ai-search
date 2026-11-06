@@ -378,7 +378,8 @@ def verdict(stats: dict[str, Any], named_rate: Optional[float], is_named: bool) 
     decided = stats["sme_validated"] + stats["sme_rejected"]
     if decided and stats["sme_wrong_facility"] * 2 > decided:
         return "below the bar: SMEs rejected most as the wrong facility"
-    if not named_rate:
+    # None when no named site was answered; a rate of 0 is a measurement to compare with.
+    if named_rate is None:
         return "no named sites to compare with"
     if (stats["new_value_rate"] or 0) < BAR * named_rate:
         return "below the bar"
