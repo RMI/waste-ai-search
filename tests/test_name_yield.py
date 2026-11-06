@@ -358,6 +358,11 @@ def test_a_price_of_zero_is_used_as_given(monkeypatch, tmp_path):
         assert {row["est_cost_usd"] for row in csv.DictReader(handle)} == {"0.0"}
 
 
+def test_the_printed_forecast_shows_cents_as_forecast_csv_holds_them(monkeypatch, tmp_path):
+    printed = _forecast_script(monkeypatch, tmp_path, "--cost-per-1000-queries", "14")
+    assert "generic label 1 (~$0.28)" in printed  # 20 queries at $14 per 1,000
+
+
 @pytest.mark.parametrize(
     ("name", "reason"),
     [

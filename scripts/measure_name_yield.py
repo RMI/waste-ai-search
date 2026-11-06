@@ -160,7 +160,7 @@ def forecast(every_site, args, out_dir: Path) -> None:
     rows = ny.forecast(sites, per_site, fallback, cost)
     for batch in sorted({row["batch"] for row in rows}):
         parts = [
-            f"{row['name_class']} {row['sites']:,} (~${row['est_cost_usd']:,.0f})"
+            f"{row['name_class']} {row['sites']:,} (~${row['est_cost_usd']:,.2f})"
             for row in rows
             if row["batch"] == batch
         ]
