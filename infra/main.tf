@@ -86,6 +86,54 @@ resource "azapi_resource" "comparison_model" {
   depends_on = [azapi_resource.model]
 }
 
+# The models batch 3 ran on: gpt-5.6-terra for every site, and gpt-5.6-sol for a second pass on
+# the largest. First created with the az CLI for the model comparison, then imported here.
+resource "azapi_resource" "batch_model" {
+  type      = "Microsoft.CognitiveServices/accounts/deployments@2025-06-01"
+  name      = var.batch_model_name
+  parent_id = azapi_resource.foundry.id
+
+  body = {
+    sku = {
+      name     = "GlobalStandard"
+      capacity = var.batch_model_capacity
+    }
+    properties = {
+      model = {
+        format  = "OpenAI"
+        name    = var.batch_model_name
+        version = var.batch_model_version
+      }
+      versionUpgradeOption = "NoAutoUpgrade"
+    }
+  }
+
+  depends_on = [azapi_resource.comparison_model]
+}
+
+resource "azapi_resource" "second_pass_model" {
+  type      = "Microsoft.CognitiveServices/accounts/deployments@2025-06-01"
+  name      = var.second_pass_model_name
+  parent_id = azapi_resource.foundry.id
+
+  body = {
+    sku = {
+      name     = "GlobalStandard"
+      capacity = var.second_pass_model_capacity
+    }
+    properties = {
+      model = {
+        format  = "OpenAI"
+        name    = var.second_pass_model_name
+        version = var.second_pass_model_version
+      }
+      versionUpgradeOption = "NoAutoUpgrade"
+    }
+  }
+
+  depends_on = [azapi_resource.batch_model]
+}
+
 resource "azapi_resource" "project" {
   type      = "Microsoft.CognitiveServices/accounts/projects@2025-06-01"
   name      = var.project_name
@@ -105,5 +153,5 @@ resource "azapi_resource" "project" {
   }
 
   # One change to an account at a time: Azure refuses a second while the first is in progress.
-  depends_on = [azapi_resource.model, azapi_resource.comparison_model]
+  depends_on = [azapi_resource.model, azapi_resource.comparison_model, azapi_resource.second_pass_model]
 }

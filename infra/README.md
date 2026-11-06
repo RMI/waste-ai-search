@@ -9,7 +9,13 @@ Terraform. State is in the same account as RMI/terraform's wastemap module, unde
 | `wastemap-ai-search` | The Foundry (AI Services) account, in East US, Entra ID sign-in only (no keys) |
 | `gpt-5.4-mini` | The model deployment, version 2026-03-17 pinned, GlobalStandard, 2,000K tokens a minute |
 | `gpt-5.4` | A second deployment (version 2026-03-05, 1,000K tokens a minute), to compare with the first on the same sites before choosing one for the batches. Set `comparison_model_name = ""` to drop it |
+| `gpt-5.6-terra` | The model batch 3 searched every site with (version 2026-07-09 pinned, 1,000K tokens a minute) |
+| `gpt-5.6-sol` | The model batch 3's second pass searched its 64 largest sites with (version 2026-07-09 pinned, 1,000K tokens a minute) |
 | `waste-ai-search` | The Foundry project the agent lives in |
+
+The two gpt-5.6 deployments were first made with the az CLI for the model comparison, then
+imported here. The state account takes connections only from RMI's network, so run Terraform on
+the VPN.
 
 All three go in **RMI-WASTEMAP-PIPELINE-RG**, beside the pipeline's translator. Our roles can create
 resources in existing resource groups but not new groups. East US because gpt-5.4-mini isn't offered

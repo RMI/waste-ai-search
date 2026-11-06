@@ -70,6 +70,42 @@ variable "comparison_model_capacity" {
   default     = 1000
 }
 
+variable "batch_model_name" {
+  description = "The model batch 3 searched every site with."
+  type        = string
+  default     = "gpt-5.6-terra"
+}
+
+variable "batch_model_version" {
+  description = "Pinned like model_version."
+  type        = string
+  default     = "2026-07-09"
+}
+
+variable "batch_model_capacity" {
+  description = "Its rate limit, in thousands of tokens a minute; billed per token, not by this."
+  type        = number
+  default     = 1000
+}
+
+variable "second_pass_model_name" {
+  description = "The model batch 3's second pass searched its largest sites with."
+  type        = string
+  default     = "gpt-5.6-sol"
+}
+
+variable "second_pass_model_version" {
+  description = "Pinned like model_version."
+  type        = string
+  default     = "2026-07-09"
+}
+
+variable "second_pass_model_capacity" {
+  description = "Its rate limit, in thousands of tokens a minute; billed per token, not by this."
+  type        = number
+  default     = 1000
+}
+
 variable "tags" {
   description = "Tags on everything this creates."
   type        = map(string)
