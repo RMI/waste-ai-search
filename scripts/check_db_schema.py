@@ -57,6 +57,12 @@ def main() -> int:
         source_name_sql,
     )
     from waste_ai_search.seed_source import SELECT_FIELDS
+    from waste_ai_search.snapshot import (
+        CONSOLIDATION_RUN_COLUMN,
+        CONSOLIDATION_TABLES,
+        CROSSWALK_RUN_COLUMN,
+        CROSSWALK_TABLE,
+    )
 
     config = DatabaseConfig.from_env()
     try:
@@ -70,6 +76,12 @@ def main() -> int:
     try:
         consolidated = fetch_columns(CONSOLIDATION_SCHEMA, CONSOLIDATION_TABLE, config=config)
         transformed = fetch_columns(TRANSFORMED_SCHEMA, TRANSFORMED_TABLE, config=config)
+        # Table -> the column the snapshot picks one run of it by.
+        run_tables = {table: CONSOLIDATION_RUN_COLUMN for table in CONSOLIDATION_TABLES}
+        run_tables[CROSSWALK_TABLE] = CROSSWALK_RUN_COLUMN
+        run_table_columns = {
+            table: fetch_columns(*table.split("."), config=config) for table in run_tables
+        }
         constrained = fetch_check_constraint_values(config=config)
         enum_values = fetch_enum_values(
             [name for name in DB_ENUMS if name != "waste_depth"], config=config
@@ -103,6 +115,19 @@ def main() -> int:
             print(f"        {column}")
     else:
         print(f"ok    seed columns: all {len(seed_fields)} present on {label}")
+
+    # 1b. The snapshot copies one run of each table it saves, picked by that table's run column.
+    #     No other check reads the ledger's or the crosswalk's, so a missing table or run column
+    #     there would otherwise first show up as a failed snapshot at the start of a run.
+    for table, column in run_tables.items():
+        if not run_table_columns[table]:
+            problems.append(f"{table} does not exist; the snapshot copies one run of it")
+            print(f"FAIL  snapshot table {table} does not exist")
+        elif column not in run_table_columns[table]:
+            problems.append(f"{table} has no {column}, which the snapshot picks its run by")
+            print(f"FAIL  snapshot run column: {table} has no {column}")
+        else:
+            print(f"ok    snapshot run column: {table}.{column}")
 
     # 2. Every column of the standardized spec, as the code declares it, must exist on the table.
     target = checked_table
