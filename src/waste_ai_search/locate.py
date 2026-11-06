@@ -1390,9 +1390,12 @@ def locate_source(
         # A PO box is taken out, and what is left is sent if it still has a street or a number.
         rest, boxed = without_po_box(part)
         sent = address_to_send(rest, names)
+        # A name taken off the front can leave only its town ("Mapleward Road Landfill, Thunder
+        # Bay, ON" sends "Thunder Bay, ON"), which places the town, not the site.
+        only_its_town = sent != normalize_scalar(rest) and not STREET_OR_NUMBER.search(sent)
         if boxed and not STREET_OR_NUMBER.search(rest):
             tried = Located(reason="a PO box is not where the site is")
-        elif not sent or names_a_facility(sent):
+        elif not sent or only_its_town or names_a_facility(sent):
             tried = Located(reason="the stated location is the facility's name, which is never geocoded")
         else:
             placed = with_place(sent, municipality, state)

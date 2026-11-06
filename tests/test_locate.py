@@ -332,6 +332,21 @@ def test_po_boxes_and_facility_names_are_never_sent():
     assert geocoder.calls == []
 
 
+def test_a_facility_name_followed_only_by_its_town_is_not_sent():
+    """Taking the name off the front would leave the town, which a geocoder places at its middle."""
+    geocoder = FakeGeocoder({"Thunder Bay, ON": GeocodeMatch(48.38, -89.25, ROOFTOP, "")})
+    for name in ("Mapleward Road Landfill", "Mapleward"):
+        named = source(address=f"{name}, Thunder Bay, ON", facility_name_in_source=name)
+        assert "facility's name" in locate_source(named, SITE, {}, geocoder, live=True).reason
+    assert geocoder.calls == []
+    # With a street after the name, the street is sent, without the name.
+    geocoder = FakeGeocoder({"5494 Mapleward Road, Thunder Bay, ON": GeocodeMatch(48.44, -89.37, ROOFTOP, "")})
+    named = source(address="Mapleward Road Landfill, 5494 Mapleward Road, Thunder Bay, ON",
+                   facility_name_in_source="Mapleward Road Landfill")
+    assert locate_source(named, SITE, {}, geocoder, live=True).basis == ROOFTOP
+    assert geocoder.calls == [("5494 Mapleward Road, Thunder Bay, ON", "CA")]
+
+
 HASARS = {"site_id": "3560", "country_iso3": "MEX", "latitude": "20.922", "longitude": "-103.453"}
 
 
