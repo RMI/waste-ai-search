@@ -2,8 +2,10 @@
 site name found, before any class is skipped. Offline: a fake run folder, a fake blob client."""
 from __future__ import annotations
 
+import contextlib
 import csv
 import importlib.util
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -329,6 +331,31 @@ def test_the_script_measures_a_run_folder_and_writes_its_csvs(tmp_path, capsys):
     with (out / "summary.csv").open(newline="", encoding="utf-8") as handle:
         summary = list(csv.DictReader(handle))
     assert {row["name_class"] for row in summary} == {NO_NAME, GENERIC, NAMED}
+
+
+def _forecast_script(monkeypatch, tmp_path, *argv):
+    """The script's forecast, run against fake seed sites; returns what it printed."""
+    import waste_ai_search.seed_source as seed_source
+
+    spec = importlib.util.spec_from_file_location(
+        "measure_name_yield", Path(__file__).resolve().parents[1] / "scripts" / "measure_name_yield.py"
+    )
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    sites = [{"site_id": "5", "site_name": "domestic landfill", "country_iso3": "UKR"}]
+    monkeypatch.setattr(seed_source, "load_seed_sites", lambda: sites)
+    every_site = [{"name_class": GENERIC, "web_searches": 20}]
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        script.forecast(every_site, script.parse_args(list(argv)), tmp_path)
+    return out.getvalue()
+
+
+def test_a_price_of_zero_is_used_as_given(monkeypatch, tmp_path):
+    printed = _forecast_script(monkeypatch, tmp_path, "--cost-per-1000-queries", "0")
+    assert "At $0 per 1,000 Bing queries" in printed
+    with (tmp_path / "forecast.csv").open(newline="", encoding="utf-8") as handle:
+        assert {row["est_cost_usd"] for row in csv.DictReader(handle)} == {"0.0"}
 
 
 @pytest.mark.parametrize(

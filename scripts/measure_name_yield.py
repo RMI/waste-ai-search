@@ -155,7 +155,8 @@ def forecast(every_site, args, out_dir: Path) -> None:
         print(f"Skipped: could not read the database ({type(exc).__name__}: {str(exc).splitlines()[0]}).")
         return
     per_site, fallback = ny.queries_per_site(every_site)
-    cost = args.cost_per_1000_queries or ny.DEFAULT_COST_PER_1000_QUERIES
+    # None when not given; 0 is a price, for a forecast of queries alone.
+    cost = ny.DEFAULT_COST_PER_1000_QUERIES if args.cost_per_1000_queries is None else args.cost_per_1000_queries
     rows = ny.forecast(sites, per_site, fallback, cost)
     for batch in sorted({row["batch"] for row in rows}):
         parts = [
