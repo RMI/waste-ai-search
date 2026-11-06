@@ -1468,6 +1468,15 @@ Pick `decision` from its dropdown:
 - **A source giving only one value to check has no ↳ row.** Its own row checks the value: Correct
   site or Different site says the value is right too. If it is wrong, type the right one in
   `corrected_value`, which then loads instead; if you don't know it, pick Junk.
+- **Any other wrong value is corrected on the page's own row** (Yuchen, 6 November): pick Correct
+  site, and in `corrected_value` write it as `attributes` does, with the right value:
+  `gccs_energy_project_type = Renewable Natural Gas (2015)`. Just the name,
+  `gccs_energy_project_type`, removes it without a replacement, for every year the page gives;
+  `gccs_energy_project_type (2015)` removes 2015's only. Separate several with semicolons.
+  A value checked on its own ↳ row is decided there instead.
+- **A corrected value may have another year** than the page gave, wherever it is typed: on a ↳ row
+  `15000 (2021)`, on a page row `... = Renewable Natural Gas (2020)`. It loads at that year, where
+  our field is empty for it.
 - **If it is about another of our sites but you can't tell which,** leave `decision` blank and say so
   in `notes`. A Different site with no `other_site_id` can't be read back.
 - **A renamed site is fine.** The question is whether it is the same facility, not the same name.

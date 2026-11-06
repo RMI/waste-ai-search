@@ -23,7 +23,9 @@ where it places it, the flags, and what approving it would load. Its decision:
 
 A value row shows which value (check), the value as it would load, the evidence (the quote, the value
 as the page writes it, the agent's note) and its flags. Its decision is Correct or Wrong; with Wrong,
-an SME who knows the right value types it in corrected_value, and that loads instead.
+an SME who knows the right value types it in corrected_value, and that loads instead. A wrong value
+with no row of its own is corrected in its source row's corrected_value, "attribute = value (year)"
+(accept_reviews.read_page_corrections).
 
 review_id names the pair, and is the same each time the run is arbitrated, so a decision is read
 back by it (accept_reviews.py); a value row by its review_id and check.
