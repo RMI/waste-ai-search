@@ -79,6 +79,8 @@ def _fake_run(run_dir: Path, manifest: dict | None = None) -> Path:
         {"site_id": "2", "attribute_name": "facility_status", "resolution": "Filled empty baseline", "resolved_value": "Active", "researcher_notes": ""},
         {"site_id": "2", "attribute_name": "found_latitude", "resolution": "Confirmed baseline", "resolved_value": "48.5", "researcher_notes": ""},
         {"site_id": "4", "attribute_name": "found_latitude", "resolution": "Confirmed baseline", "resolved_value": "49.8", "researcher_notes": ""},
+        # finding the name we hold is finding a name, though not a new value
+        {"site_id": "4", "attribute_name": "found_facility_name", "resolution": "Confirmed baseline", "resolved_value": "Brady Road Landfill", "researcher_notes": ""},
     ], ["site_id", "attribute_name", "resolution", "resolved_value", "researcher_notes"])
     _write(run_dir / "review_queue.csv", [
         {"site_id": "1", "searched_site_id": "1", "attribute_name": "found_facility_name", "resolution": "Conflict - needs review",
@@ -117,6 +119,8 @@ def test_each_searched_site_says_what_its_search_found(tmp_path):
     assert rows["4"]["source_group"] == ny.OTHER_SOURCES and rows["4"]["answered"]
     assert rows["4"]["web_searches"] == 0
     assert rows["4"]["new_values_to_review"] == 0  # its operator row was found by site 1's search
+    assert rows["4"]["found_name"] and rows["4"]["new_values_accepted"] == 0
+    assert not named["found_name"]
 
 
 def test_a_run_with_found_values_is_measured_from_them(tmp_path):

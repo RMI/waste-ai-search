@@ -230,6 +230,10 @@ def _searched_id(row: dict[str, Any]) -> str:
     return normalize_scalar(row.get("searched_site_id")) or _site_id(row)
 
 
+def _is_name(row: dict[str, Any]) -> bool:
+    return normalize_scalar(row.get("attribute_name")) == NAME_ATTRIBUTE
+
+
 def _as_int(value: Any) -> int:
     text = normalize_scalar(value)
     return int(text) if text.isdigit() else 0
@@ -266,12 +270,20 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
     seed = {_site_id(row): row for row in run.seed}
     accepted: dict[str, list[dict[str, str]]] = defaultdict(list)
     to_review: dict[str, list[dict[str, str]]] = defaultdict(list)
+    # A search found a name whether it was new or confirmed the one we hold, as a source naming the
+    # facility counts in found_values.csv; only the new-value counts leave confirmations out.
+    found_names = set(run.named)
     for row in run.resolved:
-        if normalize_scalar(row.get("resolution")) in NEW_VALUE_RESOLUTIONS:
+        resolution = normalize_scalar(row.get("resolution"))
+        if resolution in NEW_VALUE_RESOLUTIONS:
             accepted[_searched_id(row)].append(row)
+        if resolution in (*NEW_VALUE_RESOLUTIONS, CONFIRMED) and _is_name(row):
+            found_names.add(_searched_id(row))
     for row in run.review:
         if normalize_scalar(row.get("resolution")) != CONFIRMED:
             to_review[_searched_id(row)].append(row)
+        if _is_name(row):
+            found_names.add(_searched_id(row))
     elsewhere = Counter(
         _searched_id(row) for row in [*run.resolved, *run.review] if _searched_id(row) != _site_id(row)
     )
@@ -305,7 +317,7 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
             "new_values_accepted": len(accepted[site_id]),
             "new_values_to_review": len(to_review[site_id]),
             "found_attributes": "; ".join(attributes),
-            "found_name": NAME_ATTRIBUTE in attributes or site_id in run.named,
+            "found_name": site_id in found_names,
             "filed_under_another_site": elsewhere[site_id],
             "not_a_waste_facility": any(
                 normalize_scalar(row.get("attribute_name")) == "facility_type"
