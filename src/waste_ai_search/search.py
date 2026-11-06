@@ -455,8 +455,15 @@ def run_search(
     # and only the first pass is searched again by `run`, so a second pass's would go unnoticed.
     failures = [row for row in run_log if str(row["status"]).startswith(("Search tool failed", "Failed"))]
     print(f"\nSearched {len(work)} sites. Run log: {log_path}")
-    if any(row["web_searches"] != "" for row in run_log):
-        for line in describe_run_cost(run_cost(run_log)):
+    # The whole run log's cost, every pass and retry included, as Run_Config gives it: a resumed
+    # pass's own rows would leave out what the passes before it spent.
+    whole_log: list[dict[str, Any]] = []
+    if log_path.exists():
+        with log_path.open(newline="", encoding="utf-8-sig") as handle:
+            whole_log = list(csv.DictReader(handle))
+    if any(row.get("web_searches") for row in whole_log):
+        print("The run so far, every pass and retry included:")
+        for line in describe_run_cost(run_cost(whole_log)):
             print(line)
 
     # WP-533: verify cited URLs now, so arbitration can apply the verdicts offline. Every URL in

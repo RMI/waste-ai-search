@@ -118,6 +118,14 @@ def test_a_search_records_its_model_and_tokens_and_a_second_pass_adds_to_them(tm
     pl.run_search(pl.PipelineConfig(input_csv=seed, run_dir=run_dir, run_id="t", site_delay_seconds=0, force=True))
     [row] = _log(run_dir)
     assert (row["web_searches"], row["input_tokens"], row["output_tokens"]) == ("12", "100000", "4000")
+    # What it prints is the whole run's cost, as Run_Config gives it, not just this pass's.
+    printed = capsys.readouterr().out
+    assert "Bing queries: 12 across 1 searched site(s)" in printed
+    assert "100,000 in (20,000 cached), 4,000 out" in printed
+
+    # So does a pass that only finds the site already searched.
+    pl.run_search(pl.PipelineConfig(input_csv=seed, run_dir=run_dir, run_id="t", site_delay_seconds=0))
+    assert "Bing queries: 12 across 1 searched site(s)" in capsys.readouterr().out
 
 
 def test_the_real_client_records_a_responses_tokens_and_model(monkeypatch):
