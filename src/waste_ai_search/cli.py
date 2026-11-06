@@ -40,6 +40,22 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     )
 
 
+GEOCODER_CHOICES = ["azure-maps", "nominatim", "none"]
+GEOCODER_HELP = (
+    "Geocoder for addresses sources state: azure-maps, nominatim or none. Default: "
+    "WASTE_AI_SEARCH_GEOCODER, else none, which leaves addresses unlocated."
+)
+
+
+def add_locate_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--no-locate",
+        action="store_true",
+        help="Skip locating each source's stated location after the search (no source_locations.json is written).",
+    )
+    parser.add_argument("--geocoder", choices=GEOCODER_CHOICES, help=GEOCODER_HELP)
+
+
 def non_negative_int(text: str) -> int:
     """A count where 0 means "no limit": a negative typo would otherwise also mean "search all"."""
     value = int(text)
@@ -123,6 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip fetching cited URLs after the search (no link_check.json is written).",
     )
+    add_locate_options(search)
 
     arbitrate = subparsers.add_parser(
         "arbitrate",
@@ -141,6 +158,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fetch a run's cited URLs and write link_check.json (network; no agent calls).",
     )
     add_common(links)
+
+    locate = subparsers.add_parser(
+        "locate",
+        help="Turn each source's stated location into a point and write source_locations.json "
+        "(geocoding addresses is network; no agent calls).",
+    )
+    add_common(locate)
+    locate.add_argument("--geocoder", choices=GEOCODER_CHOICES, help=GEOCODER_HELP)
 
     full = subparsers.add_parser(
         "run",
@@ -168,6 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the gas-capture follow-up pass.",
     )
     full.add_argument("--no-link-check", action="store_true", help="Skip fetching cited URLs.")
+    add_locate_options(full)
     full.add_argument(
         "--keep-broken-link-evidence",
         action="store_true",
@@ -289,6 +315,8 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         use_geocode_cache=getattr(args, "use_geocode_cache", False),
         check_links=not getattr(args, "no_link_check", False),
         keep_broken_links=getattr(args, "keep_broken_link_evidence", False),
+        locate=not getattr(args, "no_locate", False),
+        geocoder=getattr(args, "geocoder", "") or "",
     )
 
 
@@ -443,6 +471,13 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
 
         check_run_links(config.run_dir)
         print(f"\nNow arbitrate to apply the verdicts:\n  uv run waste-ai-search arbitrate --run-id {config.run_id}")
+        return 0
+
+    if args.command == "locate":
+        from .search import locate_run
+
+        locate_run(config)
+        print(f"\nNow arbitrate to use the locations:\n  uv run waste-ai-search arbitrate --run-id {config.run_id}")
         return 0
 
     if args.command == "run":

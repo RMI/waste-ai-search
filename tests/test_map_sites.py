@@ -111,12 +111,12 @@ def test_drops_are_counted_per_site_and_website():
 def test_an_attribute_left_with_no_source_is_not_promoted():
     """Like a value given with no source: no evidence, nothing to resolve, nothing in Leads."""
     by_attribute, evidence, sources, warnings = extract(
-        attribute("found_latitude", "49.85", cite("https://mapcarta.com/W1"), unit="decimal degrees"),
+        attribute("operator", "City of Brandon", cite("https://mapcarta.com/W1")),
     )
     assert evidence == [] and sources == []
-    assert "found_latitude" not in by_attribute
-    assert resolve(site(), "found_latitude", by_attribute.get("found_latitude", []))["resolution"] == "Not found"
-    assert "found_latitude: every source was a dropped map site; not promoted." in warnings
+    assert "operator" not in by_attribute
+    assert resolve(site(), "operator", by_attribute.get("operator", []))["resolution"] == "Not found"
+    assert "operator: every source was a dropped map site; not promoted." in warnings
 
 
 def test_a_kept_source_still_carries_the_value():
@@ -249,13 +249,15 @@ def test_a_far_map_page_counts_even_beside_near_kept_coordinates(tmp_path):
     assert any(warning.startswith("Identity not confirmed: mapcarta.com page's") for warning in warnings)
 
 
-def test_far_kept_coordinates_are_reported_as_before(tmp_path):
+def test_a_far_kept_location_is_reported_as_a_sources(tmp_path):
+    """Changed on purpose for build step 4: the gate reads where each kept source states the site is,
+    and two decimals is only a hint, so this kept source states four."""
     kept = [
-        attribute("found_latitude", FAR[0], REGULATOR, unit="decimal degrees"),
-        attribute("found_longitude", FAR[1], REGULATOR, unit="decimal degrees"),
+        attribute("found_latitude", "50.5500", REGULATOR, unit="decimal degrees"),
+        attribute("found_longitude", "-99.9500", REGULATOR, unit="decimal degrees"),
     ]
     out = arbitrate(build_run(tmp_path, attributes=[*kept, *map_page(*FAR)], leads=[]))
-    assert "Identity not confirmed: found coordinates 77.8 km from seed location." in [
+    assert "Identity not confirmed: a source's stated location 77.8 km from seed location." in [
         row["warning"] for row in out["parse_warnings"]
     ]
 
@@ -270,11 +272,12 @@ def test_a_map_page_is_measured_by_its_own_pair_and_the_farthest_page_counts():
     assert km == pytest.approx(77.8, abs=0.1) and map_site == "maptons.com"
 
 
-def test_a_lone_map_coordinate_is_judged_by_its_axis_offset():
+def test_half_a_map_location_is_no_location():
+    """Changed on purpose for build step 4: a page cited for one coordinate states no location, so the
+    gate no longer judges a lone axis."""
     payload = {"attributes": [attribute("found_longitude", "-98.95", cite("https://mapcarta.com/W1"),
                                         unit="decimal degrees")]}
-    km, map_site = dropped_map_site_offset_km(site(), payload)
-    assert km == pytest.approx(71.7, abs=0.2) and map_site == "mapcarta.com"
+    assert dropped_map_site_offset_km(site(), payload) == (None, "")
 
 
 def test_no_map_coordinates_means_no_distance():

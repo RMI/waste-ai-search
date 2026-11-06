@@ -423,6 +423,28 @@ def test_a_newer_blob_replaces_a_stale_local_file_but_never_the_seed(tmp_path):
     assert (run / "seed.csv").read_text() == "site_id\n1\n"  # pinned: never re-pointed
 
 
+def test_source_locations_travel_like_the_link_verdicts(tmp_path):
+    """Geocoded answers cost a lookup each, so another machine's newer source_locations.json comes
+    down, and this machine's goes up."""
+    import os
+    import time
+
+    run = run_folder(tmp_path)
+    (run / "source_locations.json").write_text("old answers")
+    old = time.time() - 3600
+    os.utime(run / "source_locations.json", (old, old))
+    container = _timed(FakeContainer({"outputs/runs/r/source_locations.json": b"new answers"}), **{"source_locations.json": 0})
+    storage.pull("outputs/runs/r", run, client=container)
+    assert (run / "source_locations.json").read_text() == "new answers"
+
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    (fresh / "source_locations.json").write_text("{}")
+    container = FakeContainer()
+    storage.push(fresh, "outputs/runs/f", client=container)
+    assert "outputs/runs/f/source_locations.json" in container.blobs
+
+
 def test_an_older_blob_leaves_the_local_file_alone(tmp_path):
     run = run_folder(tmp_path)
     (run / "link_check.json").write_text("local verdicts")

@@ -80,12 +80,22 @@ UNSEARCHED_ATTRIBUTES = {
     "gccs_ch4_flow_to_project_metric_tonnes",
 }
 
-# Always requested. These are how we know the agent found the *right* facility, so they are not
-# gap-filled: the identity check rests on them (Q34).
+# A location is one fact, valued "lat, lon", so it is reviewed and loaded as a pair, from one
+# source, or not at all. It is read from where each source states the facility is (locate.py),
+# not from coordinates the agent returns as values.
+LOCATION_ATTRIBUTE = "found_location"
+
+# The two coordinates a location is made of. The seed and refresh-seed record a location's
+# provenance under these names, and responses cached before build step 4 of the source-matching
+# plan returned them as values.
+COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
+
+# Always requested, except where a Tier 1-2 source already supplied them. They are how we know
+# the agent found the *right* facility, so they are not gap-filled: the identity check rests on
+# them (Q34). The name is a value; the location comes from what each source states.
 IDENTITY_ATTRIBUTES = [
     "found_facility_name",
-    "found_latitude",
-    "found_longitude",
+    LOCATION_ATTRIBUTE,
 ]
 
 # Attribute names retired in favour of a new spelling, mapped to their replacement. Data written
@@ -127,14 +137,6 @@ DEFAULT_EXCLUDED_ISO3 = set(DEFAULT_EXCLUSION_REASONS)
 # government source, so searching it risks overwriting better data than the search can find.
 # Today that is Brazil's 3,913 SINIR facilities, whose coordinates are a municipality centre.
 COORDINATES_ONLY_ISO3 = {"BRA"}
-
-COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
-
-# The agent reports latitude and longitude separately, and each is resolved against the seed on
-# its own, but a location is one fact. Arbitration combines the two into this attribute, valued
-# "lat, lon", so a location is accepted, reviewed and loaded as a pair, from one source, or not
-# at all.
-LOCATION_ATTRIBUTE = "found_location"
 
 # The full run in six batches, run in order (F30). Batches 1-2 are English-speaking, so SMEs learn
 # the review process on familiar sources: English as the main language, then as an official one.
@@ -216,6 +218,11 @@ CALCULATED_ATTRIBUTES = [
 
 TARGET_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *CALCULATED_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
 REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
+# What a source reports as a value. A location is not one: each source states where the facility
+# is, and arbitration reads the found location from those (locate.py).
+VALUE_ATTRIBUTES = [
+    name for name in REQUESTABLE_ATTRIBUTES if name not in COORDINATE_ATTRIBUTES and name != LOCATION_ATTRIBUTE
+]
 
 BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover", "has_flare"}
 ARRAY_TARGET_ATTRIBUTES = {"cover_types", "gccs_energy_project_type", "gccs_current_project_status"}
@@ -494,6 +501,11 @@ BOOLEAN_INPUT_MAP = {
 # spelling and its language, so a reviewer can check results against the original name.
 SITE_NAME_COLUMNS = ["site_name", "original_site_name", "source_language"]
 
+SOURCE_FACILITY_COLUMNS = [
+    "facility_name_in_source", "facility_name_english", "stated_location", "stated_location_kind",
+    "location_basis", "located_latitude", "located_longitude", "location_reason",
+]
+
 EVIDENCE_HEADERS = [
     "evidence_id", "run_id", "dataset_version", "site_id", *SITE_NAME_COLUMNS, "internal_facility_id",
     "attribute_name", "claimed_value", "claimed_unit", "normalized_value", "normalized_unit",
@@ -501,6 +513,10 @@ EVIDENCE_HEADERS = [
     "agent_confidence", "source_id", "link_status", "source_tier", "agent_proposed_tier", "tier_rule_applied",
     "evidence_summary", "quoted_evidence_short", "search_terms_used", "promotion_eligible",
     "exclusion_reason", "record_created_date",
+    # The facility each source describes, as it writes it, and the point read from its location
+    # (locate.py): every row of a source carries them. location_reason says why a stated location
+    # is not a usable point.
+    *SOURCE_FACILITY_COLUMNS,
 ]
 
 # resolved.csv is written with this header and no rows. Nothing is accepted automatically, so every
@@ -646,15 +662,6 @@ FIELD_TO_DEFINITION = {
     "rejection_reason": "rejection_reason",
 }
 
-FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS = [
-    "attribute_name",
-    "value",
-    "value_basis",
-    "confidence_score",
-    "sources",
-]
-
-
 # --- scalar helpers ----------------------------------------------------------------------------
 def normalize_scalar(value: Any) -> str:
     if value is None:
@@ -732,26 +739,32 @@ def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
 
 
 def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
-    warnings: list[str] = []
-    attributes = payload.get("attributes", [])
-    if not isinstance(attributes, list):
-        return ["Payload field 'attributes' must be a list."]
+    """What is malformed in a cached response, read through the one reader (payload.py).
 
-    for idx, attribute in enumerate(attributes, start=1):
-        if not isinstance(attribute, dict):
-            warnings.append(f"attributes[{idx}] must be an object.")
+    A response from before the source-first contract is reported in its own terms, attributes[i],
+    as it always was; a source-first one as sources[i].values[j].
+    """
+    from .locate import LOCATION_KINDS, PART_SEPARATOR
+    from .payload import REQUIRED_VALUE_FIELDS, is_converted, read_payload
+
+    read = read_payload(payload)
+    warnings = list(read["problems"])
+    for index, source in enumerate(read["sources"], start=1):
+        if is_converted(source):
             continue
-        for field in FOUNDRY_REQUIRED_ATTRIBUTE_FIELDS:
-            if field not in attribute:
-                warnings.append(f"attributes[{idx}] missing required field {field!r}.")
-        # Same canonicalisation as extract_evidence, so a pre-rename cached response is not
-        # reported as unsupported by one and accepted by the other.
-        name = canonical_attribute(normalize_scalar(attribute.get("attribute_name")))
-        if name and name not in REQUESTABLE_ATTRIBUTES:
-            warnings.append(f"attributes[{idx}] has unsupported attribute_name {name!r}.")
-        sources = attribute.get("sources", [])
-        if not isinstance(sources, list):
-            warnings.append(f"attributes[{idx}] sources must be a list.")
-        elif not any(isinstance(source, dict) and source.get("url") for source in sources):
-            warnings.append(f"attributes[{idx}] has no clickable source URL.")
-    return warnings
+        if not normalize_scalar(source.get("url")):
+            warnings.append(f"sources[{index}] has no clickable source URL.")
+        kinds = [part.strip().lower() for part in normalize_scalar(source.get("stated_location_kind")).split(PART_SEPARATOR)]
+        unknown = [kind for kind in kinds if kind and kind not in LOCATION_KINDS]
+        if unknown:
+            warnings.append(f"sources[{index}] has unrecognised stated_location_kind {', '.join(unknown)!r}.")
+        for value_index, value in enumerate(source["values"], start=1):
+            for field in REQUIRED_VALUE_FIELDS:
+                if field not in value:
+                    warnings.append(f"sources[{index}].values[{value_index}] missing required field {field!r}.")
+            # Same canonicalisation as extract_evidence, so a pre-rename cached response is not
+            # reported as unsupported by one and accepted by the other.
+            name = canonical_attribute(normalize_scalar(value.get("attribute_name")))
+            if name and name not in VALUE_ATTRIBUTES:
+                warnings.append(f"sources[{index}].values[{value_index}] has unsupported attribute_name {name!r}.")
+    return list(dict.fromkeys(warnings))

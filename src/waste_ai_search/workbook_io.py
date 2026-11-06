@@ -153,7 +153,8 @@ REVIEW_INSTRUCTIONS = [
             "baseline_coordinates into Google Maps. Compare site_name with original_site_name - the source's own "
             "spelling - and note any translation problem in translation_note. Open "
             "winning_source_url and check the source says this, about THIS facility. A found_location row is one point, "
-            "lat, lon: paste it into Google Maps beside baseline_coordinates, and accept or reject the pair. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields; for a location, lat, lon) - never edit resolved_value. If your corrected value is for a different date than value_date, a current figure replacing an outdated one say, put that date in corrected_value_date (YYYY, YYYY-MM or YYYY-MM-DD). Put your name in "
+            "lat, lon, read from where its source says the site is (coordinates, a grid reference, or an address "
+            "placed on its building): paste it into Google Maps beside baseline_coordinates, and accept or reject the pair. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields; for a location, lat, lon) - never edit resolved_value. If your corrected value is for a different date than value_date, a current figure replacing an outdated one say, put that date in corrected_value_date (YYYY, YYYY-MM or YYYY-MM-DD). Put your name in "
             "reviewer and the date in reviewed_date, and say why in researcher_notes. An empty "
             "queue means nothing needs you."
         ),
@@ -168,7 +169,9 @@ REVIEW_INSTRUCTIONS = [
         "tab_name": "(file) evidence.csv",
         "purpose": (
             "One row per source-backed claim, with the tier rule applied to each source. Sources "
-            "that only confirm the database's value are here too."
+            "that only confirm the database's value are here too. Every row also gives the facility "
+            "its source describes, by name and stated location, and the point read from that location; "
+            "a source that states a location has a found_location row of its own."
         ),
         "sme_action": "Read only. Open it to see why a value won or lost.",
         "editable": "nothing",
@@ -178,8 +181,7 @@ REVIEW_INSTRUCTIONS = [
         "purpose": (
             "Findings that lost: a disagreement with the database's value from a source below the "
             "credibility floor (Tier 4-5) or weaker than the database's, a source whose link is "
-            "dead, a unit that could not be converted, half a location; plus the agent's own "
-            "unverified leads."
+            "dead, a unit that could not be converted; plus the agent's own unverified leads."
         ),
         "sme_action": "Read only. Promote something by hand if you judge the source good enough.",
         "editable": "nothing",

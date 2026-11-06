@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Sequence
 
-from .schema import ATTRIBUTE_TO_STANDARD_COLUMN, REQUESTABLE_ATTRIBUTES, normalize_scalar
+from .schema import ATTRIBUTE_TO_STANDARD_COLUMN, COORDINATE_ATTRIBUTES, GAP_FILL_ATTRIBUTES, normalize_scalar
 
 
 SOURCE_SCHEMA = "consolidation"
@@ -25,11 +25,12 @@ DB_FACILITY_KEY = "wastemap_id"
 # the switch still read; since the switch its value is the facility's wastemap_id.
 FACILITY_KEY = "internal_facility_id"
 
-# Which ledger column holds the provenance for each attribute we search. The three identity
-# attributes are named for the search, not for the database, so they need mapping.
+# Which ledger column holds the provenance for each attribute we search. The name and the two
+# coordinates are named for the search, not for the database, so they need mapping. A found
+# location's provenance is its coordinates'.
 LEDGER_COLUMNS = {
     attribute: ATTRIBUTE_TO_STANDARD_COLUMN.get(attribute, attribute)
-    for attribute in REQUESTABLE_ATTRIBUTES
+    for attribute in ["found_facility_name", *COORDINATE_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
 }
 
 # Constant within a facility (verified: 0 of 3,304 multi-row facilities vary on these).

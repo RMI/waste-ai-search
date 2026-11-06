@@ -183,7 +183,8 @@ name while the same filing against `usa_ghgrp_2026` goes to a human.
 - Require `publisher_class` and `publication_date`; state the undated→Tier 3 cap explicitly.
 - Fix site context for the new seed: drop `point` and `data_source`; keep `site_id`, `site_name`,
   `country_iso3`, `latitude`, `longitude`, `input_area_square_meters`, `municipality`, `admin1`,
-  `admin2`, `formatted_address`.
+  `admin2`, `formatted_address`. *Since F37* `latitude` and `longitude` are rounded to 2 decimals
+  and `formatted_address` is dropped, so the prompt holds nothing worth copying as a location.
 - Replace *"Do not overwrite non-empty baseline values"* with *report what sources say and cite it;
   the pipeline arbitrates.* The current wording suppresses exactly the high-credibility corrections
   Q6 is meant to capture.
@@ -371,11 +372,14 @@ All settled. Where an answer overrode my recommendation it is marked.
 | F34 | One worklist (WP-550) | The Contradictions tab is gone: a "Not a Waste Facility" verdict, or any facility_type that differs from the baseline, is reviewed on the site's own `facility_type` row in Review_Queue. The closure cross-check moved into that row's `evidence_summary`. Separate tabs for overlapping purposes confused reviewers. |
 | F35 | Newer evidence wins (WP-558) | Within a tier the newer `value_date` wins, ahead of corroboration. For `facility_status` only, a lower-tier source down to the promotion floor (Tier 3) may beat a better-tier source or the baseline when at least 3 years newer, always for review: a dated Tier 1 permit against recent Tier 3 news is the common case. `resolution_rule` states the dates. Re-arbitrating batch 1 changed 4 values (pass-1/pass-2 disagreements on gas-project fields). |
 | F36 | Nothing is accepted automatically (source-matching plan, build step 3) | Every found value that fills an empty field, at any tier, or disagrees with ours from a Tier 1–3 source at least as credible as ours goes to the review queue: `Filled empty baseline`, `Overrides baseline` and `Conflict - needs review`. A value equal to ours (`Confirmed baseline`) keeps its evidence in `evidence.csv`, but is not queued and not loaded, so the search never becomes the credited source for a value nobody reviewed. `Not found` stays out. Such rows get `validation_status = Nothing to review`, and no row is signed `AI Agent`. `resolved.csv` is written header-only; ingestion #261 accepts that and reads SME decisions from the workbook. The tier floor and the Leads route are unchanged. The 1 km (later 0.5 km) "same place" coordinate rule is gone: a location equal to ours to comparison precision confirms it, and any other is reviewed. The standardized CSV, its `.load.sql` and Run_Config's `standardized_records` are deleted, since they were built before review and #261 replaces them; arbitrating a run again deletes the copies an earlier arbitration left in its folder, and keeps any in blob. PR #24 is folded in: a location is one `found_location` row valued `lat, lon`, and a correction can carry `corrected_value_date`. The pass-2 gas follow-up and `refresh-seed` read values awaiting review in `review_queue.csv`, so both still work, and a "Not a Waste Facility" verdict still reaches the next pass's seed. In batch 1, 2,932 values had been accepted without review, the 131 a map mirror won among them. Reverses Q15/Q30, Q19, Q28, F5 and F25, and makes Q24 and Q27 moot. |
+| F37 | Sources first, and a location is what each source states (source-matching plan, build step 4) | The agent reports each source with the facility it describes, as the source writes it (`facility_name_in_source`, `facility_name_english`, `stated_location`, `stated_location_kind`), and the values it gives. It no longer returns nothing unless sure of identity: it researches only this site but reports what each source says, and code decides. `found_latitude` and `found_longitude` are no longer asked for; the locate step reads each stated location into a point (parsed coordinates and grid references, geocoded addresses, cached in `source_locations.json`), and `found_location` is resolved from the usable ones, where today's gating would have asked for coordinates. The prompt gives our coordinates rounded to 2 decimals and no `formatted_address`. The 5 km gate reads the farthest usable source location, and a value whose winning source names a facility sharing no distinctive word with ours gets a researcher note, since a source with no location can't fail the gate. One reader converts responses cached attribute-first, so older runs still arbitrate, each value tiered by its own citation's labels. Mitigates the F29 accepted risk; supersedes the coordinate parts of Q34 and F5. |
 | F11 | Tier 5 replaces the Unrated sentinel | An unclassifiable source now sits on the ordered scale at Tier 5 rather than out-of-band at 99. `Other` removed from `source_type`: 15 types, no catch-all. |
 
 ### Accepted risks
 
-- **No identity check where name and coordinates are both trusted (F29).** Those 4,063 sites
+- **No identity check where name and coordinates are both trusted (F29).** *Mitigated by F37:*
+  every source now states where it puts the facility, so the gate measures those even where the
+  location is not asked for. Before F37: those 4,063 sites
   are the same ones whose name F18 already skips, so neither is searched and the Q34 gate has
   no found coordinates to measure. A search that researched the wrong facility - the pilot's
   site 2695 resolved 238.6 km away - would reach the SME with no identity warning. Accepted by decision to cut
@@ -436,7 +440,8 @@ coordinates more than **5 km** from the seed now withdraw auto-validation for ev
 site and stamp the reason into `researcher_notes`. The threshold is a judgment call — a landfill
 footprint spans at most a couple of km and seed coordinates are polygon centroids — and is a single
 constant, `IDENTITY_DISTANCE_KM_THRESHOLD`. Since F36 nothing is auto-validated, so only the note
-remains.
+remains. Since F37 the distance is to the farthest of the site's sources whose stated location is
+usable, rather than to the resolved found coordinates.
 
 ### Pilot feedback, applied
 
@@ -765,6 +770,8 @@ evidence that the agent researched the right facility. Auto-validating a Tier 1�
 only defensible if identity is confirmed — a genuine regulator document about a neighbouring
 landfill is the failure mode tier cannot detect. (F36 stopped auto-validating anything; the gate's
 note still warns the SME.)
+
+**Superseded in part by F37:** a location is no longer a value the agent returns. `found_location` is requested under the same gating and read from where each source states the facility is.
 
 **Superseded in part by F18 (WP-531):** `found_facility_name` is no longer requested where the seed's name came from a Tier 1–2 source. Coordinates remain requested for every facility, so the Q34 identity gate is unaffected; what changes is that those facilities' identity rests on coordinates alone.
 
