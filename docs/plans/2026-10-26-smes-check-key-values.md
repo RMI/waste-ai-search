@@ -129,10 +129,11 @@ Reads the tab back and writes `accepted_values.csv`, which ingestion loads.
   source that is Junk, New site or not decided; where a value is marked Correct and also has a
   `corrected_value` (the correction is ignored); and where two different values for one field are
   both marked Correct.
-- `accepted_values.csv` keeps its columns. It doesn't say which values a person checked or
-  corrected; `found_values.csv` (every value the search found) does, in new columns
-  `value_check` ("required" for a Tier 3–5 key value, else blank), `value_decision` and
-  `corrected_value`.
+- `accepted_values.csv` keeps its columns, and since 4 November adds `is_year_exact`: TRUE where
+  the source dates the value to its year, FALSE where the run's year was assumed. It doesn't say
+  which values a person checked or corrected; `found_values.csv` (every value the search found)
+  does, in new columns `value_check` ("required" for a Tier 3–5 key value, else blank),
+  `value_decision` and `corrected_value`.
 
 ## Planned closure years
 
