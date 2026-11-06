@@ -1,5 +1,5 @@
 """Sites whose name gives a search nothing to look for are not searched (step 3 of
-docs/plans/2026-10-15-skip-unsearchable-names.md). All four classes are skipped, at site selection,
+docs/plans/2026-10-15-skip-unsearchable-names.md). All five classes are skipped, at site selection,
 beside the US and Brazil rule and in the same way: the run says what it dropped, an explicit request
 wins, and the workbook's Run_Config records it."""
 from __future__ import annotations
@@ -13,6 +13,7 @@ import pytest
 
 from waste_ai_search.run_context import PipelineConfig
 from waste_ai_search.searchable_names import (
+    ADDRESS,
     GENERIC,
     MINING,
     NAMED,
@@ -21,6 +22,7 @@ from waste_ai_search.searchable_names import (
     SKIPPED_SITES_FILE,
     describe_counts,
     name_class,
+    site_name_class,
 )
 
 # (site_id, site_name, original_site_name): one of each class, then a site named after a mining
@@ -119,6 +121,38 @@ def test_a_pilot_sample_includes_them_only_with_the_flag(tmp_path):
     assert reasons["6"] == "generic_name_hard_case"
 
 
+# --- Global Plastic Watch: an address, not a name -------------------------------------------------
+@pytest.mark.parametrize(
+    "sources, expected",
+    [
+        ("gpw_2021", ADDRESS),
+        (" gpw_2021 ", ADDRESS),
+        # Another dataset supplies the name.
+        ("gpw_2021 + osm_2022", NAMED),
+        ("osm_2022", NAMED),
+        ("", NAMED),
+    ],
+)
+def test_a_site_only_global_plastic_watch_records_is_address_only(sources, expected):
+    site = {"site_name": "Nông Cống District, Thanh Hoa province, Vietnam", "contributing_data_sources": sources}
+    assert site_name_class(site) == expected
+
+
+def test_address_only_sites_are_skipped_and_counted(tmp_path):
+    path = write_seed(tmp_path, names=[("1", "Hartland Landfill", ""), ("2", "Karimnagar Bypass, Telangana, India", "")])
+    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    rows[1]["contributing_data_sources"] = "gpw_2021"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=[*rows[0], "contributing_data_sources"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+    ids, printed = select(path)
+    assert ids == ["1"]
+    assert "(address only 1;" in printed
+    assert select(path, include_unsearchable_names=True)[0] == ["1", "2"]
+
+
 def test_the_cli_flag_reaches_the_config_for_search_and_run():
     from waste_ai_search.cli import build_parser, make_config
 
@@ -165,6 +199,42 @@ def test_initials_and_route_codes_count_as_a_name(name, expected):
 
 
 @pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        # Mexico (batch 3) names most of its sites in Spanish; 417 are just "Basurero Municipal".
+        ("BASURERO MUNICIPAL", GENERIC),
+        ("Basurero Municpal", GENERIC),
+        ("Relleno Sanitario Intermunicipal Tipo D", GENERIC),
+        ("Tiradero Municipal a Cielo Abierto", GENERIC),
+        ("Sitio Controlado de Disposicion Final de Residuos Solidos Urbanos", GENERIC),
+        ("Tiradero sin nombre", GENERIC),
+        ("El Basurero", GENERIC),
+        # Words that only say what kind of site it is, in English.
+        ("Municipal Landfill", GENERIC),
+        ("Sanitary Landfill", GENERIC),
+        ("Controlled Landfill", GENERIC),
+        ("Open-Air Dump", GENERIC),
+        ("Final Disposal Site", GENERIC),
+        ("Unnamed open-air dump", GENERIC),
+        ("The Dump", GENERIC),
+        # Saying it has no name.
+        ("NO NAME", NO_NAME),
+        ("Sin nombre", NO_NAME),
+        # A word that says which site it is still makes it a name.
+        ("Relleno Sanitario de Moroleon", NAMED),
+        ("La Lagunita Municipal Garbage Dump", NAMED),
+        ("North Landfill", NAMED),
+        ("Kitchen Corner Trash Can", NAMED),
+        # A kind word alone, with no word for a waste site, is left alone.
+        ("Centro de Acopio", NAMED),
+        ("Municipal", NAMED),
+    ],
+)
+def test_spanish_and_descriptive_names_are_generic(name, expected):
+    assert name_class(name) == expected
+
+
+@pytest.mark.parametrize(
     ("name", "original", "expected"),
     [
         # The translation lost a name the source recorded; the agent searches the original first.
@@ -172,6 +242,9 @@ def test_initials_and_route_codes_count_as_a_name(name, expected):
         ("OpenStreetMap Landfill", "Hartland", NAMED),
         ("OpenStreetMap Landfill", "", NO_NAME),
         ("", "Отвал Северный", NO_NAME),  # the original is a spoil heap, so still skipped
+        ("NO NAME", "NO NAME", NO_NAME),  # the same spelling twice is still no name
+        ("NO NAME", "Basurero Municipal", NO_NAME),
+        ("NO NAME", "Relleno Sanitario de Moroleón", NAMED),
         # Known limitation: the generic check knows only English words, so it can't tell a
         # distinctive original from a generic one such as Полигон ТБО, and reads the English name.
         ("Solid Waste Landfill", "Полигон ТБО «Новосёлки»", GENERIC),
@@ -300,12 +373,12 @@ TWO_COUNTRIES = [
 ]
 
 
-def two_country_config(tmp_path):
+def two_country_config(tmp_path, sites=TWO_COUNTRIES):
     path = tmp_path / "seed.csv"
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["site_id", "site_name", "country_iso3", "latitude", "longitude"])
-        for site_id, name, country in TWO_COUNTRIES:
+        for site_id, name, country in sites:
             writer.writerow([site_id, name, country, "1.0", "2.0"])
     return PipelineConfig(
         input_csv=path, run_dir=tmp_path / "run", run_id="run", site_delay_seconds=0, check_links=False
@@ -320,6 +393,18 @@ def test_a_narrower_search_under_the_same_run_id_adds_to_the_list(tmp_path, monk
 
     assert [row["site_id"] for row in skipped_rows(config.run_dir)] == ["2", "3", "5", "6"]
     assert run_config(config)["unsearchable_names_skipped"] == "4 (no name 2, generic label 2)"
+
+
+def test_a_search_whose_every_site_is_skipped_still_lists_them(tmp_path, monkeypatch):
+    """A country with no searchable name stops its search, but its skips stay on the run's record."""
+    from waste_ai_search.search import NothingToSearch
+
+    config = two_country_config(tmp_path, [*TWO_COUNTRIES, ("7", "Dump", "GHA")])
+    search(replace(config, iso3=["CAN"]), monkeypatch)
+    with pytest.raises(NothingToSearch):
+        search(replace(config, iso3=["GHA"]), monkeypatch)
+
+    assert [row["site_id"] for row in skipped_rows(config.run_dir)] == ["2", "3", "7"]
 
 
 def test_the_flag_on_one_country_leaves_the_others_skips_on_record(tmp_path, monkeypatch):

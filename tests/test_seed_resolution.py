@@ -269,12 +269,12 @@ def test_a_refreshed_seed_with_no_snapshot_yet_is_pinned_normally(tmp_path):
 def test_the_refresh_seed_command_runs_end_to_end(tmp_path):
     """Its default output path is resolved inside main(); exercises the import that path needs."""
     from waste_ai_search import cli
-    from waste_ai_search.schema import RESOLVED_HEADERS
+    from waste_ai_search.schema import FOUND_VALUES_HEADERS
 
     run_dir = tmp_path / "run"
     write_csv_records(run_dir / "seed.csv", [{"site_id": "1", "site_name": "A", "country_iso3": "NGA"}],
                       ["site_id", "site_name", "country_iso3"])
-    write_csv_records(run_dir / "resolved.csv", [], RESOLVED_HEADERS)
+    write_csv_records(run_dir / "found_values.csv", [], FOUND_VALUES_HEADERS)
 
     assert cli.main(["refresh-seed", "--run-id", "r", "--run-dir", str(run_dir)]) == 0
     assert (run_dir / "refreshed_seed.csv").exists()

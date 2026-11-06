@@ -1,7 +1,12 @@
 # AI search: SMEs approve sources site by site, and Tier 1–2 values are approved automatically
 
-**Status:** proposal, 21 October 2026. Nothing is built. This replaces the matching and review parts
-of [2026-10-20-match-sources-by-location.md](2026-10-20-match-sources-by-location.md) (PR #27).
+**Status:** built, 21 October 2026: build steps 1–4 and 7, on stacked local branches, not yet
+merged. Steps 5 (batch 1 conversion) and 6 (ingestion #261 rework) are not built. See
+[As built](#as-built). This replaces the matching and review parts of
+[2026-10-20-match-sources-by-location.md](2026-10-20-match-sources-by-location.md) (PR #27). Its
+approval rules were replaced on 26 October by
+[2026-10-26-smes-check-key-values.md](2026-10-26-smes-check-key-values.md): nothing is approved
+automatically.
 **Date:** 21 October 2026
 
 ## Why
@@ -167,7 +172,7 @@ Guelph. It would be auto-approved under Guelph.
 |---|---|
 | #21, #22, #23 (seed, name yield) | Keep |
 | #24 (found location as one value) | Close: it's in #30, and SME corrections go away |
-| #25 (handoff doc), #26 (batch 1 re-key), #33 (Terraform) | Keep. #26 feeds the batch 1 conversion; the handoff doc needs updating later |
+| #25 (handoff doc), #26 (batch 1 re-key), #33 (Terraform) | Keep. #26 feeds the batch 1 conversion; the handoff doc needs updating later. #26's `relabel.py` imports batch 1's `RESOLVED_HEADERS` and `REVIEW_QUEUE_HEADERS`, which the stack keeps for it; its tests also build batch 1 workbooks with the old `write_review_workbook(review_queue=, leads=)`, which needs replacing with openpyxl when #26 is rebased. Git merges the two without a conflict |
 | #27 (the matching plan) | Close: this plan replaces it |
 | #28 (mirrors dropped), #29 (unsearchable names skipped) | Keep |
 | #30 (nothing approved automatically) | Keep in the stack. Step 2 below brings auto-approval back; its description says so |
@@ -190,8 +195,8 @@ New PRs, stacked on `source-coordinates`:
 4. **`accept-reviews`** and `accepted_values.csv`.
 5. **Batch 1 conversion.**
 6. **Ingestion #261 rework.**
-7. **Docs:** the README; a design doc decision (F39) reversing F36 (nothing automatic) and F38
-   (matching); and this plan's status.
+7. **Docs:** the README; a design doc decision (F41, since F39 and F40 were taken by #34 and #35)
+   reversing F36 (nothing automatic) and F38 (matching); and this plan's status.
 
 ## Accepted risks
 
@@ -204,3 +209,100 @@ New PRs, stacked on `source-coordinates`:
   sites. #29's skipped names, the duplicate rule and the 5 km check cover most of what batch 1
   showed. A Tier 1–2 page cited for only one site and giving no usable location gets through, like
   the Manitoba news release under Guelph in the mini test.
+
+## As built
+
+| Build step | Branch |
+|---|---|
+| 1. Prompt and contract | `agent-decides-match` |
+| 2. Sorting: `found_values.csv`, auto-approval, years; matcher removed | `sort-found-values` |
+| 3. The `Site_Review` tab | `site-review-tab` |
+| 4. `accept-reviews` and `accepted_values.csv` | `accept-reviews` |
+| 5. Batch 1 conversion | Not built |
+| 6. Ingestion #261 rework | Not built (ingestion's repository) |
+| 7. Docs: README, design doc F41, this status | `source-review-docs` |
+
+Each branch is cut from the one before. The first is cut from `approve-sources-site-by-site` (this plan, PR #36), which sits on `source-coordinates`.
+
+**Where it differs from the plan:**
+
+- **Pair counts.** A pair takes the tier of its best-rated citation, and a page cited under two
+  spellings of one name is two pairs. So gpt-5.4 has 61 pairs (23 auto-approved, 51 values; 38 to
+  SMEs, all Tier 3–5) and mini 41 (19 auto-approved, 51 values; 22 to SMEs: 14 Tier 3–5, and 8 Tier 1
+  by exception, 6 for the same page and name and 3 more than 5 km away, one pair both), against the
+  table above. In gpt-5.4, gmf-fmv.ca is cited as both
+  "Merrick Landfill" and "Merrick Landfill site". The same-page check across sites compares names by
+  their distinctive words, though, so "The Eastview Landfill" and "Eastview Landfill" under two of
+  our sites are caught. In mini, Cowpen Bewley's register entry is Tier 1
+  in pass 1 and Tier 3 (undated) in the gas follow-up, and counts as Tier 1.
+- **Brazil is not searched at all.** A coordinates-only site has nothing to ask now, so it is
+  dropped from selection, even when Brazil is asked for.
+- **Not used also covers** a value the agent itself marked an excluded candidate, and the agent's
+  unverified leads, which `found_values.csv` lists with a blank `review_id`.
+- **The 5 km flag shows on any listed pair** more than 5 km away, Tier 3–5 included.
+- **`possible_duplicates.csv` leaves out a page cited with no facility name,** though both pairs
+  still go to SMEs: a blank name says nothing of two sites being one. In gpt-5.4, Ontario's
+  province-wide gas dataset paired North Bay and Guelph, 332 km apart, and re-arbitrating batch 1's
+  nameless responses listed 909 pairs. A pair more than 5 km apart says one search more likely
+  claimed the other's source.
+- **A flag says where an auto-approved value disagrees.** One value loads per site, attribute and
+  year, by tier first, and auto-approved pairs aren't on Site_Review, so an SME's approval could lose
+  to a value they never saw. Where an auto-approved source gives a different value for a field a
+  listed pair would fill, the row says which would load: "an auto-approved Tier 1 source gives
+  operator = WM New Zealand, which loads instead", or "approving replaces ...".
+- **Rough points are measured too.** Coordinates too coarse to show (fewer than 3 decimals, or a
+  grid reference coarser than 100 m) and a doubtful source's coordinates and address (more than 2 km
+  apart) give no `source_coordinates`, but the 5 km check still measures them, allowing for their
+  coarseness, so a Tier 1–2 source stating coordinates 100 km away goes to SMEs however it states
+  them. Only a source stating nothing readable is unchecked.
+- **A Different site needs an `other_site_id`.** Without one, `accept-reviews` stops and names the
+  row; an SME who can't tell which site leaves the decision blank and says so in `notes`. A
+  Different site also weighs again, at the other site, values set aside only because they confirm
+  or would change ours at the site searched.
+- **A Different site can be any site in the seed,** which holds our whole database: F38's limit to
+  the run's own sites went with `outside_run_matches.csv`. `accept-reviews` applies it but prints a
+  warning, naming the row, where the other site is in another country than the site searched, wasn't
+  searched by the run, or is more than 5 km from where the source places the facility. Ingestion
+  (#261) still has to decide what to do with one facility given values by two runs.
+- **An SME's decision applies whatever the pair's status:** a pair marked Junk loads nothing even
+  if a later arbitration auto-approves it.
+- **Arbitrating again empties `accepted_values.csv`** to its header row, since it sorts the values
+  again. It is emptied rather than deleted so the push replaces the copy in blob, which a pull would
+  otherwise bring back. `review_id` is stable, so running `accept-reviews` again restores it.
+- **`collect-new-facilities` is removed,** not kept as an alias, and `refresh-seed
+  --merge-identity` with it.
+
+**Still open:**
+
+- Nothing carries decisions from an SME-edited workbook to the one a later arbitration publishes
+  beside it.
+- A New site decision changed later doesn't remove the candidate already listed.
+- No live search has run against the new prompt.
+- **For Hugh: values the agent itself doubts are auto-approved.** Only an excluded candidate is set
+  aside. Of the 51 auto-approved values in each test, gpt-5.4 has 10 (8 pairs) that the agent marked
+  Inferred with Low confidence (9) or whose quote isn't on the cited page (1), and mini 10 (8 pairs):
+  quote not found 7, Inferred/Low 2, Conflicting 2. All 20 load. Among them: Guelph's
+  `facility_status = Active` that the agent called conflicting with a decommissioned landfill, a
+  forecast `closing_year = 2028` at Moose Jaw, and an operator the agent said the page doesn't name.
+  A fourth exception (Conflicting, Inferred with Low confidence, or a quote not found on a page whose
+  text we hold) would send these pairs to SMEs instead. Not built: it adds to decision 4.
+- **A pair takes its best citation's tier,** so a value only a weaker citation of the same page gives
+  is approved at the better tier. In mini, Cowpen Bewley's register is Tier 1 in pass 1 and Tier 3
+  undated in the gas follow-up, and the follow-up's `has_flare` and `gccs_energy_project_type`, whose
+  quotes aren't on the page, auto-approve as Tier 1.
+- **A tier comes from the agent's `source_type`.** A personal blog the agent called "Operator
+  disclosure" (gpt-5.4, Silverstream) is Tier 1 and auto-approves. This predates the stack, but
+  before it nothing loaded without review.
+- **A town-level geocode isn't used for any check.** `source_locations.json` already holds Brandon's
+  town point; a wider check (say 50 km) on such points would catch the Manitoba news release under
+  Guelph, 1,652 km away, and nothing else in either test. Such a check needs to tell a town from a
+  province: the cache records Nominatim's place rank in `match`, but a located point doesn't carry it
+  yet.
+- **Re-arbitrating batch 1's attribute-first responses**, which name no facility, makes every page
+  cited for two sites the same page and name: 2,130 values go to SMEs that way, 1,544 of them on a
+  blank name. The plan converts batch 1 from its `resolved.csv` instead (build step 5), so this only
+  matters if batch 1 is arbitrated again.
+- **For an attribute that isn't yearly, one value loads per site and attribute,** not per year, as
+  ingestion keys it; `accepted_values.csv`'s `year` is then the winning value's own year (its
+  `value_date`'s, else the run's), for the record. Ingestion (#261) should not key such an attribute
+  by it.

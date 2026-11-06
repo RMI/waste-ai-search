@@ -24,9 +24,9 @@ from .schema import normalize_scalar
 SEARCH_TOOL_RETRY_ATTEMPTS = 2
 # Bing grounding bills per query (WP-545). Asking in the prompt alone was ignored (233 queries vs
 # 235 on the same 10 sites), so this is also sent as the Responses API's max_tool_calls, which the
-# service enforces. It caps searches, not queries: each search sent ~4 queries in testing, and a
-# cap of 6 cut one site from 30-39 queries to 20. The cap is per response, so each retry gets a
-# fresh one. 0 means no cap.
+# service enforces. It caps the web search tool's calls, a page opened as well as a search, not
+# queries: each search sent ~4 queries in testing, and a cap of 6 cut one site from 30-39 queries
+# to 20. The cap is per response, so each retry gets a fresh one. 0 means no cap.
 DEFAULT_MAX_WEB_SEARCHES = 6
 SEARCH_TOOL_RETRY_DELAY_SECONDS = 20.0
 # Sites searched at once. Each search mostly waits on Foundry, so threads overlap that waiting.
@@ -47,6 +47,9 @@ class PipelineConfig:
     site_ids: list[str] = field(default_factory=list)
     # One of the country batches in schema.COUNTRY_BATCHES (F30); 0 means no batch filter.
     batch: int = 0
+    # Only sites our seed says take at least this many tonnes of waste a year; 0 means any. A second
+    # pass with another model searches a batch's largest sites (search --min-tonnes).
+    min_tonnes: float = 0
     force: bool = False
     site_delay_seconds: float = 3.0
     hard_site_timeout_seconds: int = 240
@@ -93,6 +96,8 @@ def raw_dir(run_dir: Path) -> Path:
 # the same filename would overwrite the first pass's findings, so passes are kept side by side and
 # arbitration merges them.
 PASS_SEPARATOR = "__"
+# The gas follow-up pass, which `run` makes for sites a pass found gas collection at (cli.run_everything).
+FOLLOW_UP_PASS = "gccs"
 
 
 def raw_response_path(run_dir: Path, site_id: Any, pass_label: str = "") -> Path:
@@ -105,6 +110,12 @@ def raw_response_path(run_dir: Path, site_id: Any, pass_label: str = "") -> Path
 def site_id_from_path(path: Path) -> str:
     """Recover the site id from a cached response name, ignoring any pass label."""
     return path.stem.replace("site_", "", 1).split(PASS_SEPARATOR, 1)[0]
+
+
+def pass_label_from_path(path: Path) -> str:
+    """The pass a cached response is from: blank for the first pass, else its label ("sol", "gccs")."""
+    parts = path.stem.split(PASS_SEPARATOR, 1)
+    return parts[1] if len(parts) > 1 else ""
 
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:

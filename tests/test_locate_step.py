@@ -1,6 +1,7 @@
 """The locate step: it runs in the search phase after the link check, and only it uses the network.
 
-Every source's stated location is located once and the answer kept in source_locations.json,
+Where every source puts the facility - its stated coordinates and address - is located once and
+the answer kept in source_locations.json,
 which arbitration reads, so arbitration stays offline. `locate --run-id` backfills an older run,
 as `check-links` does, and `--no-locate` skips it. No test here reaches a real geocoder.
 """
@@ -29,12 +30,19 @@ def response(*sources):
     return {"site_id": "1", "sources": list(sources), "unverified_leads": [], "search_notes": "Searched."}
 
 
-def source(url, stated, kind, **extra):
-    return {**PERMIT, "url": url, "stated_location": stated, "stated_location_kind": kind, "values": [], **extra}
+def source(url, address="", coordinates="", **extra):
+    operator = {"attribute_name": "operator", "value": "Wicklow County Council", "unit": "", "value_basis": "Direct",
+                "confidence_score": "High", "value_date": "2022", "evidence_summary": "The licence names it."}
+    return {**PERMIT, "url": url, "stated_address": address, "stated_coordinates": coordinates, "values": [operator], **extra}
 
 
-ADDRESS = source("https://epa.example.ie/licence/W0123", "Ballynagran, Coolbeg, Co. Wicklow", "street address")
-GRID = source("https://epa.example.ie/licence/W0124", "T 285 935", "grid reference")
+ADDRESS = source("https://epa.example.ie/licence/W0123", address="Ballynagran, Coolbeg, Co. Wicklow")
+GRID = source("https://epa.example.ie/licence/W0124", coordinates="T 285 935")
+
+
+def stated(row):
+    """What a found_values.csv row's source states of where the facility is, as written."""
+    return row["source_address"] or row["stated_coordinates"]
 
 
 class FakeGeocoder:
@@ -89,8 +97,8 @@ def test_the_search_locates_each_stated_location_after_the_link_check(tmp_path, 
     geocoder.calls.clear()
     run_arbitration(config)
     assert geocoder.calls == []
-    bases = {row["stated_location"]: row["location_basis"] for row in csv.DictReader((config.run_dir / "evidence.csv").open())}
-    assert bases == {ADDRESS["stated_location"]: ROOFTOP, GRID["stated_location"]: "grid reference"}
+    bases = {stated(row): row["coordinates_from"] for row in csv.DictReader((config.run_dir / "found_values.csv").open())}
+    assert bases == {ADDRESS["stated_address"]: "address (building)", GRID["stated_coordinates"]: "grid reference"}
 
     run_config = {row[0]: row[1] for row in load_workbook(config.run_dir / "run_review.xlsx")["Run_Config"].iter_rows(values_only=True)}
     assert run_config["locations_stated"] == "2 (grid reference 1, rooftop 1)"
@@ -122,8 +130,8 @@ def test_no_locate_skips_the_step(tmp_path, monkeypatch):
     assert geocoder.calls == []
     # Arbitration still reads coordinates and grid references itself; an address waits for locate.
     run_arbitration(config)
-    reasons = {row["stated_location"]: row["location_reason"] for row in csv.DictReader((config.run_dir / "evidence.csv").open())}
-    assert reasons == {ADDRESS["stated_location"]: NOT_LOCATED, GRID["stated_location"]: ""}
+    reasons = {stated(row): row["location_note"] for row in csv.DictReader((config.run_dir / "found_values.csv").open())}
+    assert reasons == {ADDRESS["stated_address"]: NOT_LOCATED, GRID["stated_coordinates"]: ""}
     run_config = {row[0]: row[1] for row in load_workbook(config.run_dir / "run_review.xlsx")["Run_Config"].iter_rows(values_only=True)}
     assert run_config["geocoder"] == "locate step not run"
 
@@ -191,3 +199,35 @@ def test_a_geocoder_configured_wrongly_stops_the_search_before_anything_is_paid_
     with pytest.raises(ValueError, match="AZURE_MAPS_SUBSCRIPTION_KEY"):
         search.run_search(config)
     assert called == []
+
+
+def test_an_address_is_located_with_its_town_and_state_and_arbitration_reads_it_back(tmp_path, monkeypatch):
+    """The locate step names the source's state as Nominatim does, and so does arbitration, from the
+    run's state_names.json: both look up "colonia El Zarco, Yautepec, Morelos"."""
+    class Nominatim(FakeGeocoder):
+        def geocode(self, address, iso2):
+            self.calls.append((address, iso2))
+            return GeocodeMatch(18.9046, -99.0612, "street", "highway=residential on way, rank 26", "Morelos")
+
+        def state(self, text, iso2):  # noqa: ARG002
+            return {"Mor.": "Morelos", "Morelos": "Morelos"}.get(text, "")
+
+    zarco = source("https://diariodemorelos.example/yautepec", address="colonia El Zarco",
+                   stated_municipality="Yautepec", stated_state="Mor.")
+    path = tmp_path / "seed.csv"
+    path.write_text(
+        "site_id,internal_facility_id,site_name,country_iso3,latitude,longitude,admin1,contributing_data_sources,reference_year\n"
+        "4853,4853,Ojo Seco Municipal Open-Air Dump,MEX,18.91608333,-99.06905556,Morelos,osm_2022,2022\n",
+        encoding="utf-8",
+    )
+    geocoder = Nominatim()
+    monkeypatch.setattr(search, "get_client", lambda _config: Client(response(zarco)))
+    monkeypatch.setattr(search, "make_geocoder", lambda name: geocoder)
+    config = PipelineConfig(input_csv=path, run_dir=tmp_path / "run", run_id="run", site_delay_seconds=0)
+    search.run_search(config)
+    assert geocoder.calls == [("colonia El Zarco, Yautepec, Morelos", "MX")]
+
+    run_arbitration(config)
+    [row] = list(csv.DictReader((config.run_dir / "found_values.csv").open(encoding="utf-8-sig")))
+    assert (row["coordinates_from"], row["location_note"]) == ("address (street)", "")
+    assert float(row["distance_km"]) < 5

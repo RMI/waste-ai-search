@@ -1,12 +1,19 @@
 """One reader for every cached agent response, whichever shape it was written in.
 
 The agent used to answer attribute-first: each attribute it found, with the sources behind it. It
-now answers source-first: each source it used, with the facility that source describes - its name
-and location as the source writes them - and the values it gives (build step 4 of the
-source-matching plan). Every reader of a cached response goes through read_payload, which turns
-either shape into the source-first one, so a run cached before the change still arbitrates: the
-evidence, the link check, the run log's counts, validation, the merge of a follow-up pass, retry
-detection and the agent's own leads.
+now answers source-first: each source it used, with the facility that source describes - its name,
+address and coordinates as the source writes them - and the values it gives (build step 4 of the
+source-matching plan, and step 1 of the approve-sources plan). Every reader of a cached response
+goes through read_payload, which turns every shape into the current one, so a run cached before a
+change still arbitrates: the evidence, the link check, the run log's counts, validation, the merge
+of a follow-up pass, retry detection and the agent's own leads.
+
+A source-first response from before step 1 of the approve-sources plan gave one stated_location,
+with a stated_location_kind for each of its parts ("a | b", kinds "coordinates | street address").
+Its parts are split by their kinds: coordinates and grid references become stated_coordinates;
+street addresses, place descriptions and parts with no kind become stated_address, which the
+locate step reads as coordinates where that is all a part is; a part of kind "none" is dropped.
+Several parts of one kind are joined with PART_SEPARATOR, and located one by one.
 
 An attribute-first response is converted like this:
 
@@ -19,9 +26,9 @@ An attribute-first response is converted like this:
   page's other citations, so an undated citation of a dated page gets its date. A gas follow-up
   pass that labelled a page differently keeps its own label;
 - facility_name_in_source is the response's found_facility_name, for the sources cited for it;
-- stated_location is the found latitude and longitude as "lat, lon", kind "coordinates", for the
-  sources cited for both. They are no longer values: a found location comes from what each source
-  states (locate.py), and half a location is none.
+- stated_coordinates is the found latitude and longitude as "lat, lon", for the sources cited for
+  both. They are no longer values: a found location comes from what each source states
+  (locate.py), and half a location is none.
 """
 from __future__ import annotations
 
@@ -35,17 +42,37 @@ from .schema import COORDINATE_ATTRIBUTES, REQUESTABLE_ATTRIBUTES, canonical_att
 ATTRIBUTE_FIRST = "attribute-first"
 SOURCE_FIRST = "source-first"
 
-# What each source reports about itself and the facility it describes.
+# What each source reports about itself and the facility it describes. The facility's name,
+# address and coordinates, as the source writes them, are only used to check that the source is
+# about the site searched; they never replace ours.
 SOURCE_FIELDS = [
     "url", "source_title", "publisher", "source_type", "publication_date", "language", "paywall_flag",
-    "facility_name_in_source", "facility_name_english", "stated_location", "stated_location_kind",
+    "facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates",
+    "stated_municipality", "stated_state",
+]
+# The fields that describe the facility as text, which validation checks are text.
+FACILITY_FIELDS = [
+    "facility_name_in_source", "facility_name_english", "stated_address", "stated_coordinates",
+    "stated_municipality", "stated_state",
 ]
 # Kept from older responses, which carried them on each citation.
 LEGACY_SOURCE_FIELDS = ["subscription_followup_needed", "source_tier"]
+# The one location a source-first response gave before stated_address and stated_coordinates, and
+# the kind of each of its parts, from this list. Split by read_payload (see the module docstring).
+LEGACY_LOCATION_FIELDS = ["stated_location", "stated_location_kind"]
+LEGACY_LOCATION_KINDS = ["coordinates", "grid reference", "street address", "place description", "none"]
+LEGACY_POINT_KINDS = {"coordinates", "grid reference"}
+# Between the parts of one stated field: "a | b".
+PART_SEPARATOR = "|"
 # What each value reports. The fields the code reads are the ones it read before the change.
 VALUE_FIELDS = [
     "attribute_name", "value", "unit", "value_basis", "confidence_score", "value_date",
     "evidence_summary", "search_terms_used", "quoted_evidence_short",
+    # Only a closing_year can be planned; responses before the key-values plan don't give it.
+    "planned",
+    # Only an incoming waste amount can be not municipal; responses before 30 October 2026 don't
+    # give it.
+    "not_municipal",
 ]
 REQUIRED_VALUE_FIELDS = ["attribute_name", "value", "value_basis", "confidence_score"]
 # An attribute-first response's required fields, as validation reported them.
@@ -112,7 +139,7 @@ def normalize_url(url: Any) -> str:
 def source_id_for(url: Any, fallback: str) -> str:
     """A source's id, derived from its exact URL, so it is the same wherever the URL is cited.
 
-    evidence.csv and sources.csv both carry it, so the two files join. A citation with no URL has
+    found_values.csv and sources.csv both carry it, so the two files join. A citation with no URL has
     nothing to derive an id from, and keeps `fallback`, its own per-citation id.
     """
     exact = normalize_url(url)
@@ -174,8 +201,46 @@ def _read_sources(sources: Any, problems: list[str]) -> list[dict[str, Any]]:
                 kept.append(dict(value))
             else:
                 problems.append(f"sources[{index}].values[{value_index}] must be an object.")
-        out.append({**source, "values": kept})
+        out.append(_location_fields({**source, "values": kept}, index, problems))
     return out
+
+
+def _location_fields(source: dict[str, Any], index: int, problems: list[str]) -> dict[str, Any]:
+    """The source with stated_address and stated_coordinates, split from an older response's one
+    stated_location where it gave that instead."""
+    legacy = {field: source.pop(field, None) for field in LEGACY_LOCATION_FIELDS}
+    if "stated_address" in source or "stated_coordinates" in source:
+        source.setdefault("stated_address", "")
+        source.setdefault("stated_coordinates", "")
+        return source
+    address, coordinates, unknown = split_stated_location(*legacy.values())
+    if unknown:
+        problems.append(f"sources[{index}] has unrecognised stated_location_kind {', '.join(unknown)!r}.")
+    source["stated_address"], source["stated_coordinates"] = address, coordinates
+    return source
+
+
+def split_stated_location(text: Any, kind: Any) -> tuple[str, str, list[str]]:
+    """An older response's stated_location as (stated_address, stated_coordinates), split by the
+    kind of each part, and any kinds not in LEGACY_LOCATION_KINDS.
+
+    "48.4410, -89.3690 | 1 Gate Road", kinds "coordinates | street address", is ("1 Gate Road",
+    "48.4410, -89.3690"). A part with no kind, or a kind not in the list, is an address: the locate
+    step still reads it as coordinates where that is all it is, as it did when the labels were
+    read. A part of kind "none" is no location.
+    """
+    texts = [part.strip() for part in normalize_scalar(text).split(PART_SEPARATOR)]
+    kinds = [part.strip().lower() for part in normalize_scalar(kind).split(PART_SEPARATOR)]
+    address: list[str] = []
+    coordinates: list[str] = []
+    for position, part in enumerate(texts):
+        part_kind = kinds[position] if position < len(kinds) else ""
+        if not part or part_kind == "none":
+            continue
+        (coordinates if part_kind in LEGACY_POINT_KINDS else address).append(part)
+    unknown = [part_kind for part_kind in kinds if part_kind and part_kind not in LEGACY_LOCATION_KINDS]
+    separator = f" {PART_SEPARATOR} "
+    return separator.join(address), separator.join(coordinates), unknown
 
 
 def _from_attributes(attributes: Any, problems: list[str]) -> list[dict[str, Any]]:
@@ -244,12 +309,12 @@ def _from_attributes(attributes: Any, problems: list[str]) -> list[dict[str, Any
         name = normalize_scalar(cited.get("found_facility_name"))
         source.setdefault("facility_name_in_source", name)
         source.setdefault("facility_name_english", "")
+        # An attribute-first response never gave an address.
+        source["stated_address"] = ""
         if latitude and longitude:
-            source["stated_location"] = f"{latitude}, {longitude}"
-            source["stated_location_kind"] = "coordinates"
+            source["stated_coordinates"] = f"{latitude}, {longitude}"
         else:
-            source.setdefault("stated_location", "")
-            source.setdefault("stated_location_kind", "")
+            source["stated_coordinates"] = ""
             source.pop(_LOCATION_CITED_AS, None)
         out.append(source)
     return out

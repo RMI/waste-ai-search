@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from waste_ai_search.prompt_builder import build_site_prompt
+from waste_ai_search.prompt_builder import build_site_prompt, operator_named, requested_attributes
 from waste_ai_search.source_names import (
     RAW_NAME_SOURCES,
     _osm_tag_name,
@@ -115,7 +115,7 @@ def test_attach_matches_on_the_integer_facility_key():
 
 
 # --- the prompt ---------------------------------------------------------------------------
-def test_prompt_carries_both_names_and_says_to_search_both():
+def test_prompt_carries_both_names_as_one_facility():
     prompt = build_site_prompt(
         {
             "site_id": "44",
@@ -124,7 +124,7 @@ def test_prompt_carries_both_names_and_says_to_search_both():
             "source_language": "es",
             "country_iso3": "MEX",
         },
-        attributes=["found_facility_name"],
+        attributes=["operator"],
     )
     assert '"site_name": "DELICACIES"' in prompt
     assert '"original_site_name": "DELICIAS"' in prompt
@@ -138,7 +138,7 @@ def test_prompt_omits_the_original_name_when_there_is_none():
     """Sites from English-language sources must not carry an empty field into the context."""
     prompt = build_site_prompt(
         {"site_id": "7", "site_name": "Greenview Landfill", "country_iso3": "USA"},
-        attributes=["found_facility_name"],
+        attributes=["operator"],
     )
     assert "original_site_name" not in prompt.split("Site context:")[1]
 
@@ -154,7 +154,7 @@ def test_english_source_site_is_not_told_its_name_is_a_translation():
     """
     prompt = build_site_prompt(
         {"site_id": "7", "site_name": "Greenview Landfill", "country_iso3": "CAN"},
-        attributes=["found_facility_name"],
+        attributes=["operator"],
     )
     assert "machine-translated" not in prompt
     assert "it has not\n  been translated" in prompt
@@ -171,7 +171,7 @@ def test_translated_source_site_still_gets_the_two_name_guidance():
             "source_language": "es",
             "country_iso3": "MEX",
         },
-        attributes=["found_facility_name"],
+        attributes=["operator"],
     )
     assert "machine-translated" in prompt
     assert "Search THIS name in the local language first" in prompt
@@ -188,7 +188,7 @@ def test_blank_original_name_counts_as_absent():
             "source_language": "",
             "country_iso3": "CAN",
         },
-        attributes=["found_facility_name"],
+        attributes=["operator"],
     )
     assert "machine-translated" not in prompt
 
@@ -208,7 +208,7 @@ def test_translated_source_keeps_its_language_when_the_name_is_unchanged():
             "source_language": "pt",
             "country_iso3": "BRA",
         },
-        attributes=["found_facility_name"],
+        attributes=["operator"],
     )
     assert "'pt' (ISO 639-1)" in prompt
     assert "Search it in that language as well as in English" in prompt
@@ -228,7 +228,7 @@ def test_english_language_translated_source_is_treated_as_untranslated():
             "source_language": "en",
             "country_iso3": "GBR",
         },
-        attributes=["found_facility_name"],
+        attributes=["operator"],
     )
     assert "it has not\n  been translated" in prompt
     assert "ISO 639-1" not in prompt
@@ -390,3 +390,193 @@ def test_load_takes_the_raw_row_whose_translation_is_the_chosen_name(monkeypatch
         ],
     })
     assert found[7]["original_site_name"] == "Lixao Itaresidue"
+
+
+# --- Spanish-language sites: searched in Spanish, never by coordinates -----------------------
+# In the 31 October Mexico tests none of the 213 sources cited was in English but one bilingual PDF,
+# and none printed decimal coordinates, yet Terra searched English names at 43 of 50 sites and put
+# our coordinates into searches at 21. 1,548 of batch 3's 1,553 sites are 'es'; other languages
+# keep the old wording.
+def flat(site, attributes=("operator",)):
+    return " ".join(build_site_prompt(site, attributes=list(attributes)).split())
+
+
+def section(prompt, title):
+    return prompt.split(f"\n{title}:\n", 1)[1].split("\n\n", 1)[0]
+
+
+SPANISH_TASK = (
+    "Search in the local language, using the site's names, municipality and admin names. Use the approximate "
+    "coordinates only to check a source's place: pages almost never print them, so never put them in a search."
+)
+OLD_TASK = (
+    "Search in English and in the local language, using the site name, approximate coordinates, municipality, "
+    "and admin names."
+)
+GAS_IN_ENGLISH = (
+    "Gas-project records (UNFCCC CDM, Global Methane Initiative) are often in English: search those in English."
+)
+
+
+def test_a_spanish_site_is_searched_in_spanish_and_never_by_its_coordinates():
+    site = {"site_id": "3564", "site_name": "BASURERO MUNICIPAL DE SAN IGNACIO CERRO GORDO", "source_language": "es",
+            "country_iso3": "MEX", "latitude": "20.74182013", "longitude": "-102.5077198"}
+    prompt = flat(site)
+    assert SPANISH_TASK in prompt and OLD_TASK not in prompt
+    assert "Search it in that language. Local permits, municipal records and news coverage are written in it" in prompt
+    assert "as well as in English" not in prompt
+    # The coordinates in the site context only check a source's place.
+    assert "never use the coordinates in the site context (rounded to about 1 km, for checking places only)" in prompt
+    assert "for searching only" not in prompt
+
+
+def test_a_spanish_sites_translated_name_is_not_searched():
+    """Terra searched 'CUITECO GARBAGE DUMP' and 'GARBAGE DUMP A LA PICHUECA'."""
+    site = {"site_id": "9233", "site_name": "VERACRUZ SANITARY LANDFILL", "original_site_name": "RELLENO SANITARIO VERACRUZ",
+            "source_language": "es", "country_iso3": "MEX"}
+    names = " ".join(section(build_site_prompt(site, attributes=["operator"]), "Names").split())
+    assert (
+        "- Don't spend searches on site_name: it is our own translation and no source uses it. Treat them as one "
+        "facility with two names, never as two candidates: agreeing on the translated name alone is not identity "
+        "confirmation."
+    ) in names
+    assert "Search both." not in names
+
+
+def test_gas_project_records_are_still_searched_in_english():
+    """UNFCCC CDM and Global Methane Initiative documents are in English. Only where the gas
+    attributes are asked: 168 of batch 3's sites."""
+    site = {"site_id": "4005", "site_name": "RED RECOLECTOR SA. DE CV.", "source_language": "es", "country_iso3": "MEX",
+            "has_landfill_gas_collection": "TRUE"}
+    assert GAS_IN_ENGLISH in flat(site, requested_attributes(site))
+    assert GAS_IN_ENGLISH in flat(site, ["has_flare"])
+    assert GAS_IN_ENGLISH not in flat(site, ["facility_status", "has_landfill_gas_collection"])
+
+
+@pytest.mark.parametrize("language", ["pt", "de", ""])
+def test_other_languages_keep_searching_in_english_and_by_coordinates(language):
+    site = {"site_id": "17924", "site_name": "Burgenland Waste Association", "original_site_name": "Burgenlandischer Mullverband",
+            "source_language": language, "country_iso3": "AUT", "has_landfill_gas_collection": "TRUE"}
+    prompt = flat(site, ["operator", "has_flare"])
+    assert OLD_TASK in prompt and SPANISH_TASK not in prompt
+    assert "- Search both. Treat them as one facility with two names" in prompt
+    assert "(rounded to about 1 km, for searching only)" in prompt
+    assert GAS_IN_ENGLISH not in prompt
+
+
+# --- a name that is an operator's -----------------------------------------------------------
+# At 4005 and 5339, named after the company that runs them, gpt-5.4 and Terra found only the
+# company and returned nothing. Sol searched for the landfill at that place and found pages
+# judged ours, which name other operators. The rows are the seed's, with the fields the prompt reads.
+INEGI = "found_facility_name@mexico_inegi_2016; found_latitude@mexico_inegi_2016; found_longitude@mexico_inegi_2016"
+OPERATOR_NAMED = {
+    "4005": {"site_id": "4005", "site_name": "RED RECOLECTOR SA. DE CV.", "original_site_name": "",
+             "source_language": "es", "country_iso3": "MEX", "latitude": "19.167215", "longitude": "-99.586588",
+             "is_location_exact": "TRUE", "attribute_sources": INEGI},
+    "5339": {"site_id": "5339",
+             "site_name": "SISTEMA INTEGRAL PARA EL MANEJO ECOLOGICO Y PROCESAMIENTO DE DESECHOS ANAHUAC",
+             "original_site_name": "", "source_language": "es", "country_iso3": "MEX", "latitude": "27.26966667",
+             "longitude": "-100.0853333", "is_location_exact": "TRUE", "attribute_sources": INEGI},
+    "8146": {"site_id": "8146", "site_name": "FINAL DISPOSAL SITE PROMOTORA AMBIENTAL DE LA LAGUNA S.A. DE C.V.",
+             "original_site_name": "SITIO DE DISPOSICION FINAL PROMOTORA AMBIENTAL DE LA LAGUNA S.A. DE C.V.",
+             "source_language": "es", "country_iso3": "MEX", "latitude": "25.98393323", "longitude": "-109.02698709",
+             "is_location_exact": "TRUE", "attribute_sources": INEGI},
+}
+OWN_NAMES = {
+    "9233": {"site_id": "9233", "site_name": "VERACRUZ SANITARY LANDFILL", "original_site_name": "RELLENO SANITARIO VERACRUZ",
+             "source_language": "es", "country_iso3": "MEX", "latitude": "19.232865", "longitude": "-96.225432",
+             "is_location_exact": "TRUE", "attribute_sources": INEGI},
+    # A bare 'Intermunicipal' is the site's own name: 21 of batch 3's names have one.
+    "6592": {"site_id": "6592", "site_name": "HUEJOTZINGO INTERMUNICIPAL SANITARY LANDFILL",
+             "original_site_name": "RELLENO SANITARIO INTERMUNICIPAL DE HUEJOTZINGO", "source_language": "es",
+             "country_iso3": "MEX", "latitude": "19.1823381", "longitude": "-98.4268559", "is_location_exact": "TRUE",
+             "attribute_sources": INEGI},
+    "6469": {"site_id": "6469", "site_name": "RELLENO SANITARIO INTERMUNICIPAL AJALPAN", "original_site_name": "",
+             "source_language": "es", "country_iso3": "MEX", "latitude": "18.36825", "longitude": "-97.226544",
+             "is_location_exact": "TRUE", "attribute_sources": INEGI},
+}
+OPERATOR_BULLET = (
+    "looks like an operator's name (a company or agency), which may run sites elsewhere. Search for the landfill "
+    "or dump at this place under the names local sources use. A source about it may name another operator: let "
+    "the municipality, state and our other sites decide."
+)
+
+
+@pytest.mark.parametrize("site_id", sorted(OPERATOR_NAMED))
+def test_a_site_named_after_its_operator_is_searched_for_the_site_it_runs_here(site_id):
+    names = " ".join(section(build_site_prompt(OPERATOR_NAMED[site_id], ["operator"]), "Names").split())
+    # The name searched: original_site_name where we have one, else site_name.
+    field = "original_site_name" if OPERATOR_NAMED[site_id]["original_site_name"] else "site_name"
+    assert f"- {field} {OPERATOR_BULLET}" in names
+
+
+@pytest.mark.parametrize("site_id", sorted(OWN_NAMES))
+def test_a_sites_own_name_gets_no_operator_bullet(site_id):
+    assert "looks like an operator's name" not in build_site_prompt(OWN_NAMES[site_id], ["operator"])
+
+
+def test_a_place_in_an_operators_name_is_not_taken_for_the_sites():
+    """7 of the 8 sites named 'PROMOTORA AMBIENTAL DE LA LAGUNA', such as 8146 in Sinaloa, are
+    outside La Laguna, so a page about La Laguna's dump is not about them. The town's dump still is."""
+    operator_named = flat(OPERATOR_NAMED["8146"])
+    assert "the place our site is named after" not in operator_named
+    assert (
+        "But a page about the town's dump, as we hold no other site nearby, describes this one unless it speaks "
+        "of a replacement or another location"
+    ) in operator_named
+    own_name = flat(OWN_NAMES["9233"])
+    assert "But a page about the dump of the place our site is named after, or about the town's dump" in own_name
+
+
+def test_an_operators_name_is_never_called_confirmed():
+    """INEGI's names are Tier 1, and 'The name and coordinates are already confirmed' pushed the
+    agent to match the company's name exactly. Only the coordinates are confirmed now."""
+    operator_named = " ".join(build_site_prompt(OPERATOR_NAMED["4005"], ["operator"]).split())
+    assert "The coordinates are already confirmed by an authoritative source." in operator_named
+    assert "The name and coordinates are" not in operator_named
+    own_name = " ".join(build_site_prompt(OWN_NAMES["9233"], ["operator"]).split())
+    assert "The name and coordinates are already confirmed by an authoritative source." in own_name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "RED RECOLECTOR SA. DE CV.", "WASTE CO MEXICO SA DE CV", "RELLENO SANITARIO SAN JUAN DEL RIO S.A DE .CV",
+        "Grupo Contadero S. A. de C. V.", "PROMOTORA AMBIENTAL DE LA LAGUNA SOCIEDAD ANÓNIMA DE CAPITAL VARIABLE",
+        "Servicios Ambientales S. de R.L.", "RELLENO SANITARIO A CARGO DE TECMED,", "Proactiva Medio Ambiente",
+        "SISTEMA INTERMUNICIPAL DE MANEJO DE RESIDUOS SOLIDOS SIMAR", "simeprode",
+        "JUNTA INTERMUNICIPAL PARA LA OPERACION DE RELLENO SANITARIO (JIORESA)",
+    ],
+)
+def test_legal_forms_and_operators_are_found_in_any_spelling(name):
+    assert operator_named({"site_name": name}) == "site_name"
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["RELLENO SANITARIO INTERMUNICIPAL DE ATLIXCO", "Casa de Cvetkovic", "Sistema Integral de Aseo", "Grupo SA",
+     "LA JUNTA LANDFILL"],
+)
+def test_a_bare_intermunicipal_or_a_lookalike_is_not_an_operators_name(name):
+    assert operator_named({"site_name": name, "original_site_name": name}) == ""
+
+
+# --- a misspelt name ------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "site",
+    [
+        {"site_id": "5099", "site_name": "EL ASALTO LANDFILL", "original_site_name": "RELLENO SANITARIO EL ASALTO",
+         "source_language": "es", "country_iso3": "MEX"},
+        {"site_id": "2210", "site_name": "Lixao Municipal", "source_language": "pt", "country_iso3": "BRA"},
+        {"site_id": "7", "site_name": "Greenview Landfill", "country_iso3": "CAN"},
+    ],
+)
+def test_close_spellings_are_tried_before_a_site_is_called_undocumented(site):
+    """At 5099 Terra's six searches were all for 'El Asalto' and found nothing; only Sol tried the
+    likely variant 'El Salto', and found the one page judged ours. INEGI names carry slips like it
+    ('SITIO DE DISPOSICON FINAL')."""
+    names = " ".join(section(build_site_prompt(site, ["operator"]), "Names").split())
+    assert (
+        "- Our recorded name may be misspelt or garbled: if it finds nothing, try close spellings (El Salto for "
+        "El Asalto) before concluding the site is undocumented."
+    ) in names

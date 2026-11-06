@@ -2,7 +2,7 @@
 """How often a cited page states an address or coordinates that the agent didn't copy.
 
 Measures whether a second, page-reading pass is worth building (src/waste_ai_search/missed_locations.py
-says how it looks). Reads an arbitrated run whose link check kept page text: evidence.csv,
+says how it looks). Reads an arbitrated run whose link check kept page text: found_values.csv,
 sources.csv, seed.csv, link_check.json and page_text/. Prints a summary, and with --out writes the
 missed pages, to spot-check before deciding anything.
 

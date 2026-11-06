@@ -28,7 +28,6 @@ from waste_ai_search.on_page import (
 )
 from waste_ai_search.page_text import PAGE_TEXT_DIR, save_page_text
 from waste_ai_search.run_context import PipelineConfig
-from waste_ai_search.schema import LOCATION_ATTRIBUTE
 from waste_ai_search.seed_source import seed_headers
 
 
@@ -68,27 +67,27 @@ def test_nothing_to_check_or_no_page_text():
 
 
 def test_stated_coordinates_count_where_the_page_gives_them_to_more_decimals():
-    assert location_on_page("-40.88365, 175.0277", "coordinates", PAGE) == FOUND
+    assert location_on_page("", "-40.88365, 175.0277", PAGE) == FOUND
     # Trailing zeros say nothing.
-    assert location_on_page("-40.88365, 175.02770", "coordinates", PAGE) == FOUND
+    assert location_on_page("", "-40.88365, 175.02770", PAGE) == FOUND
     # A sign or hemisphere is not compared, but the digits are.
-    assert location_on_page("40.8836512 S, 175.0277 E", "coordinates", PAGE) == FOUND
-    assert location_on_page("-40.88365, 176.1234", "coordinates", PAGE) == PARTLY
-    assert location_on_page("-41.2000, 174.7700", "coordinates", PAGE) == NOT_FOUND
+    assert location_on_page("", "40.8836512 S, 175.0277 E", PAGE) == FOUND
+    assert location_on_page("", "-40.88365, 176.1234", PAGE) == PARTLY
+    assert location_on_page("", "-41.2000, 174.7700", PAGE) == NOT_FOUND
     # 140.8836 is not 40.8836.
-    assert location_on_page("140.8836, 75.0277", "coordinates", PAGE) == NOT_FOUND
+    assert location_on_page("", "140.8836, 75.0277", PAGE) == NOT_FOUND
 
 
 def test_a_grid_reference_is_compared_without_its_spaces():
-    assert location_on_page("TQ 310 806", "grid reference", PAGE) == FOUND
-    assert location_on_page("TQ 311 806", "grid reference", PAGE) == NOT_FOUND
+    assert location_on_page("", "TQ 310 806", PAGE) == FOUND
+    assert location_on_page("", "TQ 311 806", PAGE) == NOT_FOUND
 
 
 def test_of_a_stated_pair_the_better_counts_and_an_address_is_a_phrase():
-    assert location_on_page("-40.88365, 175.0277 | 1 Otaihanga Road", "coordinates | street address", PAGE) == FOUND
-    assert location_on_page("Otaihanga Road, Paraparaumu", "street address", PAGE) == FOUND
+    assert location_on_page("1 Otaihanga Road", "-40.88365, 175.0277", PAGE) == FOUND
+    assert location_on_page("Otaihanga Road, Paraparaumu", "", PAGE) == FOUND
     assert location_on_page("", "", PAGE) == ""
-    assert location_on_page("Otaihanga Road", "street address", None) == NO_PAGE_TEXT
+    assert location_on_page("Otaihanga Road", "", None) == NO_PAGE_TEXT
 
 
 def test_numbers_and_units_count_however_they_are_spaced():
@@ -132,24 +131,32 @@ def test_a_quote_too_short_to_mean_anything_is_not_checked():
 
 def test_an_address_written_slightly_differently_still_counts():
     page = Page("Find us at 12 Foo Rd, Barton OX1 2AB.")
-    assert location_on_page("12 Foo Road, Barton", "street address", page) == FOUND
-    assert location_on_page("12 Foo Road, Barton, Oxon OX1 2AB, United Kingdom", "street address", page) == PARTLY
+    assert location_on_page("12 Foo Road, Barton", "", page) == FOUND
+    assert location_on_page("12 Foo Road, Barton, Oxon OX1 2AB, United Kingdom", "", page) == PARTLY
 
 
 def test_the_part_of_a_location_its_point_was_read_from_is_the_one_that_counts():
     """An address on the page says nothing of coordinates beside it that aren't."""
     page = Page("Otaihanga Landfill, 12 Otaihanga Road, Paraparaumu.")
-    stated, kinds = "-40.8870, 175.0290 | 12 Otaihanga Road, Paraparaumu", "coordinates | street address"
-    assert location_on_page(stated, kinds, page, basis="coordinates") == NOT_FOUND
-    assert location_on_page(stated, kinds, page, basis="rooftop") == FOUND
+    address, coordinates = "12 Otaihanga Road, Paraparaumu", "-40.8870, 175.0290"
+    assert location_on_page(address, coordinates, page, basis="coordinates") == NOT_FOUND
+    assert location_on_page(address, coordinates, page, basis="rooftop") == FOUND
     # With no usable point, the better of the two counts.
-    assert location_on_page(stated, kinds, page) == FOUND
+    assert location_on_page(address, coordinates, page) == FOUND
+
+
+def test_coordinates_given_as_the_address_are_checked_as_coordinates():
+    assert location_on_page("-40.88365, 175.02770", "", PAGE) == FOUND
+    assert location_on_page("-41.2000, 174.7700", "", PAGE) == NOT_FOUND
+    # Of a grid reference and coordinates, the one the point was read from counts.
+    assert location_on_page("", "TQ 310 806 | -41.2000, 174.7700", PAGE, basis="grid reference") == FOUND
+    assert location_on_page("", "TQ 310 806 | -41.2000, 174.7700", PAGE, basis="coordinates") == NOT_FOUND
 
 
 def test_a_point_the_page_gives_in_another_form_counts_within_250_m():
     page = Page("Site location: 40°53'01\"S 175°01'40\"E.")
-    assert location_on_page("-40.8836, 175.0277", "coordinates", page, "coordinates", (-40.8836, 175.0277)) == FOUND
-    assert location_on_page("-40.9000, 175.0277", "coordinates", page, "coordinates", (-40.9000, 175.0277)) == NOT_FOUND
+    assert location_on_page("", "-40.8836, 175.0277", page, "coordinates", (-40.8836, 175.0277)) == FOUND
+    assert location_on_page("", "-40.9000, 175.0277", page, "coordinates", (-40.9000, 175.0277)) == NOT_FOUND
 
 
 def test_a_page_built_by_javascript_is_no_text_and_one_read_in_part_isnt_flagged(tmp_path):
@@ -193,18 +200,20 @@ def value(attribute, found, quote, value_date="2024"):
             "quoted_evidence_short": quote}
 
 
-def source(url, values, name="Otaihanga Landfill", location="", kind=""):
+def source(url, values, name="Otaihanga Landfill", location="", source_type="Municipal document"):
     return {"url": url, "source_title": "Page", "publisher": "Kapiti Coast District Council",
-            "source_type": "Municipal document", "publication_date": "2024-03-01",
-            "facility_name_in_source": name, "facility_name_english": "", "stated_location": location,
-            "stated_location_kind": kind, "values": values}
+            "source_type": source_type, "publication_date": "2024-03-01",
+            "facility_name_in_source": name, "facility_name_english": "", "stated_address": "",
+            "stated_coordinates": location, "values": values}
 
 
 def rows(run_dir, name):
     return list(csv.DictReader((run_dir / name).open(encoding="utf-8-sig")))
 
 
-def test_the_queue_flags_a_winning_source_its_own_page_doesnt_bear_out(tmp_path):
+def test_found_values_says_whether_each_quote_and_location_is_on_its_page(tmp_path):
+    """And the Site_Review tab flags a source for review whose page doesn't bear them out, in place of
+    the review queue's CHECK notes."""
     run_dir = tmp_path / "run"
     write_csv_records(run_dir / "seed.csv", [seed("901", "Otaihanga Landfill", -40.8836, 175.0277)], seed_headers())
     council, news, blocked = "https://kapiticoast.example/otaihanga", "https://news.example/otaihanga", "https://blocked.example/x"
@@ -213,10 +222,11 @@ def test_the_queue_flags_a_winning_source_its_own_page_doesnt_bear_out(tmp_path)
     (raw / "site_901.json").write_text(json.dumps({"site_id": "901", "sources": [
         # On its page, quote and location both.
         source(council, [value("operator", "Kapiti Coast District Council", "It is operated by the council")],
-               location="-40.88365, 175.02770", kind="coordinates"),
-        # Its quote isn't on its page, and neither is the location it states, 0.7 km from ours.
+               location="-40.88365, 175.02770"),
+        # Its quote isn't on its page, and neither is the location it states, 0.7 km from ours. A
+        # Tier 3 source, so it goes to an SME.
         source(news, [value("closing_year", "2011", "The landfill finally closed in 2011")],
-               location="-40.8900, 175.0300", kind="coordinates"),
+               location="-40.8900, 175.0300", source_type="News report"),
         # The link check kept no text of this one.
         source(blocked, [value("facility_status", "Inactive", "The site closed to all waste in 2007")]),
     ]}))
@@ -224,38 +234,140 @@ def test_the_queue_flags_a_winning_source_its_own_page_doesnt_bear_out(tmp_path)
     save_page_text(run_dir / PAGE_TEXT_DIR, news, "Coastal news. The Otaihanga site is now a park.")
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
-    evidence = {(row["attribute_name"], row["claimed_value"]): row for row in rows(run_dir, "evidence.csv")}
-    assert (evidence[("operator", "Kapiti Coast District Council")]["quote_on_page"],
-            evidence[("operator", "Kapiti Coast District Council")]["location_on_page"]) == (FOUND, FOUND)
-    assert (evidence[("closing_year", "2011")]["quote_on_page"], evidence[("closing_year", "2011")]["location_on_page"]) == (NOT_FOUND, NOT_FOUND)
-    assert evidence[("facility_status", "Inactive")]["quote_on_page"] == NO_PAGE_TEXT
-
-    queue = {row["attribute_name"]: row for row in rows(run_dir, "review_queue.csv")}
-    assert "CHECK" not in queue["operator"]["evidence_summary"]
-    assert "CHECK: its quote is not on the source's page." in queue["closing_year"]["evidence_summary"]
-    # The source was filed by the location it states, so that is flagged too.
-    assert "CHECK: the location the source states is not on its page." in queue["closing_year"]["evidence_summary"]
-    # No text kept is not evidence against it: nothing is flagged.
-    assert "CHECK" not in queue["facility_status"]["evidence_summary"]
+    found = {row["attribute_name"]: row for row in rows(run_dir, "found_values.csv")}
+    assert (found["operator"]["quote_on_page"], found["operator"]["location_on_page"]) == (FOUND, FOUND)
+    assert (found["closing_year"]["quote_on_page"], found["closing_year"]["location_on_page"]) == (NOT_FOUND, NOT_FOUND)
+    assert found["facility_status"]["quote_on_page"] == NO_PAGE_TEXT
 
     config = {row[0]: row[1] for row in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].values}
     assert config["quotes_on_page"].startswith("found ") and "not found 1" in config["quotes_on_page"]
     assert "not found 1" in config["locations_on_page"]
-    queue_sheet = load_workbook(run_dir / "run_review.xlsx")["Review_Queue"]
-    assert any("on its page" in str(rule.formula) for ranges in queue_sheet.conditional_formatting for rule in ranges.rules)
+    sheet = load_workbook(run_dir / "run_review.xlsx")["Site_Review"]
+    header = [cell.value for cell in sheet[1]]
+    listed = [dict(zip(header, row)) for row in sheet.iter_rows(min_row=2, values_only=True)]
+    # closing_year is a key value from a Tier 3 source, and the page's only one, so its own row
+    # checks it, and flags its quote.
+    [review] = [row for row in listed if row["source_url"] == news]
+    assert review["check"] == "page: closing_year"
+    assert review["flags"] == "quote not found on the page (closing_year)\naddress or coordinates not found on the page"
 
 
-def test_a_found_location_row_flags_a_location_not_on_its_page(tmp_path):
+# --- a page whose kept text is only its menu (#25) ------------------------------------------------
+# As the link check kept xeu.mx's page for site 9233: the title, then its menu.
+MENU = "Clausuran en su totalidad basurero municipal de Veracruz - xeu noticias veracruz\n" + "\n".join(
+    ["Portada", "Veracruz", "Boca del Río", "Estado", "Nacional", "Internacional", "Deportes", "Policiaca", "Espectáculos",
+     "Sociedad", "Tecnociencia", "Al minuto", "Finanzas", "Destacadas", "Viral", "Videos", "Opinión", "Sondeo",
+     "XEU 98.1 FM", "ESCUCHA EN VIVO", "Servicios Informativos", "Radio en vivo", "Mensaje a Cabina",
+     "Teléfonos de Emergencia", "Programación xeu 98.1 FM", "Redes Sociales"]
+)
+ARTICLE = MENU + (
+    "\nFue clausurado en su totalidad el basurero municipal de Veracruz la tarde de este martes, tras una "
+    "revisión de la Procuraduría de Medio Ambiente junto con representantes del ayuntamiento."
+)
+
+
+def test_a_quote_missing_from_an_html_page_that_kept_only_its_menu_is_no_page_text(tmp_path):
+    """The article was built after the page loaded, so the three quotes read "not found" and flagged
+    a page the judges called ours. A quote that is there is still found; a PDF or an article with
+    prose is checked as before."""
+    from waste_ai_search.on_page import menu_only
+    from waste_ai_search.page_text import text_file_name
+
+    assert len(MENU) < 1000 and menu_only(MENU) and not menu_only(ARTICLE)
+    pages = {"https://xeu.example/menu": MENU, "https://xeu.example/menu.pdf": MENU, "https://xeu.example/nota": ARTICLE}
+    for url, text in pages.items():
+        save_page_text(tmp_path / PAGE_TEXT_DIR, url, text)
+    kinds = {text_file_name(url): "pdf" if url.endswith(".pdf") else "html" for url in pages}
+    checker = PageChecker(tmp_path, {}, kinds)
+
+    def check(url, quote, address=""):
+        row = {"source_id": text_file_name(url).removesuffix(".txt.gz"), "quoted_evidence_short": quote,
+               "stated_address": address, "stated_coordinates": ""}
+        checker.check(row)
+        return row["quote_on_page"], row["location_on_page"]
+
+    missing, title, address = "Fue clausurado en su totalidad el basurero municipal", "Clausuran en su totalidad basurero municipal", "Carretera Veracruz-Xalapa, El Guayabo"
+    assert check("https://xeu.example/menu", missing, address) == (NO_PAGE_TEXT, NO_PAGE_TEXT)
+    assert check("https://xeu.example/menu", title) == (FOUND, "")
+    # The title with a word more is only partly found, which says nothing on a menu either.
+    partly = "Clausuran en su totalidad el basurero municipal de Veracruz"
+    assert (check("https://xeu.example/menu", partly), check("https://xeu.example/menu.pdf", partly)) == (
+        (NO_PAGE_TEXT, ""), (PARTLY, ""),
+    )
+    assert check("https://xeu.example/menu.pdf", missing, address) == (NOT_FOUND, NOT_FOUND)
+    assert check("https://xeu.example/nota", "basurero municipal de Veracruz fue abierto en 1990") == (NOT_FOUND, "")
+
+
+def test_which_pages_are_only_a_menu_is_read_from_html_pages_alone_without_building_a_page(tmp_path, monkeypatch):
+    """link_words asks it of every page the link check kept, and building a Page from a long one
+    takes most of a second."""
+    from waste_ai_search import on_page
+    from waste_ai_search.link_check import LinkResult
+    from waste_ai_search.page_text import read_page_text
+
+    pages = {"https://xeu.example/menu": ("html", MENU), "https://xeu.example/nota": ("html", ARTICLE),
+             "https://gob.example/acta.pdf": ("pdf", MENU)}
+    results = {}
+    for url, (kind, text) in pages.items():
+        name = save_page_text(tmp_path / PAGE_TEXT_DIR, url, text)
+        results[url] = LinkResult(url, "OK", "200", url, text_file=name, text_kind=kind, text_chars=len(text))
+    read = []
+
+    def no_page(text):  # noqa: ARG001
+        raise AssertionError("built a Page")
+
+    monkeypatch.setattr(on_page, "read_page_text", lambda directory, name: read.append(name) or read_page_text(directory, name))
+    monkeypatch.setattr(on_page, "Page", no_page)
+    checker = PageChecker(tmp_path, {}, {result.text_file: result.text_kind for result in results.values()})
+    words = checker.link_words(results)
+    assert words["https://xeu.example/menu"].startswith("OK, but its text is only the site's menu")
+    assert words["https://xeu.example/nota"] == words["https://gob.example/acta.pdf"] == "OK"
+    assert sorted(read) == sorted(results[url].text_file for url in ("https://xeu.example/menu", "https://xeu.example/nota"))
+
+
+def test_site_review_says_why_a_page_had_no_automatic_check_and_found_values_keeps_the_verdict(tmp_path):
+    from waste_ai_search.link_check import LINK_CHECK_FILE, LinkResult, save_results
+    from waste_ai_search.page_text import text_file_name
+
     run_dir = tmp_path / "run"
-    write_csv_records(run_dir / "seed.csv", [seed("902", "Otaihanga Landfill", -40.8836, 175.0277)], seed_headers())
-    page_url = "https://register.example/otaihanga"
+    write_csv_records(run_dir / "seed.csv", [seed("9233", "Veracruz Sanitary Landfill", 19.2329, -96.2254, iso3="MEX")], seed_headers())
+    urls = {
+        "refused": "https://oem.example/nota", "scan": "https://gob.example/acta.pdf",
+        "menu": "https://xeu.example/menu", "read": "https://diario.example/nota",
+    }
     raw = run_dir / "raw_foundry_responses"
     raw.mkdir(parents=True)
-    # A location 0.6 km from ours, so a value to review; the page gives other coordinates.
-    (raw / "site_902.json").write_text(json.dumps({"site_id": "902", "sources": [
-        source(page_url, [], location="-40.8890, 175.0300", kind="coordinates"),
+    (raw / "site_9233.json").write_text(json.dumps({"site_id": "9233", "sources": [
+        source(url, [value("operator", "Ayuntamiento de Veracruz", "Fue clausurado en su totalidad el basurero municipal")],
+               name="Basurero municipal de Veracruz", source_type="News report")
+        for url in urls.values()
     ]}))
-    save_page_text(run_dir / PAGE_TEXT_DIR, page_url, "Otaihanga Landfill. Coordinates -40.8836, 175.0277.")
+    save_page_text(run_dir / PAGE_TEXT_DIR, urls["menu"], MENU)
+    save_page_text(run_dir / PAGE_TEXT_DIR, urls["read"], ARTICLE)
+    save_results(run_dir / LINK_CHECK_FILE, {
+        urls["refused"]: LinkResult(urls["refused"], "Unverified", "403", urls["refused"]),
+        urls["scan"]: LinkResult(urls["scan"], "OK", "200", urls["scan"], text_kind="pdf",
+                                 text_note="a PDF with no text layer, probably scanned"),
+        urls["menu"]: LinkResult(urls["menu"], "OK", "200", urls["menu"], text_file=text_file_name(urls["menu"]),
+                                 text_kind="html", text_chars=len(MENU)),
+        urls["read"]: LinkResult(urls["read"], "OK", "200", urls["read"], text_file=text_file_name(urls["read"]),
+                                 text_kind="html", text_chars=len(ARTICLE)),
+    })
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
-    [location] = [row for row in rows(run_dir, "review_queue.csv") if row["attribute_name"] == LOCATION_ATTRIBUTE]
-    assert "CHECK: the location the source states is not on its page." in location["evidence_summary"]
+
+    sheet = load_workbook(run_dir / "run_review.xlsx")["Site_Review"]
+    header = [cell.value for cell in sheet[1]]
+    listed = {row["source_url"]: row for row in (dict(zip(header, r)) for r in sheet.iter_rows(min_row=2, values_only=True)) if not row["check"]}
+    assert {name: listed[url]["link_status"] for name, url in urls.items()} == {
+        "refused": "Unverified: the site refuses automated readers (403), so quotes weren't checked",
+        "scan": "OK, but it's a scanned PDF, so quotes weren't checked",
+        "menu": "OK, but its text is only the site's menu, so a quote missing from it isn't flagged",
+        "read": "OK",
+    }
+    # Its quote isn't flagged on the menu's row, as it was when it read "not found".
+    assert not listed[urls["menu"]]["flags"]
+    found = {row["source_url"]: row for row in rows(run_dir, "found_values.csv")}
+    assert {name: found[url]["link_status"] for name, url in urls.items()} == {
+        "refused": "Unverified", "scan": "OK", "menu": "OK", "read": "OK",
+    }
+    assert (found[urls["menu"]]["quote_on_page"], found[urls["read"]]["quote_on_page"]) == (NO_PAGE_TEXT, FOUND)

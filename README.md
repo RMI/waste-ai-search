@@ -66,10 +66,13 @@ Default outputs:
 ```text
 outputs/runs/<run_id>/seed.csv
 outputs/runs/<run_id>/consolidation_snapshot/
-outputs/runs/<run_id>/<run_id>_candidate.xlsx
 outputs/runs/<run_id>/raw_foundry_responses/site_<site_id>.json
-outputs/runs/<run_id>/status/site_<site_id>.json
+outputs/runs/<run_id>/<run_id>_review.xlsx
+outputs/runs/<run_id>/found_values.csv
+outputs/runs/<run_id>/accepted_values.csv     (written by accept-reviews)
 ```
+
+The rest are listed under [Outputs](#outputs).
 
 ## Seeding
 
@@ -154,22 +157,31 @@ refining-ai-search (RDP-63):
 | Verdict | Meaning | Effect |
 |---|---|---|
 | `OK` | 200 | Normal |
-| `Broken` | 404, 410 or a redirect loop | Not promoted; the source goes to Leads |
-| `Unverified` | 403, 429, timeout, TLS error | Left alone — usually bot-blocking, not a dead page |
+| `Broken` | 404, 410 or a redirect loop | Its values are not used (`dead link` in `found_values.csv`) |
+| `Unverified` | 403, 429, 5xx, timeout, failed connection, a name that doesn't resolve, TLS error | Left alone — usually bot-blocking, not a dead page |
 
 A broken URL is retried with a literal comma for `%2C` and with the trailing slash toggled; a
 respelling that works replaces it. Existing escapes are never decoded otherwise.
 
-**Only public addresses are ever contacted.** Cited URLs are untrusted and are fetched from a machine that is often on the VPN, so every hop — redirects included — is resolved first and refused if any address is private, loopback, link-local (including the cloud metadata address) or otherwise non-public. The connection then goes to the address that was checked, so a second DNS answer cannot redirect it. A refused URL is `Unverified` and never fetched; a malformed one is `Unverified` too, rather than stopping the check.
+**Only public addresses are ever contacted.** Cited URLs are untrusted and are fetched from a machine that is often on the VPN, so every hop — redirects included — is resolved first and refused if any address is private, loopback, link-local (including the cloud metadata address) or otherwise non-public. The connection then goes to the address that was checked, so a second DNS answer cannot redirect it. A refused URL is `Unverified` and never fetched; a malformed one is `Unverified` too, rather than stopping the check. So is a name that doesn't resolve, with its own status (`DoesNotResolve`), since a name server can fail for a while.
+
+**An Unverified page can be fetched again.** `check-links --retry-unverified` fetches once more,
+with 45 seconds to answer rather than 15, each URL left Unverified by a timeout, a failed connection,
+a name that didn't resolve, a 429 or a server error, and keeps its new verdict and text. Never a 403:
+that site refuses automated readers on purpose. No headless browser is used either: these sites
+often refuse those too, and one would resolve names itself, past the address check above. Of the 32
+pages the October 2026 model tests couldn't read, 20 were 403s, 5 timeouts, 2 server errors, 1 a name
+that didn't resolve and 4 scanned PDFs.
 
 The fetching happens during **search**, which needs the network anyway; `arbitrate` only reads
-`link_check.json`, so it stays offline. A value with one dead source and one working source is still
-promoted from the working one.
+`link_check.json`, so it stays offline. A dead source's values are not used, but the same value from
+another, working source still is.
 
 ```bash
 uv run waste-ai-search check-links --run-id <run_id>   # backfill an older run, then arbitrate
+uv run waste-ai-search check-links --run-id <run_id> --retry-unverified   # fetch again what may pass
 uv run waste-ai-search run --no-link-check ...          # skip checking
-uv run waste-ai-search arbitrate --keep-broken-link-evidence ...  # let dead sources stay promotable
+uv run waste-ai-search arbitrate --keep-broken-link-evidence ...  # let dead sources stay usable
 ```
 
 Run_Config records `links_checked`, `links_broken`, `links_repaired` and `broken_link_route`, so
@@ -213,19 +225,31 @@ without spaces, such as Chinese, Japanese and Thai, are matched anywhere in the 
 | `partly found` | Not as written, but 80% of its words and every number in it are on the page, or one of its two coordinates is. A quote with a figure the page doesn't have is `not found`, however many of its words are there. |
 | `not found` | Neither. |
 | `not in the part read` | Not found, but only part of the page was read (a long PDF or spreadsheet, a cut body), so it may be in the rest. Not flagged. |
-| `no page text` | No text was kept: the page didn't load, refuses automated reading, is a scan, is built by JavaScript, or wasn't checked. Not flagged. |
+| `no page text` | No text was kept: the page didn't load, refuses automated reading, is a scan, is built by JavaScript, or wasn't checked. Or the page is HTML whose text kept is under 1,000 characters with no line over 100, which is the site's menu, not the article, and the quote or location isn't in it: xeu.mx's page for site 9233 kept 593 characters of menu. Not flagged. |
 
 A quote of fewer than three words ("Open", "Status Operational") is not checked: finding it would
 say nothing. Where a source states both coordinates and an address, the one its point was read from
 is checked, since an address on the page says nothing of coordinates beside it that aren't.
 
-`evidence.csv` records both results for every row, in `quote_on_page` and `location_on_page`. In the
-review queue, a winning source whose quote is not on its page, or only partly, gets a **CHECK** note
-in `evidence_summary`, and the cell is shaded. So does one whose stated location isn't on its page,
-where that location counted: on a `found_location` row, and wherever the source was filed by it.
+`found_values.csv` records both results for every value, in `quote_on_page` and `location_on_page`.
+On the Site_Review tab, a source whose quote is not on its page, or only partly, is flagged ("quote
+not found on the page", naming the attributes), and so is one whose address or coordinates aren't.
 Nothing is dropped or downgraded for it, since a page can say something in a way the check can't
-follow, in an image or a map, say. Run_Config counts `page_text_kept`, `quotes_on_page` and
+follow, in an image or a map, say. An auto-approved source isn't on Site_Review, so its page checks
+are only in `found_values.csv`. Run_Config counts `page_text_kept`, `quotes_on_page` and
 `locations_on_page`.
+
+**Site_Review's `link_status` says why a page wasn't checked.** Where the check couldn't read a page,
+it says so in words rather than as a flag, so the SME knows its quotes weren't checked against it:
+
+- `Unverified: the site refuses automated readers (403), so quotes weren't checked`, or `the site
+  timed out`, `the address doesn't resolve`, `the site had a server error (500)`, and so on;
+- `OK, but it's a scanned PDF, so quotes weren't checked`, or `it has almost no text: it may be built
+  by JavaScript`;
+- `OK, but its text is only the site's menu, so a quote missing from it isn't flagged`: a quote that
+  is in the menu, the page's title say, is still found.
+
+A page that loaded and was read says `OK`. `found_values.csv` keeps the verdict alone.
 
 **Is a page-reading agent worth adding?** The search agent sees only what Bing hands it, which may be
 part of a page. A second pass, a model reading each kept page for the facility's address or
@@ -245,20 +269,43 @@ address may be an office's, so spot-check `missed.csv` before deciding.
 
 ## Locating each source
 
-The agent reports where each source puts the facility, copied as the source writes it (see
+The agent reports where each source puts the facility, copied as the source writes it, in two
+fields: `stated_coordinates` (coordinates or a grid reference) and `stated_address` (see
 [What the agent returns](#what-the-agent-returns)). Right after the link check, the search phase
-turns each of those into a point and says how far it can be trusted, as its `location_basis`
-([the plan](docs/plans/2026-10-20-match-sources-by-location.md), step 3;
-[`locate.py`](src/waste_ai_search/locate.py)):
+turns them into a point and says how far it can be trusted, as its basis
+([`locate.py`](src/waste_ai_search/locate.py)):
 
-| The source states | Becomes | Basis | Used for |
+| The source states | Becomes | Basis | `coordinates_from` |
 |---|---|---|---|
-| Coordinates with 3 or more decimals (or seconds) | Parsed locally | `coordinates` | Matching, and a location value |
-| A UK OS or Irish grid reference, 100 m or finer, ITM metres labelled ITM, or an easting and northing each labelled (`E 531090 N 180600`) in the UK or Ireland | Converted locally (`pyproj`) | `grid reference` | Matching, and a location value |
-| A street address placed on its building or address point | Geocoded | `rooftop` | Matching, and a location value |
-| A street address placed only on its street | Geocoded | `street` | Matching only |
-| Coordinates with fewer decimals, or a coarser grid reference | Parsed locally | `hint` | Nothing yet: too approximate |
-| Anything else: a town or postcode match, a place description, a PO box | — | `none` | — |
+| Coordinates with 3 or more decimals (or seconds) | Parsed locally | `coordinates` | `stated` |
+| A UK OS or Irish grid reference, 100 m or finer, ITM metres labelled ITM, or an easting and northing each labelled (`E 531090 N 180600`) in the UK or Ireland | Converted locally (`pyproj`) | `grid reference` | `grid reference` |
+| An address placed on its building or address point | Geocoded | `rooftop` | `address (building)` |
+| An address placed only on its street | Geocoded | `street` | `address (street)` |
+| Coordinates with fewer decimals, or a coarser grid reference | Parsed locally | `hint` | blank: too approximate to show, but still measured for the 5 km check |
+| Anything else: a town or postcode match, a major road, a PO box, a kilometre marker | — | `none` | blank |
+
+**What the point is for.** A source's location never replaces ours. It is only used to check that
+the source is about our site. Three columns of `found_values.csv` and the Site_Review tab carry it:
+
+- `source_coordinates`: the point, as `lat, lon`, which Google Maps finds when pasted into its
+  search box;
+- `coordinates_from`: where the point came from, as in the table. A point on a street can be a
+  kilometre or more from the address;
+- `distance_km`: how far the point is from our site's coordinates.
+
+A Tier 1–2 source placing the facility more than 5 km from our site goes to SMEs rather than being
+approved automatically (see [Filing and approving each source](#filing-and-approving-each-source)).
+A source that states no location we can read, or a site of ours with no coordinates, is not
+checked. Where a source gives both coordinates and an address, the coordinates are used, unless the
+guards below throw both out.
+
+**Rough points are still measured.** Coordinates too coarse to show (a hint), and a doubtful pair's
+coordinates and address, give no `source_coordinates`, but each still says roughly where the source
+puts the facility. The 5 km check measures them: a hint is far only beyond 5 km plus its own
+coarseness, and a doubtful pair is far if either its coordinates or its address is more than 5 km
+from ours. `distance_km` then gives the farthest of them, `location_note` says why there is no
+point, and `status_reason` says "roughly". A Tier 1 source stating `50.66, -97.20` for a site at
+Brady Road, 100 km south, would otherwise be approved unseen.
 
 Coordinates are read as `lat, lon`, in decimal degrees or degrees, minutes and seconds, with
 hemisphere letters or words (`North`, `West`). `lon, lat` is read only where that is unambiguous: a
@@ -267,6 +314,14 @@ hemisphere or a label says so, or the first number is beyond 90. A header naming
 longitude first. In prose, a number followed by a unit (km, m, ha,
 %) is a distance or an area, not a coordinate, and the first pair in range is the one used.
 
+**West is often written O.** Spanish, Portuguese, French and Italian write west as O (`oeste`,
+`ouest`, `ovest`), so a Mexican page's `98° 50’ 42.8” O` is west. In test10-mex-sample2 it was read
+as east, placing Chicoloapan's page 15,289 km from our site instead of 0.5 km. In German and Dutch
+O is east (`Ost`, `oost`), so in Germany, Austria, Switzerland, Liechtenstein, Luxembourg, the
+Netherlands and Belgium it is read as east. A hemisphere written with its axis's name counts too,
+for a number with no sign or hemisphere of its own: `98°50'42.8" longitud oeste`, `Longitude West:
+97.1234`, `latitud sur`. "Sur" counts as south only there, since in French it means "on".
+
 A labelled easting and northing (`E`/`N`, `Easting`/`Northing` or `X`/`Y`, in metres) is read in
 the country's grid: the British National Grid in the UK, and in Ireland the Irish Grid or ITM,
 whose numbers never overlap. A UK source that says Irish Grid, as Northern Ireland's do, is read
@@ -274,30 +329,27 @@ in Ireland's grids. Elsewhere the grid is unknown, so such metres are not read. 
 taken for an Irish Grid square, and where a text holds a licence number and a grid reference, the
 reference 100 m or finer wins.
 
-"Matching" is filing each source under the site of ours it is about (see
-[Matching each source to a site](#matching-each-source-to-a-site)).
-
-Three guards throw a location out, with the reason in `evidence.csv`:
+Three guards throw a location out, with the reason in `found_values.csv`'s `location_note`:
 
 - **Copied from the prompt.** Coordinates equal to the rounded point the prompt gives. In batch 1,
   whose prompts carried our full point, the agent credited our exact OSM centroid to an Ontario
   registry six times. The prompt no longer carries that point, so a source stating it exactly is
-  not a copy but a source that agrees with us, such as the regulator our seed came from, and it is
-  matched and confirms our location. A response cached before build step 4, attribute-first, came
-  from a prompt with our full point, so there a point within 10 m of ours is still copied: batch 1's
-  six copies were each within a few metres. Left in, one search's copy of Thunder Bay's registry
-  entry filed every other search's citation of it under the copier's site.
+  not a copy but a source that agrees with us, such as the regulator our seed came from. A
+  response cached attribute-first, before the agent answered source by source, came from a prompt
+  with our full point, so there a point within 10 m of ours is still copied: batch 1's six copies
+  were each within a few metres. Left in, a copy would pass the 5 km check whatever the source is
+  about.
 - **wastebook.co.uk.** Its coordinates are postcode centroids.
 - **A doubtful pair.** Where a source gives coordinates and an address, the coordinates win; if the
-  address lands more than 2 km from them, neither is used. Coarse coordinates (a hint) give way to
-  a located address that agrees with them: within 2 km plus the hint's own coarseness, about
-  0.8 km for 2 decimals. An address farther off, such as an operator's office, makes the pair
-  doubtful too.
+  address lands more than 2 km from them, neither is used as the source's point, though both are
+  still measured for the 5 km check. Coarse coordinates (a hint) give way to a located address that
+  agrees with them: within 2 km plus the hint's own coarseness, about 0.8 km for 2 decimals. An
+  address farther off, such as an operator's office, makes the pair doubtful too.
 
 **A facility name is never geocoded.** Geocoders find landfills by name from OpenStreetMap, where
-most of our sites came from, so it would hand our own point back. Only text the agent labelled a
-street address is sent, with any leading facility name taken off, and text that is only a name is
-not sent at all. The names are the source's own, any `found_facility_name` it gives, and our
+most of our sites came from, so it would hand our own point back. Only the stated address is
+sent, with any leading facility name taken off, and text that is only a name is not sent at all.
+The names are the source's own, any name an older response gave as `found_facility_name`, and our
 site's `site_name` and `original_site_name`; `&` and `and` count as the same, and a name is taken
 off only where a comma, a dash or a number follows it, so "Hart" never shortens "Hartland Avenue".
 Text with no civic number in which a part ends in a word for a waste site is a name too, whoever's
@@ -306,11 +358,32 @@ Brandon MB" is never sent, while "5405 Mapleward Road" is. The words are landfil
 station, centre, depot, park or grounds after waste, refuse, recycling, transfer, disposal and the
 like.
 
+**An address is sent with the source's own town and state.** The agent gives the town and state each
+source puts the facility in (`stated_municipality`, `stated_state`), and each is added to the
+address where it doesn't already name it, accents and case aside, the state as the run's
+`state_names.json` writes it. Site 4853's "colonia El Zarco", in Yautepec, Morelos, is sent as
+"colonia El Zarco, Yautepec, Morelos": sent bare, it was matched to a street of that name in Estado
+de México, 66.55 km away, and four pages the judges called ours were flagged as more than 5 km from
+our site. A place counts as named by a part that is it or a later part that holds it, not by the
+first part, since a street is often named after a state, as Calle Morelos is. An address still in
+one part, with no town or state, isn't sent: a geocoder would take any place of that name. And
+Nominatim says which state each match is in: one in another state than the source's isn't used.
+The locate step and arbitration both read `state_names.json`, so both look up the same text.
+
 **A PO box is where post goes, not where the site is.** A PO box, `Box 219`, `C.P.`, case postale,
 private or locked bag, `PMB`, `BP` and the like is taken out of an address, and what is left is
 sent only if it still has a civic number or names a road: "29786 Rte. 2 PO Box 253 Wellington PE"
 is sent as "29786 Rte. 2, Wellington PE", while "PO Box 1234, Thunder Bay, ON" is not sent. Where a
 source gives two addresses, the second is tried when the first placed nothing.
+
+**A kilometre marker, a distance or a major road places nothing.** Mexican landfills are often
+addressed by a kilometre marker along a road ("Carretera Colotlán km 15.5"), and a geocoder can't
+use one: it finds the road by name and returns whichever stretch it picked. In test10-mex-sample2
+that put a Tier 1 page 129 km from Hasars. So text with a kilometre marker or a distance ("km
+15.5", "kilómetro 12", "a 3 km del centro") is never sent, though its plainer form may be (below).
+For the same reason, a match on a major road itself, its house number not found, is not used: a
+motorway, trunk, primary or secondary road, which runs between towns or across a city. Each of the
+four such matches in the October 2026 test runs was more than 5 km from the site.
 
 **An address written as a sentence is sent again, plainly.** Sources write "765 33rd Street East in
 Brandon, Manitoba" or "Reynolds Bach Drive, accessed from Eastern Hutt Road in Silverstream", and a
@@ -325,8 +398,7 @@ test runs, it gave a point to 5 more of gpt-5.4's 42 sources stating a location 
 more of mini's 39 (6 to 18). Both answers are kept, so a re-run asks neither again. Most of these
 points are on the street, not the building: where a geocoder has no house numbers for a road, it
 returns a point somewhere along it, which can be a kilometre or more from the address. So such a
-point places a source only within 2 km of a site of ours (see
-[Matching each source to a site](#matching-each-source-to-a-site)).
+point is labelled `address (street)` in `coordinates_from`, for the SME to weigh.
 
 ### Geocoder
 
@@ -337,13 +409,14 @@ configured". Choose one with `WASTE_AI_SEARCH_GEOCODER` in `.env`, or with `--ge
 | Geocoder | Settings | How a match is read |
 |---|---|---|
 | `azure-maps` | `AZURE_MAPS_SUBSCRIPTION_KEY`, or `AZURE_MAPS_CLIENT_ID` to sign in with Entra ID (`az login`) | [Get Geocoding](https://learn.microsoft.com/en-us/rest/api/maps/search/get-geocoding?view=rest-maps-2026-01-01), api-version 2026-01-01. An address matched to its rooftop or parcel is `rooftop`; an interpolated address, a block or an intersection is `street`. A match it had to broaden (`UpHierarchy`), an ambiguous one, or Low confidence is not used. The account is IT's to create. |
-| `nominatim` | `NOMINATIM_URL` (the public instance if blank) and `NOMINATIM_USER_AGENT` (default `waste-ai-search (RMI)`, which names the application, never a person) | OpenStreetMap's geocoder, at most one request a second. An address point or building is `rooftop`; a road, or a house number Nominatim interpolated along its street (`place=house` on a way), is `street`, as with Azure Maps. A mapped feature that carries the address, such as the landfill itself, is not used: it would be OSM's own point. Enough for the live test. |
+| `nominatim` | `NOMINATIM_URL` (the public instance if blank) and `NOMINATIM_USER_AGENT` (default `waste-ai-search (RMI)`, which names the application, never a person) | OpenStreetMap's geocoder, at most one request a second. An address point or building is `rooftop`; a minor road, or a house number Nominatim interpolated along its street (`place=house` on a way), is `street`, as with Azure Maps. A major road (motorway, trunk, primary, secondary) is not used. A mapped feature that carries the address, such as the landfill itself, is not used: it would be OSM's own point. A match in another state than the source's is not used. Enough for the live test. |
 | `none` | | Addresses stay unlocated. |
 
 ### `source_locations.json`
 
-Every answer is kept in `source_locations.json` in the run folder, keyed by the stated text and its
-country, never by site. So an address is looked up once however many sources state it, and a
+Every answer is kept in `source_locations.json` in the run folder, keyed by the text located (an
+address as sent, with its town and state) and its country, never by site, with the state a geocoded
+match is in. So an address is looked up once however many sources state it, and a
 resumed search or the follow-up pass looks up only what is new. An address kept as "no geocoder
 configured" is looked up once a geocoder is set; a failed lookup is not kept, and is tried again
 next time. Any other answer is kept, so to look addresses up again with another geocoder, delete
@@ -351,8 +424,9 @@ the file first. It is saved as the step goes, so an interrupted run keeps what i
 
 Arbitration only reads it, so it stays offline. It parses coordinates and grid references itself,
 which needs no network, so a run's coordinates are read even before it is located; an address
-not yet looked up says "not located yet: run `locate --run-id`". Blob storage carries the file
-like `link_check.json`.
+not yet looked up says "not located yet: run `locate --run-id`". An address whose text gains its
+town or state isn't in an older run's `source_locations.json` under its new text, so it says that
+too until `locate` runs again. Blob storage carries the file like `link_check.json`.
 
 ```bash
 uv run waste-ai-search locate --run-id <run_id>       # backfill an older run, then arbitrate
@@ -364,120 +438,165 @@ Run_Config records `locations_stated` and `locations_used` (the usable ones: coo
 reference, rooftop and street), each counted by basis, and `geocoder`: which geocoder answered,
 `none configured`, `none needed (no address stated)` or `locate step not run`.
 
-## Matching each source to a site
+## Filing and approving each source
 
-Everything the agent returns used to be filed under the site it was asked about, and nothing
-checked that a source was about that site. Now arbitration files each source under the site of
-ours it is about, by where the source places the facility, with its name as a check (build step 5
-of [the plan](docs/plans/2026-10-20-match-sources-by-location.md);
-[`match.py`](src/waste_ai_search/match.py)). It runs offline, like the rest of arbitration.
+We trust the agent to read values off a page. What a person has to check is whether the page is
+about our site. So the search files every source under the site it searched, approves Tier 1–2
+values for empty fields automatically, and sends SMEs only the sources that need a look
+([the plan](docs/plans/2026-10-21-approve-sources-site-by-site.md), design doc F41;
+[`found_values.py`](src/waste_ai_search/found_values.py)). It all runs offline in arbitration, so
+a change here can be re-applied to a finished run for free.
 
-**Our sites** are every site in the run's `seed.csv`, in every country. A `--batch` run's seed holds
-the whole corpus; a run seeded with `--iso3` holds only those countries, so a source about a site
-across the border can't match it there.
+### Every source is filed under the site searched
 
-**Distance** is to a site's approximate edge: the distance to its point, less the radius of a circle
-with its `area_square_meters`, the radius capped at 2 km. A site with no area is its point. This is
-how entity linkage's `precise_v1` measures it (RMI/waste_data_ingestion_pipeline#225).
+**The agent decides whether a source is about the site it was asked about,** as in batch 1. It
+returns only sources about that facility, and nothing if it can't confirm it (see
+[What the agent returns](#what-the-agent-returns)). Our code doesn't move a source to another site.
+A source's name, address and coordinates are only used to check that it is about our site; they
+never replace ours.
 
-**A location** is one the locate step read as coordinates, a grid reference, or an address placed
-on its building or its street. A hint, a location copied from the prompt and a doubtful one count
-as none. So does an address placed only on its street more than 2 km from every site of ours: a
-geocoder with no house numbers for a road returns a point anywhere along it, so that far out it
-can't tell a new facility from one of ours. The source stays with the site searched, and `match`
-says how far its street put it. Brandon's Eastview licence gives "3610 Victoria Avenue East";
-Nominatim put that 2.4 km from the site, and it would otherwise have been listed as a new facility.
+**Decisions are made per site–source pair.** A pair is one of our sites and one source its search
+cited. A source is one exact page (see [Outputs](#outputs)) under one facility name, compared
+without case, accents or punctuation; a blank name counts as one name. A page with good data on
+three of our sites is three pairs, each decided on its own, and each loads only that site's values.
+`review_id` names a pair, and is the same each time the run is arbitrated, so an SME's decision on it
+can be read back.
 
-| The source has | Rule | Filed under |
+Until this plan, arbitration filed each source under the site of ours it was about, by distance
+and name (`match.py`, design doc F38), and SMEs reviewed every value. Both are gone, and so is
+`outside_run_matches.csv`: a source is only ever filed under a site the run searched.
+
+### What becomes of each value
+
+Every value found is written to `found_values.csv` with one of three statuses:
+
+| Status | When |
+|---|---|
+| `auto-approved` | It fills an empty field, and its pair's source is Tier 1–2 with none of the exceptions below. It loads without review. |
+| `SME review` | It fills an empty field, and its pair's source is Tier 3–5, or Tier 1–2 with an exception. It loads once an SME approves the pair on Site_Review. |
+| `not used` | Anything else. `status_reason` says why: it confirms our value; it would change a value we hold; its link is dead or missing; it could not be converted or mapped; the agent itself marked it an excluded candidate; it says Not a Waste Facility of a site not offered that check; it is a planned closure year that has passed; it is one of the agent's unverified leads; or an auto-approved source of a better tier already gives every value its source gives (see below). |
+
+**A source that adds nothing isn't reviewed.** One value loads per site, attribute and year, and
+the best tier wins. So where an auto-approved source of a better tier already gives every value a
+source would load, for the same site, attribute and year, approving that source could load
+nothing: it is marked not used instead of going to SMEs. In the 10-site tests that was 6 of
+gpt-5.4's 38 sources for review and 1 of mini's 22. A source that says the site is Not a Waste
+Facility is reviewed all the same.
+
+Tier 1 is a regulator, permit or operator; Tier 2 is government statistics, peer-reviewed or
+intergovernmental data (see [Source credibility](#source-credibility)). A pair takes the tier of
+its best-rated citation, so a follow-up pass that left a page undated doesn't lower it.
+
+**Only fills of empty fields load.** A value that would change one we hold is listed as not used.
+An empty field is our value for that site, attribute and year, left blank. A value's year is the
+year its `value_date` starts with (1950 to the run's year), else the run's year. For a yearly
+attribute (status, waste received, waste in place, waste depth, cover types and the gas figures,
+as consolidation keeps them by year), the seed holds our value for its reference year only, so for
+any other year our latest value stands in, and `status_reason` says so. Where our value for the
+reference year was carried forward from an earlier one, we hold nothing for that year, so a value
+found for it fills an empty field.
+
+**A planned closure year that has passed isn't used.** The agent marks a `closing_year` the source
+gives as planned or expected (`planned`). Where that year is before the run's, the plan can't say
+whether the site closed: in October 2024 Milenio reported that El Huixmí would stop taking waste that
+December, and it was still taking waste in October 2026. An actual closure has to come from a
+source that reports one. Such a year isn't used even where it matches ours, so a Different site
+doesn't weigh it again at the other site. A planned year still to come is used like any other
+closing year: from a Tier 3–5 source it is flagged planned where an SME checks it, and from a Tier 1–2 source
+it loads with its page, unmarked. `accepted_values.csv` has no column to say it is planned, so
+ingestion reads it as the year the site closes.
+
+**Three exceptions send a Tier 1–2 pair to an SME:**
+
+1. **The same page and facility name are cited for two or more of our sites.** It is about one of
+   them at most, unless they are one facility recorded twice. Each site's pair goes to SMEs, and
+   the sites go on `possible_duplicates.csv` (unless the name is blank). For this check, names are
+   compared by their distinctive words, so "The Eastview Landfill" and "Eastview Landfill site" are
+   one name, though each is still its own pair. A page cited with no name for two sites counts as
+   one name here too.
+2. **The source places the facility more than 5 km from our site's coordinates.** This is batch 1's
+   check, now run per source (see [Locating each source](#locating-each-source)). Coordinates too
+   coarse to show, and a doubtful pair's coordinates and address, are still measured. A source
+   stating no location we can read, or a site of ours with no coordinates, isn't checked, so its
+   Tier 1–2 values are approved, as in batch 1.
+3. **The source says the site is "Not a Waste Facility"** (see
+   [Not a waste facility](#not-a-waste-facility-wp-525)).
+
+**One value per site, attribute and year is loaded.** Where approved values disagree,
+`accept-reviews` picks one: the best tier, then the newest `value_date`, then the value the most
+sources give (a page cited twice counts once), then the agent's order. Tier always comes first,
+however the values are dated. For an attribute that isn't yearly, it is one value per site and
+attribute, as ingestion keys it, and `accepted_values.csv`'s `year` is then the winning value's own
+year, for the record, not part of the key.
+`is_year_exact` beside it is `TRUE` when the source dates the value to that year and `FALSE` when
+the value is undated and took the run's year, the standardized spec's column of that name.
+
+Run_Config counts `site_source_pairs`, `pairs_auto_approved` and `pairs_sme_review`, each with its
+values. Pairs for review are split into Tier 3–5 and the Tier 1–2 pairs each exception sent.
+`values_not_used` is counted by reason.
+
+### What else is listed for ingestion
+
+- **`possible_duplicates.csv`:** pairs of our sites whose searches cited the same page under the
+  same facility name. They may be one facility recorded twice, as E-PRTR's re-registrations are
+  (Cowpen Bewley, Foxhall), or one search may have claimed another site's source, as batch 1's
+  Brandon page under 14 sites did. `reason` says the second is likelier where the sites are more
+  than 5 km apart. A page cited with no facility name is left out: both pairs still go to an SME,
+  but a blank name says nothing of two sites being one, and in the gpt-5.4 test Ontario's
+  province-wide landfill gas dataset paired two sites 332 km apart.
+- **`datasets_found.csv`:** pages that look like datasets, such as a regulator's list of its
+  landfills. A search reports only the entry it used, so the rest of such a page goes unread, and
+  every site on it pays its own search to find it again. Loaded once through ingestion, as E-PRTR
+  is, it would cover them all. A page is listed when it names 2 or more facilities (names told
+  apart by their distinctive words), places 2 or more (points within 2 km of each other count as
+  one), or is a regulator, registry or statistics publisher's page found by 3 or more searches (a
+  town's landfill page is found by every nearby search too).
+- **`new_facility_candidates.csv`:** landfills none of our sites is. Only an SME's New site decision
+  adds one now.
+
+### On the 10-site tests
+
+Arbitrated again from the cached `test10-gpt54` and `test10-mini` responses:
+
+| | gpt-5.4 | mini |
 |---|---|---|
-| A location | 1. Exactly one of our sites within 2 km | That site, whether or not it was the one searched |
-| A location | 2. Two or more within 2 km | The one its name strongly matches, if exactly one does. Otherwise a **tie**: the site searched if it is one of them, else the nearest (among those its name fits, where it fits several). The pairs go on `possible_duplicates.csv`. |
-| A location | 3. None within 2 km, but its name strongly matches the site searched, within 5 km of it (25 km where our location is flagged inexact) | The site searched. Its location is reviewed as a coordinate correction. Where we hold no location for the site searched, the name alone decides. A name with fewer than two distinctive words never matches strongly, which leaves most of Brazil's sites without this rule (see Brazil, under [What is actually searched](#what-is-actually-searched--read-this-before-a-full-run)). |
-| A location | 4. Anything else | No site. Listed in `new_facility_candidates.csv`. |
-| No location | 5. Its name strongly matches exactly one other site of ours within 200 km of the site searched, and not the site searched | That site, **moved by name** |
-| No location | 6. Anything else | The site searched, flagged **no location**. The flag names any site of ours within 200 km that the name also fits, ties included, and says if the same page was cited for other searches. `corrected_site_id` offers those sites, and the sites whose searches cited the page. |
+| Site–source pairs | 61 | 41 |
+| Auto-approved | 23 pairs, 51 values | 19 pairs, 51 values |
+| To SMEs | 38 pairs, all Tier 3–5 | 22 pairs: 14 Tier 3–5, and 8 Tier 1 by exception: 6 for the same page and name, 3 more than 5 km away (one pair both) |
+| Not used | 72 values, 63 of them the agent's unverified leads | 17 values, 14 of them unverified leads |
+| Review_Queue rows before this plan | 102 | 90 |
 
-**Names** are scored by [`facility_names.py`](src/waste_ai_search/facility_names.py), which
-started as a copy of entity linkage's name scoring (#225) and is this repository's own. Matching is
-independent of entity linkage, since AI search rows join the facility named by the wastemap_id they
-carry, so the two needn't agree. Case,
-accents, punctuation, company suffixes and permit codes are ignored, and generic words are dropped
-("landfill", "sanitary", "waste management", and more this corpus needs: words for a site's state,
-such as closed, former and disused; tip, refuse, depot, grounds, nuisance, lieu, enfouissement, technique and LET; the words of other
-kinds of site, such as Australia's "Resource Recovery Centre", Canada's "Integrated Waste Management
-Facility" (IWMF), France's "Installation de Stockage de Déchets Non Dangereux" and Mexico's "tiradero
-a cielo abierto"; and small words such as "for", "in"
-and the French "à"). The score, from 0 to 1, is the higher of the share of the shorter name's words found in the longer one and how alike the
-two read as strings, so "Seaton Meadows Landfil" still matches "Seaton Meadows". Conflicting
-qualifiers (North and South, Cell I and Cell II) score 0.
+In mini, Guelph's search cited five pages about Brandon's Eastview Landfill, all Tier 1–2. Three
+were cited for Brandon as well (one as "The Eastview Landfill" there and "Eastview Landfill" under
+Guelph), and two have addresses that put the facility 1,645 km away (one of them also cited for
+Brandon), so four go to SMEs, and the three shared pages go to SMEs under Brandon too. The fifth gets
+through: a Manitoba news release whose only location is "Brandon", cited only for Guelph. It is
+auto-approved under Guelph.
 
-- A **strong** match scores 0.8 or more and shares at least two distinctive words, counting a
-  qualifier both names have: in "North Bay" it is part of the place's name. One shared word is never
-  strong: "Eastview Landfill" is both a Brandon and a Guelph site, 1,716 km apart. So the SME's
-  "Merrick Landfill - North Bay" moves to our North Bay Landfill, while a source naming only
-  "Merrick Landfill" shares no word with it and stays with the site searched.
-- A name with no distinctive words left, and our placeholders and generic labels ("OpenStreetMap
-  Landfill", "domestic landfill"), can't be judged. Nor can our names from Global Plastic Watch,
-  which are addresses looked up from its point ("Emu Mountain Road, Doonan, Noosa Shire,
-  Queensland"), as #225 treats them: 662 of batch 2's 856 sites are named so, and two in one
-  district share every word.
-- A source's `facility_name_english` is compared with our `site_name`, and its
-  `facility_name_in_source` with our `original_site_name` where we have one. The higher score
-  counts. A response cached before build step 4 has no English name, so its name is compared as
-  written.
+**Accepted risks:**
 
-**The same page counts once.** A source is its exact URL, query string included, with the facility
-name it gives, so a registry page naming many sites is several sources, and one cited by several
-searches is one. A page cited with no name is told apart by the location it states. A source with
-a location is matched once, however many searches cited it, and all their citations are filed
-with it. One with no location is matched for each search on its own, since rules 5 and 6 depend on
-the site searched. Located sources that match none of our sites and lie within 2 km of each other
-become one new-landfill candidate. Where two of our sites within 2 km of each other were both
-searched and cited the same page, the pair goes on `possible_duplicates.csv`: E-PRTR re-registered
-many facilities under new ids.
-
-**Only the run's selection gets values.** The selection is every site in the countries the run
-searched (those with a cached response), and in a default-excluded country (the US, Brazil) only
-the sites the run itself searched. A source filed under a site outside it, in another batch's
-country say, goes on `outside_run_matches.csv` instead of the review queue, since ingestion #261
-stops on a facility with values from two runs.
-
-**A page listing many landfills is read one entry at a time.** A search reports only the entry it
-used, under the name the page gives it, so a regulator's list of twelve landfills can be several
-sources, one per entry, each matched by its own location or name. A name the page gives to places
-more than 2 km apart, a list of "Closed Landfill"s say, is one source per place, and a citation of
-it with no location stays with its own search. The rest of such a page goes unread, so arbitration
-lists it in `datasets_found.csv` for ingestion to load once, as a source of its own.
-
-**A site's trust still decides what is asked of SMEs.** Where the name or coordinates of the site a
-source is filed under come from a Tier 1–2 source, the source's name and location still match it,
-but they are recorded in `evidence.csv`, not queued as `found_facility_name` or `found_location`
-values. This is judged on the site the source is filed under, not the one searched.
-
-**"Not a Waste Facility"** is filed only under the site searched, and only where that site was
-offered the check (see [Not a waste facility](#not-a-waste-facility-wp-525)). A source that matching
-would file anywhere else gives its verdict to Leads, and is never a new-landfill candidate: one
-placed more than 2 km from every site of ours is counted as `match_not_a_waste_facility`, and its
-other values are recorded in `evidence.csv` only.
-
-The 5 km identity check, a dropped map page's coordinates read for it, and the note on a value
-whose winning source named another facility are gone: matching replaces all three.
-
-Run_Config counts each outcome, a source with a location once and one without once per search
-that cited it: `match_located`, `match_named_among_several`, `match_tie`, `match_name_nearby`,
-`match_new_facility`, `match_not_a_waste_facility`, `match_moved_by_name`, `match_no_location` and
-`match_outside_run`, beside `new_facility_candidates` and `possible_duplicates`.
-
-**On the batch-1 replay**, a plumbing check since batch 1's sources rarely give a location, 85
-located sources matched one site, 2 tied, 8 matched none, 91 moved by name, and 4,650 citations had
-no location. The queue has 6,414 rows (6,562 before), never two for one site, attribute and year.
-80 of them are filed under a site other than the one searched, at 25 sites: Thunder Bay's 15 rows,
-moved by name from searches of nearby "domestic landfill" sites, Fredericton, Otter Lake, Sault
-Ste. Marie, North Bay (the SME's Merrick example), Prairie Green, Moose Jaw and Benaraby among
-them. The six points batch 1's agent copied from our own count as no location. Rule 6 leaves some
-known cases with the site searched, flagged: Prairie Green's pages at four sites 283-633 km from it,
-West Perth's page at 14 unnamed sites, and Brandon's Eastview pages at 12 Manitoba sites and at
-Guelph's Eastview; `corrected_site_id` offers the sites whose searches cited each page. 41 pairs are possible duplicates, Cowpen Bewley's and Foxhall's E-PRTR records among them.
+- **Tier 1–2 sources with no location are approved unchecked,** as in batch 1. In the gpt-5.4 test,
+  36 of the old review queue's 44 rows from Tier 1–2 sources had no usable source location.
+- **Extraction errors load unseen.** In the tests, 8% (gpt-5.4) and 11% (mini) of the values that
+  would have loaded were wrong, even from the right facility. Most were planned or permitted
+  figures read as actual. The prompt now asks for actual figures, dates and features only -
+  nothing planned, proposed, ordered or required, permitted, design or projected, and no future
+  years - which those tests predate; a live run will show how much it helps.
+- **The agent can claim the wrong facility.** The duplicate rule and the 5 km check catch most of
+  what batch 1 showed. A Tier 1–2 page cited for only one site and giving no usable location gets
+  through, like the Manitoba news release above. Its only location, "Brandon", is geocoded and
+  cached at the town's point, 1,652 km from Guelph, but a town-level point isn't used for any check.
+- **Values the agent itself doubts are auto-approved** (a decision for Hugh). Only a value it marks
+  an excluded candidate is set aside. Of the 51 auto-approved values in each test, gpt-5.4 has 10
+  the agent marked Inferred with Low confidence (9) or whose quote isn't on the cited page (1), and
+  mini 10 (quote not found 7, Inferred/Low 2, Conflicting 2), all of which load: Guelph's
+  `facility_status = Active` that the agent itself said conflicts with a decommissioned landfill,
+  and a forecast `closing_year = 2028` at Moose Jaw, among them.
+- **A pair takes its best citation's tier,** so a value only a weaker citation of the same page
+  gives is approved at the better tier: in mini, the gas follow-up's undated citation of Cowpen
+  Bewley's register (Tier 3) gives values approved at the first pass's Tier 1.
+- **A tier comes from the agent's `source_type`.** A personal blog the agent called an operator
+  disclosure is Tier 1 in gpt-5.4, and auto-approves.
 
 ## Storage and sharing
 
@@ -524,9 +643,9 @@ That searches, arbitrates, and — if any facility turns out to have a gas colle
 seed did not know about — automatically runs a second, narrow pass for that facility's gas-capture
 attributes and re-arbitrates. Same run id, same output directory, no reseeding by hand. Pass
 `--no-followup` to stop after the first pass. Nothing has been reviewed by then, so the follow-up
-reads the gas collection findings still waiting in the review queue. They are keyed by the site
-each source is filed under, so the follow-up searches that site, and only a site in the run's
-selection.
+reads the gas collection findings in `found_values.csv` that are auto-approved or waiting for SME
+review. Every value is filed under the site searched, so only a site the run searched is followed
+up.
 
 Why a second pass exists at all: gas-capture attributes are only asked of facilities known to have
 a collection system, and `has_landfill_gas_collection` is itself one of the searched attributes. A
@@ -551,16 +670,18 @@ uv run waste-ai-search search --run-id pilot10 --pilot-size 10
 # With blob storage configured this pulls from blob first (VPN); add --local to stay fully offline.
 uv run waste-ai-search arbitrate --run-id pilot10
 
-# Phase 3 - `run` does this for you. By hand: fold found values, still awaiting review, back into
-# the seed, then search ONLY the sites where gas collection was discovered - refresh-seed prints
-# the command.
+# Phase 3 - `run` does this for you. By hand: fold found values, auto-approved or awaiting
+# review, back into the seed, then search ONLY the sites where gas collection was discovered -
+# refresh-seed prints the command.
 uv run waste-ai-search refresh-seed --run-id pilot10
 uv run waste-ai-search search --run-id pilot10_pass2 \
   --input-csv outputs/runs/pilot10/refreshed_seed.csv --site-ids <ids printed above>
 
-# After review - add the values SMEs rejected as "New facility - not in our database" to the run's
+# During or after review - apply the SMEs' Site_Review decisions: write the auto-approved and
+# SME-approved values to accepted_values.csv, for ingestion, and the sources marked New site to
 # new_facility_candidates.csv. Reads the SharePoint copy of the workbook, else the run folder's.
-uv run waste-ai-search collect-new-facilities --run-id pilot10 [--workbook <reviewed .xlsx>]
+# Run it any time: undecided pairs load nothing until it runs again.
+uv run waste-ai-search accept-reviews --run-id pilot10 [--workbook <reviewed .xlsx>]
 ```
 
 **Never search `refreshed_seed.csv` without `--site-ids`.** It holds the whole seeded corpus
@@ -584,9 +705,10 @@ call still running then is abandoned and not retried. The HTTP timeout
 
 ### What the agent returns
 
-The agent answers **source first** (build step 4 of
-[the source-matching plan](docs/plans/2026-10-20-match-sources-by-location.md)): each source it
-used, with the facility that source describes and the values it gives.
+The agent answers **source first**: each source it used, with the facility that source describes
+and the values it gives (build step 4 of
+[the source-matching plan](docs/plans/2026-10-20-match-sources-by-location.md), and step 1 of
+[the approve-sources plan](docs/plans/2026-10-21-approve-sources-site-by-site.md)).
 
 ```json
 {
@@ -597,8 +719,10 @@ used, with the facility that source describes and the values it gives.
       "publication_date": "...", "language": "...", "paywall_flag": false,
       "facility_name_in_source": "the facility's name, exactly as this source writes it",
       "facility_name_english": "that name in English",
-      "stated_location": "the facility's location, exactly as this source writes it",
-      "stated_location_kind": "coordinates",
+      "stated_address": "the site's address, exactly as this source writes it",
+      "stated_coordinates": "the site's coordinates or grid reference, exactly as written",
+      "stated_municipality": "the town or municipality the source puts it in",
+      "stated_state": "the state or province the source puts it in, in full",
       "values": [
         {"attribute_name": "operator", "value": "...", "unit": "", "value_basis": "Direct",
          "confidence_score": "High", "value_date": "2024", "evidence_summary": "...",
@@ -606,51 +730,93 @@ used, with the facility that source describes and the values it gives.
       ]
     }
   ],
-  "unverified_leads": [],
+  "unverified_leads": [
+    {"url": "https://... or blank", "attribute_name": "...", "value": "...", "unit": "",
+     "value_date": "...", "quoted_evidence_short": "...",
+     "why_unverified": "identity / value rule / page not readable", "lead_summary": "..."}
+  ],
   "search_notes": "..."
 }
 ```
 
 - `facility_name_in_source` is the name as the source writes it; `facility_name_english` is the
   agent's English rendering, since our names are in English. Either may be blank.
-- `stated_location` is the source's coordinates, grid reference or the site's street address,
-  copied as written and never worked out, and blank if the source gives none. Its kind is one of
-  `coordinates`, `grid reference`, `street address`, `place description` or `none`. A source that
-  gives coordinates and an address writes them `a | b`, kinds `coordinates | street address`.
-- Each value keeps the fields arbitration has always read.
+- `stated_address` is the site's own address, never the operator's office, and
+  `stated_coordinates` its coordinates or grid reference. Both are copied as written and never
+  worked out, and blank if the source gives none. The prompt adds that a page often gives the
+  address in a contact box or footer.
+- `stated_municipality` and `stated_state` are the town and the state or province the source puts
+  the site in, the state written in full; where the source names only a town, the state it is in.
+  A source in another state than ours is flagged on Site_Review.
+- These six fields only check that the source is about our site (see
+  [Locating each source](#locating-each-source)). They never replace our name or location.
+- Each value keeps the fields arbitration has always read. Its `value_date` is the date the value
+  is true for: a figure's own year, never a target year, else the source's date. A yearly value
+  loads under that year.
+- `unverified_leads` holds what the agent found but couldn't use, each in the one shape above:
+  a page it couldn't tie to our site, a value a rule leaves out, or a page it couldn't read. The
+  list may be empty. In the 31 October Mexico tests, without a shape, 174 leads came back in 23.
 
-**The agent reports what each source says, and code decides.** It still researches only the site
-asked about. A source that turns out to describe a different facility is reported anyway, with that
-facility's name and location, but the agent does not go on researching it; from a registry that
-lists many sites, only the entry it used. A source that names or locates the facility but gives no
-value is reported too. Arbitration then files each source under the site of ours it is about,
-which may not be the site searched (see [Matching each source to a site](#matching-each-source-to-a-site)).
+**The agent decides whether a source is about this site,** as batch 1's prompt had it. It returns
+only sources about this facility, using the names and rounded coordinates the prompt gives it to
+check, and an empty sources list, with the reason in `search_notes`, if it can't confirm it. From a
+registry that lists many sites, it uses only this facility's entry. Agreeing on the translated name
+alone is not confirmation. Where our name or coordinates came from a Tier 1–2 source, the prompt
+says they are already confirmed by an authoritative source. Every source it returns is filed under
+the site searched (see [Filing and approving each source](#filing-and-approving-each-source)).
+
+**A site named after its operator is searched for by its place.** Where our name has a legal form
+(S.A. de C.V., Sociedad Anónima, S. de R.L.) or an operator's name (SIMEPRODE, Promotora,
+Proactiva, TECMED, Sistema Integral para el Manejo, Sistema or Junta Intermunicipal), accents and case aside,
+the prompt says it looks like an operator's name, which may run sites elsewhere, and asks for the
+landfill or dump at this place under the names local sources use. A source about it may name
+another operator: the municipality, state and our other sites decide. Such a name is never called
+confirmed. A bare "Intermunicipal" doesn't count: "Relleno Sanitario Intermunicipal de Atlixco" is a
+site's own name. 39 of batch 3's 1,553 prompts get this, 15 of them among the 64 sites taking
+100,000 t a year or more. In the 31 October Mexico tests, gpt-5.4 and Terra found only the company
+at 4005 "RED RECOLECTOR SA. DE CV." and returned nothing, while Sol found the landfill there, La
+Estación, in pages naming other operators.
 
 **The prompt gives our coordinates rounded to 2 decimals (about 1 km),** with the municipality
-and admin names where the seed has them: enough to search with, and nothing worth copying. With
+and admin names where the seed has them: enough to check a source's place with (and, outside
+Spanish-language sites, to search with), and nothing worth copying. With
 the full point in the prompt, the agent once credited our own OSM centroid to a registry. The
 reverse-geocoded `formatted_address` is left out for the same reason. The search cap
 (`--max-web-searches`) is unchanged.
 
-Only Brazil's seed has place names (SINIR's municipality and state). Every other country's come
-only from a reverse-geocode cache passed with `--use-geocode-cache` (see
-[Reverse Geocoding](#reverse-geocoding)), and no such cache exists yet. So outside Brazil the
-prompt names the site, its country and the rounded point, and no town. Batch 1's prompts had the
-full point and no town either, so a comparison with batch 1's yield measures the rounding, not the
-loss of place names.
+**A Spanish-language site is searched in Spanish.** That is every site whose `source_language` is
+`es`: every Mexican site but five, and also Spain's 249 (batch 5) and 191 in Latin America (the
+last batch), though only Mexico was measured. Its prompt says to search its names, municipality and
+admin names in the local language, where we hold the original name to spend no searches on
+`site_name`, our English translation, and to use our coordinates only to check a source's place,
+never in a search: pages almost never print them. Where the gas attributes are asked, gas-project
+records such as UNFCCC CDM's are still searched in English. In the 31 October Mexico tests none of
+the 213 sources cited was in English but one bilingual PDF, yet Terra searched English names at 43
+of 50 sites and our coordinates at 21, with six searches a site. Other languages are still searched
+in English too, until their batches are measured.
+
+Only Brazil's seed has place names (SINIR's municipality and state). Every other site's are
+looked up from our coordinates when it is searched (see [Reverse Geocoding](#reverse-geocoding)),
+from 30 October 2026. Batches 1 and 2 were searched before that, with no town in the prompt.
 
 **Runs cached before this still arbitrate.** One reader,
 [`payload.py`](src/waste_ai_search/payload.py), turns any cached response into this shape, and
 everything that reads a response goes through it: the evidence, the link check, the run log's
-counts, validation, the merge of the follow-up pass, retry detection and the agent's own leads. An
-older, attribute-first response's citations become one source per exact URL, each with the values
-of the attributes that cited it. Its found name is the in-source name of the sources cited for it,
-and its found coordinates the stated location of the sources cited for both; half a location is
-none. Evidence ids and the agent's order are kept. Each value keeps how its own citation labelled
-the page (source type, date, publisher), so it is tiered as it was, even where the gas follow-up
-pass labelled the same page differently. Only a label its citation left blank comes from the
-page's other citations, so an undated citation of a dated page gets its date: on batch 1 that
-lifts 118 citations from the undated cap to their type's tier, and lowers none.
+counts, validation, the merge of the follow-up pass, retry detection and the agent's own leads.
+
+- A source-first response from before the approve-sources plan gave one `stated_location`, with a
+  kind for each of its parts (`a | b`, kinds `coordinates | street address`). Its parts are split
+  by kind: coordinates and grid references become `stated_coordinates`; street addresses, place
+  descriptions and unlabelled parts become `stated_address`.
+- An older, attribute-first response's citations become one source per exact URL, each with the
+  values of the attributes that cited it. Its found name becomes the `facility_name_in_source` of
+  the sources cited for it, and its found coordinates the `stated_coordinates` of the sources cited
+  for both; half a location is none. A found name or location is no longer a value, so neither
+  loads. The agent's order is kept. Each value keeps how its own citation labelled the page (source
+  type, date, publisher), so it is tiered as it was, even where the gas follow-up pass labelled the
+  same page differently. Only a label its citation left blank comes from the page's other
+  citations, so an undated citation of a dated page gets its date: on batch 1 that lifts 118
+  citations from the undated cap to their type's tier, and lowers none.
 
 ### The full run, in six country batches
 
@@ -677,11 +843,72 @@ These sizes and costs predate rule 4 below, which also skips sites whose name gi
 nothing to look for, so each batch searches fewer sites than this. `measure_name_yield.py
 --list-sites` counts how many per batch.
 
+### A second model on the largest sites
+
+Batch 3 is searched with GPT-5.6 Terra, then GPT-5.6 Sol searches the batch's largest sites again:
+the 64 taking 100,000 t a year or more, which hold 63% of its incoming waste. In the October 2026
+tests on 60 Mexican sites, adding Sol on such sites took good pages from 1.8 to 3.5 a site, for
+about $22 across the 64 at list price; on smaller sites it mostly added pages repeating what Terra's
+said, or found nothing. The second pass goes into the same run, so its pages are on the same
+Site_Review, and a page both models cite under the same name is one pair:
+
+```bash
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search search \
+  --run-id batch3 --batch 3 --workers 3
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search \
+  --run-id batch3 --batch 3 --min-tonnes 100000 --pass-label sol --workers 3
+uv run waste-ai-search check-links --run-id batch3 --retry-unverified
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search run \
+  --run-id batch3 --batch 3 --workers 3
+```
+
+- `--workers 3`: each deployment allows 1M tokens a minute, but Azure counts what each call might
+  use, not what it does. Batch 3 at 16 sites at a time had 130 of its first 147 searches refused
+  (429), and at 6 a quarter; at 3 none were, about 5 sites a minute (1,553 in 5 hours). A refused
+  search waits out the minute and tries again, with `AZURE_FOUNDRY_MAX_RETRIES=4` in `.env`.
+- Azure's content filter sometimes stops the agent's answer, probably over violent local news it
+  read. It depends on the pages an attempt happens to read, so a stopped search is retried like
+  any other failure, and the error names the filter (`ContentFiltered`) when every attempt is
+  stopped. In batch 3, 98 answers came only on a retry, and 15 searches (about 1%) were still
+  stopped after it; running them again later can succeed.
+
+- `--min-tonnes 100000` takes the sites whose seed gives 100,000 t a year or more of incoming
+  waste, and lists them. It applies after the other rules, like `--limit`, so with `--batch 3` it
+  takes the large sites the first pass searched. `--site-ids` works too, for a list of your own.
+- `--pass-label sol` keeps each response beside the first, as `site_<id>__sol.json`, and
+  arbitration merges every pass's sources. Retry a site that failed as the same pass, with the same
+  agent, as the search prints: `AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run
+  waste-ai-search search --run-id batch3 --pass-label sol --force --site-ids ...`. Without the
+  label, `--force` would replace the first pass's response; without the agent, `.env`'s would
+  answer, and its tokens would be added to Sol's.
+- `check-links --retry-unverified` fetches once more, with longer to answer, each page that timed
+  out, failed to connect, didn't resolve or had a server error, so its quotes can be checked before
+  SMEs review: 8 of the 32 pages the October tests couldn't read. Never a 403 (see
+  [Link checking](#link-checking)).
+- Before going on, run the Sol command again until it searches nothing and prints no failure: it
+  resumes, searching only sites with no `__sol` response, and prints a retry, with its agent and
+  label, for any that failed. The last command searches the first pass only, so a Sol search that
+  timed out would otherwise just be missing. Its arbitration lists any pass still failed, each with
+  its own retry command, in `sites_to_retry.csv`.
+- The last command is the one every batch runs. It searches only a site that has no first-pass
+  response yet, checks the links and locates the sources the searches didn't, arbitrates both
+  passes, runs the gas follow-up on what either model found, with Terra, and publishes the
+  workbook. Don't `arbitrate` between these steps, as the commands suggest: it publishes a
+  workbook without Sol's pages.
+- Set `.env`'s `AZURE_AI_AGENT_NAME` to `waste-ai-search-gpt-5-6-terra` for the batch, so a command
+  run without a setting asks Terra.
+- The run log has a row for each site and pass, each priced at its own model (see
+  [Bing cost](#bing-cost)).
+- Don't raise `--max-web-searches` instead. The pages one model missed were nearly all ones it
+  never came across, not ones it ran out of searches for, and where no model found anything, each
+  had confirmed the town and found no page about a dump there.
+
 ### What is actually searched — read this before a full run
 
 Four rules narrow the search. The first three mean a full run queries **12,392 of 15,537
 facilities** and makes **167,410 attribute-requests** instead of 22 x 15,537 = 341,814. The fourth
-removes more; those figures predate it.
+removes more, and so does no longer asking for a site's name and location; those figures predate
+both.
 
 **1. United States facilities are excluded by default — 3,145 sites, 20% of the corpus.**
 
@@ -697,13 +924,20 @@ uv run waste-ai-search search --run-id r --site-ids 499                 # listin
 
 The run prints how many sites it dropped, so this is never silent.
 
-**2. Brazil is excluded by default. When searched, it is coordinates only, and only where the
-location is flagged inexact — 3,913 of 4,225 sites, all from SINIR.**
+**2. Brazil is excluded by default, and a search of it now has nothing to ask.**
 
-For a Brazilian facility, the search asks only where the facility is (`found_location`): it looks
-for sources that state its location, and asks for no values — **and only when `is_location_exact`
-is FALSE.** Every other Brazilian attribute comes from a
-government source, so searching it risks overwriting better data than the search can find.
+Brazil is coordinates only: every other Brazilian attribute comes from a government source, so
+searching it risks overwriting better data than the search can find. Its coordinates were the one
+thing worth confirming, for the 3,913 of 4,225 sites, all from SINIR, whose location is flagged
+inexact. But since [the approve-sources plan](docs/plans/2026-10-21-approve-sources-site-by-site.md)
+a site's location is no longer asked for, and a source's coordinates never replace ours. So a
+Brazilian site has nothing to ask, and is not searched even when Brazil is asked for: the run
+counts it among the sites with no attributes left to search, and a search of Brazil alone
+(`--iso3 BRA`) stops with an error saying so. A Brazilian response cached before then still
+arbitrates, and loads nothing.
+
+The rest of this rule describes how Brazil was searched before, for when it is taken up again (see
+[docs/future_improvements.md](docs/future_improvements.md)).
 
 SINIR's coordinates are the centre of a municipality, not the dumpsite, and most of its names are
 generic ("Lixão", "Aterro Controlado"). So the seed carries the municipality and state SINIR
@@ -713,29 +947,19 @@ from the city-centre point and, on the WP-543 test, returned dumps 140 and 237 k
 
 With the municipality the agent found the right facilities, but in reports that publish no readable
 coordinates: **0 of 20** sites got usable coordinates either way. So Brazil is excluded by default
-like the US, and searching it is opt-in with the same three overrides (`--iso3 BRA`, `--site-ids`,
-`--include-excluded-countries`). Matching against OSM/GPW landfills within the municipality is the
-likelier fix. Opting in to Brazil does not lift rule 4, and many of SINIR's names are generic
-labels such as `Dump`, so pass `--include-unsearchable-names` too to search those.
-
-Unknown is **not** treated as inexact: only an explicit FALSE triggers a coordinate search.
-
-**Since build step 5, few of Brazil's found coordinates reach review.** A source's location is
-filed under the site searched only where it falls within 2 km of it, or its name strongly matches
-the site's within 25 km (rules 1 and 3 of [matching](#matching-each-source-to-a-site)). SINIR's
-point is the municipality's centre, so a dump's own coordinates usually lie farther than 2 km
-from it, and 1,484 of the 2,657 searchable inexact sites have names with fewer than two
-distinctive words ("Aterro Controlado", "Lixão de Itapipoca", "Jeremoabo dump"), which can never
-match strongly. A source placing such a dump 8 km from the municipality's centre goes to
-`new_facility_candidates.csv`, not to review as the site's `found_location`, as it did before. This
-is open: one option is to file a located source within 25 km of a site with an inexact location
-under it unless its name strongly fits another of our sites, so that the name vetoes a match
-rather than being needed for one.
+like the US. The same three overrides (`--iso3 BRA`, `--site-ids`,
+`--include-excluded-countries`) still lift the exclusion, but now find nothing to ask. Matching
+against OSM/GPW landfills within the municipality is the likelier fix. Rule 4 applies to Brazil
+too, and many of SINIR's names are generic labels such as `Dump`.
 
 **3. Everywhere else: gap-fill, plus the gas-capture gate.**
 
-- Identity (`found_facility_name`, `found_location`) is requested **except** where the seed's value came from a Tier 1–2 source: the name for about 10,600 facilities, and both coordinates for 4,063 of the 12,122 searchable sites (Mexico INEGI, E-PRTR, Canada GHGRP). This needs per-attribute provenance; with none, the attribute is still asked. Coordinates flagged inexact are still searched.
-- **Where our coordinates are trusted, the sources' locations are recorded, not reviewed.** Every source still states where it puts the facility, so the wrong-facility check runs for these sites too; what is skipped is the push to find a location, and a `found_location` row for SMEs (design doc F29).
+- **A site's name and location are not asked for.** Every source states the name, address and
+  coordinates it gives, which only check that it is about our site. Where our name or coordinates
+  came from a Tier 1–2 source (the name for about 10,600 facilities, both coordinates for 4,063 of
+  the 12,122 searchable sites: Mexico INEGI, E-PRTR, Canada GHGRP), the prompt says they are
+  already confirmed. Coordinates flagged inexact are never called confirmed, and nor is a name
+  that looks like an operator's (see [What the agent returns](#what-the-agent-returns)).
 - Metadata attributes are requested **only where that facility's baseline is empty**.
 - The seven `gccs_*` attributes are requested **only where gas collection is known present** —
   212 to 603 facilities each, not 13,000. See the two-pass note above for why this loses nothing.
@@ -745,8 +969,8 @@ Both country rules live in [`schema.py`](src/waste_ai_search/schema.py) as
 
 **Why these rules exist, in one line each:** the US is already Tier 1 covered by GHGRP and LMOP, so
 searching it manufactures equal-tier conflicts rather than data; Brazil's non-coordinate attributes
-are government-sourced and should not be overwritten by a web search, and its coordinates were not
-found by web search on the WP-543 test.
+are government-sourced and should not be overwritten by a web search, its coordinates were not
+found by web search on the WP-543 test, and a source's coordinates no longer replace ours.
 
 A site left with no attributes to search is dropped from selection entirely — querying it would
 spend a request and a prompt to receive nothing.
@@ -755,22 +979,26 @@ spend a request and a prompt to receive nothing.
 
 The agent finds a facility by its name and location. A name that is filler, stray text or only a
 kind of site gives it nothing to search for, so its queries are wasted or find a different
-facility nearby. Four classes of name are skipped
+facility nearby. Five classes of name are skipped
 ([the plan](docs/plans/2026-10-15-skip-unsearchable-names.md);
 [`searchable_names.py`](src/waste_ai_search/searchable_names.py) holds the test):
 
 | Class | What it is | Examples |
 |---|---|---|
-| No name | An empty name, or the filler ingestion gives an OSM polygon with no name, unless the source's own spelling is a name | `OpenStreetMap Landfill` |
+| No name | An empty name, the filler ingestion gives an OSM polygon with no name, or a name saying there is none, unless the source's own spelling is a name | `OpenStreetMap Landfill`, `NO NAME` |
 | Not a name | A URL, a bare number or a survey note that ended up as the name | `update the tag landuse after survey`, `4000` |
-| Generic label | Only says what kind of site it is (`is_generic_site_name`). Initials and route codes count as a name: `K & W Landfill` and `SR 85 Landfill` are searched | `domestic landfill`, `Landfill`, `Municipal Dump`, `Landfill II` |
+| Generic label | Only says what kind of site it is (`is_generic_site_name`), in English or Spanish. Initials and route codes count as a name: `K & W Landfill` and `SR 85 Landfill` are searched | `domestic landfill`, `Municipal Landfill`, `Landfill II`, `Basurero Municipal`, `Relleno Sanitario Tipo C` |
 | Mining feature | A spoil heap or similar, matched in the English name or the original (отвал, террикон, відвал) | `Overburden Blade`, `Terrikon` |
+| Address only | A site only Global Plastic Watch records (`contributing_data_sources` is `gpw_2021`). It maps sites from satellite images and names none; the name is an address worked out from the point. Skipped from 4 November 2026: 662 sites in batch 2, 70 in batch 4, 420 in batch 5, 468 in the last batch, none in batch 3 | `Nông Cống District, Thanh Hoa province, Vietnam` |
 
 Nothing in the database changes: a skipped site stays in WasteMAP and Climate TRACE. It just isn't
-web-searched until it has a name worth searching for. The test leaves some description-only names
-in, such as `Sanitary Landfill` and `Controlled Landfill`, and names still in Cyrillic.
+web-searched until it has a name worth searching for. Words that only describe the kind of site,
+such as municipal, sanitary, controlled, open-air and final disposal, don't count as a name:
+`Sanitary Landfill` and `Controlled Landfill` are skipped, `North Landfill` is searched. Spanish
+words were added for Mexico, where 417 sites are named just `Basurero Municipal`; batch 3 skips 667
+of its 2,220 sites. Names still in Cyrillic are searched.
 
-The generic test knows only English words, so it reads the English name, not the source's own
+The generic test knows only English and Spanish words, so it reads the English name, not the source's own
 spelling. It can't tell a generic original such as `Полигон ТБО` ("MSW landfill") from a
 distinctive one, so a site whose English name is a generic translation is skipped even when its
 original, which the agent would search first, names it. How often that happens can't be measured
@@ -820,46 +1048,50 @@ rule 4, which lowers them further.
 
 ### Attributes searched
 
-**22 attributes are searched.** No site is asked for all 22 — the scoping rules above decide
+**20 attributes are searched.** No site is asked for all 20 — the scoping rules above decide
 which ones a given facility gets. Three more gas-capture volumes are no longer searched but are
 still read from the seed and from older cached responses (see below).
 
-**Identity — requested unless a Tier 1–2 source already supplied it.** These are the evidence that
-the agent researched the *right* facility.
+**A site's name and location are no longer searched.** Until the approve-sources plan,
+`found_facility_name` and `found_location` were values, asked for where a Tier 1–2 source hadn't
+supplied ours, and reviewed as corrections to our name and coordinates. Now every source states the
+name, address and coordinates it gives (see [What the agent returns](#what-the-agent-returns)),
+and those only check that the source is about our site: they never replace ours. A name or
+location an older cached response gave as a value is not loaded.
 
-| Attribute | Type | Unit asked for | → standardized column |
-|---|---|---|---|
-| `found_facility_name` | text | — | `facility_name` |
-| `found_location` | `lat, lon`, from the sources' stated locations | — | `latitude`, `longitude` |
+**Newer sources win.** The agent is told to prefer the most recent source when sources disagree,
+and to base `facility_status` on the most recent source that shows whether the site still takes
+waste (a closure notice, current opening hours, news) rather than an older permit or directory
+listing. A fire doesn't show it, since closed dumps burn too: in the 31 October Mexico tests, 9
+statuses came from fire reports. Arbitration follows the same rule: where approved values for one
+site, attribute and year disagree, within a tier the newer `value_date` wins. Each year of a status
+is its own value now, so an older status loads at its own year rather than losing to a newer one.
 
-`found_location` is not a value the agent returns. Every source states where it puts the
-facility, the locate step turns that into a point (see [Locating each source](#locating-each-source)),
-and a site's found location is resolved from the usable points of the sources filed under it —
-coordinates, a grid reference or a rooftop address — by the usual rules: the most credible source,
-then the newest by publication date. It is one value, `lat, lon`, so it is reviewed and loaded as a point or not at
-all. A street-level address or a hint is never a value. A map directory is Tier 3 for a location,
-as it was for coordinates. Asking for it, where our coordinates are not trusted, means the prompt
-stresses finding a source that states the location, and its row reaches the review queue; where
-the coordinates of the site a source is filed under are trusted, its location is still in
-`evidence.csv`, and nothing is queued.
+**A closure counts once it has happened.** A closure that is only ordered, recommended, planned,
+funded or expected, a temporary one (*clausura temporal*), one later reversed, or a replacement
+site's opening doesn't make a site Inactive or give it a closing year. `closing_year` is a year a
+source gives for the closure, never the article's own date, and the agent is told to look for it
+whenever it finds a site closed. In the 31 October Mexico tests, 15 statuses and closing years took
+such a closure as done, among them a closure programme Profepa had approved and a seal with 15 days
+to comply.
 
-**Which site a value belongs to** is decided by matching each source to the site it is about,
-by where the source places the facility and with its name as a check (see
-[Matching each source to a site](#matching-each-source-to-a-site)). It replaced the 5 km identity
-check, which measured how far a site's sources put it from the seed and only added a note, and the
-note on a value whose winning source named another facility. A source's location is reviewed as
-the `found_location` of the site it is filed under, where that site's coordinates are asked for.
+**The operator is the body a source says runs the site,** by its full name as the source writes it,
+never a description ("la empresa", "autoridad municipal"). A body the source names only for owning,
+regulating, inspecting or visiting the site, hauling waste to it, building, cleaning up or closing
+it, or giving a figure is not its operator: in the 31 October Mexico tests, 12 operators were such
+bodies, among them the police at a fire and a town lending machinery for a clean-up.
 
-A location that matches the seed's to comparison precision (six significant digits) confirms it,
-and like any confirmation it is not queued, so nothing moves. One equal to the prompt's rounded
-point is copied from the prompt and is no location at all. One that differs by more, even by a few
-hundred metres, goes to review like any other value. There is no "same place" distance any more. The 1 km rule, and the 0.5 km rule that replaced it, counted a
-permit's coordinates near OSM's as confirming OSM's, when the permit's point is the one worth
-having.
+**Containment decides between a sanitary landfill and a controlled dumpsite.** Compaction, soil
+cover and restricted access occur at both, so where no source says whether a site has a liner,
+leachate collection or groundwater monitoring, the agent chooses neither and leaves `facility_type`
+out. A page describing an open dump can still give `Dumpsite`. In a country bound by the EU
+Landfill Directive, a landfill that took waste after July 2009 is still a Sanitary Landfill unless a
+source says it lacks that engineering. In the 31 October Mexico tests, Sol gave Controlled Dumpsite 7
+times from a fence, compaction or criticism, and 6 were wrong.
 
-**Newer sources win.** The agent is told to prefer the most recent source when sources disagree, and to base `facility_status` on the latest evidence it can find (a closure notice, current opening hours, recent news) rather than an older permit or directory listing. Arbitration follows the same rule: within a tier the newer `value_date` wins, and for `facility_status` only, a lower-tier source down to Tier 3 may win when it is at least 3 years newer than the source or baseline it replaces. Such a win goes to review like any change, and `resolution_rule` states the dates.
-
-`found_facility_name` must be **specific**: a name that identifies the site on its own ("Wonthaggi Transfer Station"), not a generic label ("Waste Management Facility"). If a source gives only a generic name, the agent adds the municipality, town or operator that the same source names ("Bass Coast Shire Waste Management Facility"), never a place the source doesn't mention.
+**One cell's area or cover is not the site's.** `area_square_meters` is the waste footprint, not
+the whole property, nor one cell or extension, and `cover_types` the cover used across the site: in
+the tests, a new cell's 6,000 m² of geomembrane was given as a site's area.
 
 **Gap-fill — requested only where that facility's baseline value is empty.**
 
@@ -867,12 +1099,11 @@ having.
 |---|---|---|---|
 | `facility_status` | enum | — | `facility_status` |
 | `facility_type` | enum | — | `facility_type` |
-| `bulk_waste_type` ‡ | enum: `municipal solid waste`, `inert waste`, `others` | — | *none yet — review layer only* |
 | `operator` ‡ | text | — | *none yet — review layer only* |
 | `opening_year` | integer year | `year` | `opening_year` |
 | `closing_year` | integer year | `year` | `closing_year` |
 | `has_landfill_gas_collection` | boolean | — | `has_landfill_gas_collection` |
-| `annual_incoming_waste_metric_tonnes` | numeric | `metric tonnes/year` | `annual_incoming_waste_metric_tonnes` |
+| `annual_incoming_waste_metric_tonnes` | numeric, municipal waste only (see below) | `metric tonnes/year` | `annual_incoming_waste_metric_tonnes` |
 | `waste_in_place_metric_tonnes` | numeric | `metric tonnes` | `waste_in_place_metric_tonnes` |
 | `area_square_meters` | numeric | `square meters` | `area_square_meters` |
 | `waste_depth` | enum (derived) | `meters` in, category out | `waste_depth` |
@@ -880,14 +1111,30 @@ having.
 | `cover_types` | enum array | — | `cover_types` |
 | `has_biocover` | boolean | — | `has_biocover` |
 
-‡ **Review-layer only: `operator`, `bulk_waste_type`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value reaches the review queue but has no standardized column to load into. Like every attribute, a found value goes to review whatever its tier. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
+‡ **Review-layer only: `operator`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
 
-`bulk_waste_type` is the waste that makes up **most** of what a site receives. It separates
-municipal solid waste (household and similar waste, which decomposes and generates methane) from
-inert waste (construction and demolition rubble, soil, stones); `others` is mainly industrial,
-hazardous or mining waste or sludge. A site taking mostly municipal waste plus some rubble is
-municipal solid waste. There is no `unknown`: with no source on the waste received, or no one
-main type, the value stays NULL, so the site is asked again on a later pass.
+**Incoming waste counts municipal waste only,** as the standardized spec's "Municipal waste only"
+rule asks of every source: household and similar waste, which decomposes and generates methane.
+
+- Where the source doesn't say what an amount is made of, it is taken as municipal and loads as
+  written. This is the usual case.
+- Where the source splits it ("120,000 t, of which 20,000 t construction debris"), the agent
+  returns the municipal part (100,000 t).
+- Where the source says the amount is mainly other waste (construction and demolition rubble,
+  soil, quarry or mining waste, industrial or hazardous waste, or sludge), the agent returns it
+  with `not_municipal = true`. It is listed in `found_values.csv` as not used ("not municipal
+  waste") and never loads.
+- On Site_Review, an SME marks an amount of rubble, soil or tailings Wrong, so it loads nothing,
+  or types just the municipal part in `corrected_value`.
+
+Unlike the US GHGRP transform in `waste_data_ingestion_pipeline` #244, nothing estimates a
+municipal share where the source gives none. A site taking mainly other waste is typed
+`Non-Municipal Waste Landfill` (see [Landfills for other waste](#landfills-for-other-waste)).
+
+`bulk_waste_type`, the waste that made up most of what a site receives, was retired on 30 October
+2026 (`UNSEARCHED_ATTRIBUTES`): it is no longer asked, and a value from a response cached before is
+listed as not used ("no longer asked"). The loader in `waste_data_ingestion_pipeline` #261 typed a
+site Non-Municipal from it; with no waste type in new runs, that rule no longer fires.
 
 `waste_depth` is the only **derived** categorical. The agent still reports a number and its
 unit; the pipeline converts to metres, then bins on the spec's 5 m boundary. The metre value is
@@ -898,12 +1145,26 @@ less is not a measurement, so it is stored NULL rather than binned to `<=5m`.
 biocover, and the prompt says so explicitly. `consolidated_facility` now carries the column but it
 is entirely NULL today, so the gap-fill rule still fires for every facility.
 
+An enum array is read however it is written: separated by semicolons or commas, or as a JSON list.
+The prompt asks for `cover_types` as an "Array", so the agent often writes `["other soil
+mixture"]`. Until 30 October 2026 that was split on its commas, brackets and all, and dropped as
+unmappable: 8 times in the October 2026 test runs, while 3 cover types got through.
+
 
 
 **Gas capture — additionally gated on `has_landfill_gas_collection` being known TRUE.** Asking a
 facility with no capture system about methane flaring buys a certain "nothing". Nothing is lost by
-the gate: `has_landfill_gas_collection` is itself gap-filled, so `refresh-seed` promotes a
+the gate: `has_landfill_gas_collection` is itself gap-filled, so `refresh-seed` merges a
 discovery into the baseline and the next pass picks up that facility's GCCS attributes.
+
+Since 30 October 2026 the prompt says what each counts as. `has_landfill_gas_collection` is a
+system collecting gas through wells and pipes, to a flare or an engine, that exists or existed: not
+one ordered, required, planned or proposed, and not vents that only let gas escape.
+`gccs_current_project_status` is the status of each gas energy project, never of the landfill
+itself. In test10-mex-sample2-run2, an order to Naucalpan's operator to "implement ... biogas
+management" was read as gas collection. That set off the follow-up search, which then gave the
+landfill's own status as its gas project's: Operational because waste was arriving, and Closed
+because the site had been sealed.
 
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
@@ -921,7 +1182,7 @@ before the change still re-arbitrates them for review.
 #### Units are converted, not demanded
 
 The agent is asked for the source's **original** unit and the pipeline converts to the spec's
-canonical unit. A unit it cannot convert produces a warning and the value is **not promoted**, so
+canonical unit. A unit it cannot convert produces a warning and the value is **not used**, so
 an unconverted number can never land in a column whose name asserts a unit.
 
 | Target | Accepted source units |
@@ -937,6 +1198,12 @@ Bold entries are the spec's own conversion table. Three deliberate refusals: an 
 `"tons"` is **never** converted (metric vs short is a 10% error); a **landfill-gas** volume is
 refused because the spec's formula needs a methane fraction the source did not give; and a value
 whose unit cannot be identified is refused rather than assumed.
+
+Units written in Spanish, Portuguese, French, Italian or German are read as their English names,
+accents aside: "toneladas por día", "metros cuadrados", "Hectáreas", "Tonnen pro Jahr", "t/a",
+"tonnellate all'anno". Until 31 October 2026 they were refused, which dropped Pro Limpieza's area
+and waste in place in every Mexico test run. "ton" counts as tonnes only beside words in one of
+those languages ("ton/día"), where it means the metric tonne; an English "tons" stays ambiguous.
 
 Allowed categorical values come from the **live Postgres enums** — regenerate with
 `scripts/generate_enums.py`. Anything outside them maps to NULL with a parse warning rather than
@@ -958,17 +1225,18 @@ decades, which is why WasteMAP tracks it. A landfill that is now a park keeps it
 with closure in `facility_status = Inactive` and `closing_year`. The question is *was this ever a
 waste disposal site?*, not *is it operating today?*
 
-The value is **handled like any facility_type**. It goes to review whatever its tier, as every found
-value does, on the site's own `facility_type` row in Review_Queue — there is no separate tab. It is
-kept only for the site searched, and only where that site was offered the check: a source that
-matching files under another site, or under none, gives its verdict to Leads, and a place that is
-no landfill is never listed as a new one. It also
-reaches the next pass's seed, which `refresh-seed` builds from values still awaiting review. Where
-the same run also found the site closed, the likeliest misreading, the row's `evidence_summary` says
-so.
+The value is a `facility_type` like any other, except that **a source saying it always goes to an
+SME**, whatever its tier: it is one of the three exceptions (see
+[Filing and approving each source](#filing-and-approving-each-source)). On Site_Review its row is
+flagged "says Not a Waste Facility". The verdict is used only where the site searched was offered
+the check; at a site that wasn't, it is not used, and the rest of that source's values still go to
+an SME. An SME's Different site loads it at the other site only where that site would have been
+offered the check. It also reaches the next pass's seed, which `refresh-seed` builds from values
+auto-approved or awaiting review. Where the same run also found the site closed, the likeliest
+misreading, the flag asks whether it is a closed landfill misread as never a waste site.
 
 > **Pending upstream.** The database's `facility_type` enum and `chk_facility_type` do not carry
-> `Not a Waste Facility` yet, so consolidating a validated one will be rejected.
+> `Not a Waste Facility` yet, so loading an approved one will be rejected.
 > `check_db_schema.py` warns about it. The value needs adding upstream in
 > `waste_data_ingestion_pipeline`.
 
@@ -1002,73 +1270,86 @@ whenever waste was ever landfilled or dumped there, because the buried waste sti
 > it accepted by **both** the enum and `consolidated_facility`'s `chk_facility_type`, which roll out
 > separately. Then regenerate `db_enums.py`; `generate_enums.py` does not edit the pending list.
 
+### Landfills for other waste
+
+`facility_type` also offers **`Non-Municipal Waste Landfill`**: a disposal site taking mainly waste
+other than municipal solid waste, such as construction and demolition rubble, soil, or industrial,
+hazardous or mining waste. It is the standardized spec's type for a site a model of municipal waste
+leaves out (`waste_data_ingestion_pipeline` #238). What a site takes decides it, whatever its
+engineering: an engineered hazardous-waste landfill is a Non-Municipal Waste Landfill, not a
+Sanitary Landfill. "Inert landfill", "C&D landfill", "industrial landfill" and "hazardous waste
+landfill" map to it. Since 30 October 2026 it is the only place a page saying a site is, say, an
+inert-waste landfill is recorded: `bulk_waste_type` is retired, and an amount of other waste is
+marked on the amount itself.
+
+> **Pending upstream** like `Transfer Station`: it is in `consolidated_facility`'s
+> `chk_facility_type` on `main`, but stays on `PENDING_UPSTREAM_FACILITY_TYPES` until
+> `check_db_schema.py` reports the `facility_type` enum type accepts it too.
+
 ### Outputs
 
 | File | Purpose |
 |---|---|
-| `<run_id>_review.xlsx` | **The SME artifact.** Every found value for an empty field, whatever its tier, and every disagreement with our value from a Tier 1–3 source at least as credible as ours, with dropdowns: one row per site, attribute and, for a yearly attribute, year, under the site each source is about. Weaker disagreements are under Leads. Ingestion reads the SMEs' decisions from it. |
-| `resolved.csv` | A header and no rows. Nothing is accepted automatically, and ingestion accepts it empty. Runs from before (batch 1) wrote the values they accepted here. |
-| `evidence.csv` | One row per source-backed claim, confirmations of our values included. The audit trail. Its `source_id` finds the source in `sources.csv`. Every row also gives the facility its source describes (`facility_name_in_source`, `facility_name_english`), the location it states (`stated_location`, `stated_location_kind`) and the point read from it (`location_basis`, `located_latitude`, `located_longitude`, and `location_reason` when it is not usable). A source that states a location has a `found_location` row of its own. Its `site_id` is the site the source is filed under, blank for a likely new facility; `searched_site_id` is the search that found it, and `match` says why. |
+| `<run_id>_review.xlsx` | **The SME artifact.** Its Site_Review tab lists the site–source pairs an SME needs to decide, grouped by our site (see [SME Review Workflow](#sme-review-workflow)). `accept-reviews` reads the decisions back from it. |
+| `found_values.csv` | **Every value found**, one row per site, year, source and attribute, with its status (`auto-approved`, `SME review` or `not used`) and `status_reason` (see [Filing and approving each source](#filing-and-approving-each-source)). Each row gives our site, the source and its tier, the facility the source describes (`facility_name_in_source`, `facility_name_english`, `source_address`, `stated_coordinates`) and where that puts it (`source_coordinates`, `coordinates_from`, `distance_km`, and `location_note` where there is no point), the value as converted and as written, our value for that year, the agent's quote and whether it and the location are on the page, and the pair's `review_id`. `accept-reviews` fills `sme_decision` and `loaded`. The agent's unverified leads are listed too, as not used, with the link, value, date, quote and note each gives, however the agent named them (a lead written as a whole source gives a row for each of its values), and why it didn't stand behind it in `status_reason`. The audit trail. |
+| `accepted_values.csv` | **For ingestion**, written by `accept-reviews`: one value per site, attribute and, for a yearly attribute, year, from the auto-approved pairs and those SMEs approve on Site_Review (Correct site, or Different site with `other_site_id`, where that site's field is empty). Where accepted values disagree, the best tier wins, then the newest, then the value most sources give. Columns: `run_id`, `site_id`, `site_name`, `country_iso3`, `attribute_name`, `value`, `unit`, `year`, `source_url`, `source_tier`, `approved_by` (`auto` or the reviewer), `reviewed_date`, `review_id`. Arbitrating again empties it to its header row; run `accept-reviews` again. |
+| `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below), its tier, and how many sites cited it. |
 | `source_locations.json` | Each stated location's point, keyed by its text and country (see [Locating each source](#locating-each-source)). |
-| `page_text/` | The text of each page that loaded, one gzip file per exact URL named by its `source_id` (see [The text of each page that loads](#the-text-of-each-page-that-loads)). `evidence.csv`'s `quote_on_page` and `location_on_page` say whether each source's quote and stated location are on it. |
-| `sources.csv` | One row per exact URL, with a `source_id` derived from it (see below). |
-| `supplementary_leads.csv` | Findings below the credibility floor, plus the agent's own leads. `searched_site_id` is the search that found each; a weaker disagreement weighed several sources, and names every search behind them. |
+| `page_text/` | The text of each page that loaded, one gzip file per exact URL named by its `source_id` (see [The text of each page that loads](#the-text-of-each-page-that-loads)). `found_values.csv`'s `quote_on_page` and `location_on_page` say whether each source's quote and stated location are on it. |
 | `parse_warnings.csv` | Dropped values, dropped map-site citations, unit failures, unmappable enums. |
+| `sites_to_retry.csv` | Searches that couldn't be done, one row per site and pass, with the agent to retry it with (see [If a site could not be searched](#if-a-site-could-not-be-searched)). |
 | `skipped_sites.csv` | Sites the run skipped because their name gives a search nothing to look for, with the class and rule. Each search adds to it. |
-| `new_facility_candidates.csv` | For ingestion: landfills none of our sites is. One row per group of located sources more than 2 km from every site of ours (grouped within 2 km of each other), with their URLs, names as written and in English, stated locations, the point and its basis, our nearest site and its distance, and the searches that found them. `collect-new-facilities` adds the values SMEs rejected as "New facility - not in our database" (`found_by` = `SME`); arbitrating again keeps those. |
-| `possible_duplicates.csv` | For ingestion (entity linkage's #225 tackles E-PRTR re-registrations): pairs of our sites, with names, distance apart, the sources that hit both and why: one source placed within 2 km of both that its name couldn't settle, or one page cited by both sites' searches where they lie within 2 km. |
-| `outside_run_matches.csv` | Sources filed under a site outside the run's selection: the source, the site, its country, and the search that found it. Not reviewed. |
-| `datasets_found.csv` | For ingestion: pages that look like datasets, such as a regulator's list of its landfills. A search reports only the entry it used, so the rest of such a page goes unread, and every site on it pays its own search to find it again; loaded once through ingestion, as E-PRTR is, it would cover them all. Listed when it names or places 2 or more facilities, or when a regulator, registry or statistics publisher's page is found by 3 or more searches (a town's landfill page is found by every nearby search too). Names count apart by their distinctive words, and a facility placed being a site of ours the page was filed under by its own location or name, or one of its new-landfill entries. It gives the page, its publisher, type and tier, the counts, the searches, the sites it placed, the names it gave, and why it is listed. |
+| `new_facility_candidates.csv` | For ingestion: landfills none of our sites is, from the sources SMEs mark New site on Site_Review (`found_by` = `SME`). One row per source, with its URL, name as written and in English, stated location, the point and where it came from, our nearest site and its distance, the searches that cited it, and a note of who marked it and the values it gives. `accept-reviews` adds each once; arbitrating again keeps them. |
+| `possible_duplicates.csv` | For ingestion (entity linkage's #225 tackles E-PRTR re-registrations): pairs of our sites whose searches cited the same page under the same facility name (not a blank one), with their names, the distance between them, the pages, the names, and a `reason` that says when the sites are too far apart to be one facility. |
+| `datasets_found.csv` | For ingestion: pages that look like datasets, such as a regulator's list of its landfills (see [What else is listed for ingestion](#what-else-is-listed-for-ingestion)). It gives the page, its publisher, type and tier, how many searches cited it and how many facilities it names and places, the searches, the names it gave, and why it is listed. |
+
+**Gone since the approve-sources plan:** `evidence.csv`, `resolved.csv`, `review_queue.csv` and
+`supplementary_leads.csv`, which `found_values.csv` replaces, and `outside_run_matches.csv`, since no
+source is moved off the site searched now. Arbitrating a run again deletes the copies an earlier
+arbitration left in its folder, and says so. A copy already pushed to blob is kept there, as the
+record of that arbitration.
 
 **Nothing is loaded from this repository.** It used to write a standardized table and a `.load.sql`
-beside it, built before review. Ingestion now builds the AI search's table itself, from the values
-SMEs validate (`waste_data_ingestion_pipeline` #261). Arbitrating a run again deletes the
-`std_facility_tbl_ai_search_<run_id>.csv` and `.load.sql` an earlier arbitration left in its folder,
-and says so. A copy already pushed to blob is kept there, as the record of that arbitration.
+beside it, built before review. Ingestion builds the AI search's table itself
+(`waste_data_ingestion_pipeline` #261), from `accepted_values.csv` once #261 is reworked for it.
+Arbitrating a run again deletes the `std_facility_tbl_ai_search_<run_id>.csv` and `.load.sql` an
+earlier arbitration left in its folder, as above.
 
 **One source per exact URL.** The query string is part of the URL, so documents that one script
 serves by id stay separate sources: dropping it once merged 103 different Natural Resources Wales
 documents into one. Only spellings that never change the page are cleaned: the scheme and host's case,
 a leading `www.`, a trailing slash and the `#fragment`. The path and query keep their case. The
 `source_id` is derived from that URL, so it is the same in every run and for every site citing
-it, and every `evidence.csv` row's `source_id` is in `sources.csv`. `evidence_id` stays one per
-citation.
+it, and every `found_values.csv` row's `source_id` is in `sources.csv`.
 
 ### Source credibility
 
 Tier is assigned **locally** from `source_type` and publisher, never taken from the agent — measured
 against the pilot responses, the agent's self-assigned tier put news reports at Tier 2, 3 and 4
-simultaneously. Its number is kept as `agent_proposed_tier` for drift monitoring only.
+simultaneously. Its number is kept as `agent_proposed_tier` in `sources.csv`, for drift monitoring
+only.
 
-| Tier | Class | Can fill an empty baseline | Can override a baseline |
-|---|---|---|---|
-| 1 | Regulator, permit/registry, operator disclosure | yes | yes |
-| 2 | Peer-reviewed, IFI/UN dataset, govt statistics | yes | yes |
-| 3 | News, trade press, NGO report | yes | no |
-| 4 | Aggregator, wiki, directory listing | yes | no |
-| 5 | Source type could not be established | yes | no |
+| Tier | Class | A value that fills an empty field |
+|---|---|---|
+| 1 | Regulator, permit/registry, operator disclosure | Approved automatically, unless an exception sends it to an SME |
+| 2 | Peer-reviewed, IFI/UN dataset, govt statistics | Approved automatically, unless an exception sends it to an SME |
+| 3 | News, trade press, NGO report | SME review |
+| 4 | Aggregator, wiki, directory listing | SME review |
+| 5 | Source type could not be established | SME review |
 
-**Nothing is accepted automatically.** A found value for an empty field goes to the review queue
-whatever its tier. One that disagrees with ours goes there from a Tier 1–3 source at least as
-credible as ours, and to Leads from one below the floor or weaker than ours. A value equal to ours
-is a confirmation: its evidence stays in `evidence.csv`, but it is not queued and not loaded, so the
-AI search never becomes the credited source for a value nobody reviewed. Tier still decides between
-the queue and Leads, and is shown beside each value. Until build step 3 of
-[the source-matching plan](docs/plans/2026-10-20-match-sources-by-location.md), Tier 1–2 fills and
-confirmations were accepted without review: 2,932 values in batch 1.
+**Tier 1–2 fills of empty fields are approved automatically,** as in batch 1, unless one of the
+three exceptions applies (see [Filing and approving each source](#filing-and-approving-each-source)).
+That reverses "nothing is accepted automatically" (design doc F36), under which every value went to
+SMEs. **A value we already hold is never changed** by the search, whatever the source's tier: a
+value equal to ours, or a different one, is listed as not used. So the tier of our own value no
+longer decides anything.
 
-Baseline credibility is judged **per attribute**, from
-`consolidation.value_resolution_ledger`, not from the facility's composite
-`contributing_data_sources` — so an `osm_2022` site name is tiered as OSM even when the same
-facility also has a GHGRP filing. The dataset is shown as `baseline_source`.
+A source with no publication date is capped at Tier 3 whatever its publisher. A pair takes the tier
+of its best-rated citation, so a page one search cites twice, once dated and once undated, takes
+the better of the two.
 
-A source with no publication date is capped at Tier 3 whatever its publisher. An **empty**
-baseline is filled at any tier — a sourced value beats no value. Once a baseline value exists, only
-Tier 1-2 may override it.
-
-Corroboration counts sources, not citations. A page cited twice for one attribute counts once in
-`agreeing_source_count`, once when the most-corroborated value breaks a tie, and once in the
-"N source(s) found" a weaker finding carries to Leads.
+Corroboration counts sources, not citations. A page cited twice for one attribute counts once when
+the value most sources give breaks a tie.
 
 **Two map sites are dropped.** Citations of `mapcarta.com` and `maptons.com`, any subdomain
 included (`ca.maptons.com`), are dropped before arbitration, and so are the agent's own leads that
@@ -1077,12 +1358,9 @@ point at them. Mapcarta's landfill pages copy OpenStreetMap, where most of our s
 business listings, and 27 of its 36 batch-1 coordinate pairs were more than 2 km from the site
 searched. They are recognised by website, never by the agent's `source_type`, which it applies
 unreliably. Each drop is counted in `parse_warnings.csv`, per site and website, and the URLs are
-not link-checked. A value whose only sources were these two is not promoted, like a value given
-with no source, and neither appears in Leads. Wikimapia, an independent crowd-sourced map, stays as
-a weak source.
-
-Nothing is read from a dropped page. Until build step 5, its stated location still fed the 5 km
-identity check; matching each source to the site it is about replaced that check.
+not link-checked. Nothing is read from a dropped page, its location included, and its values are
+not listed in `found_values.csv`. Wikimapia, an independent crowd-sourced map, stays as a weak
+source.
 
 The prompt tells the agent not to cite the two, and to cite the government source where a
 directory republishes one: `wastebook.co.uk` copies the Environment Agency register (its
@@ -1107,95 +1385,98 @@ accepted risks.
 
 ## SME Review Workflow
 
-The reviewer opens **one file**: `outputs/runs/<run_id>/<run_id>_review.xlsx`. Everything else in
-the run directory is audit material you only need if a row raises a question.
+The reviewer opens **one file**: `<run_id>_review.xlsx`, in the run's SharePoint folder (see
+[Review workbooks in SharePoint](#review-workbooks-in-sharepoint)), or else the run folder. Its
+ReadMe tab gives the same steps as this section. Everything else in the run folder is audit
+material you only need if a row raises a question.
 
-### 1. Open the Review_Queue tab
+**The question for each row is whether the source is about this site of ours.** We trust the agent
+to read most values off a page: you check only those on ↳ rows (below), and the rest load with your
+approval of the source.
 
-This is the worklist: every value the search found for an empty field, and every disagreement
-with what the database holds from a source credible enough to challenge it. **Nothing is accepted
-without review**, whatever the source's tier. An empty queue means nothing needs you.
+### 1. Open the Site_Review tab
 
-Rows arrive here for one of two reasons:
+This is the worklist. Each row is one site–source pair: a source the search found for one of our
+sites, whose values would fill fields that are empty in our database for that site. Rows are
+grouped by our site, in site id order, with a rule above each new site. Under each site, sources
+with flags come first, then the best tier. An empty tab means nothing needs you.
 
-- **A value fills a field that was empty.** It may come from a regulator or from a directory; the
-  tier is beside it.
-- **A value disagrees with what the database already holds**, from a Tier 1–3 source at equal or
-  better credibility. For status, a Tier 1–3 source at least 3 years newer than ours counts too.
+**↳ rows.** Under a Tier 3–5 source, an indented ↳ row for each key value it would load: site type,
+closure year, incoming waste, area, gas collection and collection efficiency. Under a source of any
+tier, one for an operator the search worked out rather than read, or found sources disagreeing on
+(`value_basis` Inferred or Conflicting). Check each against the page and mark it Correct or Wrong: it
+loads only once marked Correct, and only with its source. A source giving only one such value has no
+↳ row: its own row checks the value too (see Decide).
 
-Not shown: a source that only confirms what the database holds (it stays in `evidence.csv`, and
-nothing from it is loaded), a search that found nothing, and a disagreement from a source below the
-floor or weaker than what we hold, which is under Leads.
-
-**One row per site, attribute and year.** Each source is filed under the site of ours it is about
-(see [Matching each source to a site](#matching-each-source-to-a-site)), and everything filed under
-a site, from any search, is decided together: one row per site and attribute, the key ingestion
-loads by. A yearly attribute — status, waste received, waste in place, waste depth, cover types and
-the gas figures, as consolidation keeps them by year — has a row for each year a source reports,
-the year of its `value_date`, or the run's year where it has none. Its `baseline_value` is ours for
-that year: the seed holds one row per site, at its reference year, so for any other year our latest
-value stands in, and `evidence_summary` says so. Where our value for the reference year was carried
-forward from an earlier one, we hold nothing for that year, so a value found for it fills an empty
-field.
+Every source whose values would fill an empty field is here, whatever its tier: the flags (below)
+say which need a closer look. Not here: values that confirm or would change one we hold (only fills
+of empty fields load), dead links, and values that couldn't be converted or mapped.
+`found_values.csv` lists every value, with its status and why.
 
 ### 2. Read the row
 
-The five columns that decide your judgement:
+The columns run left to right in four groups: our site, the source, what the source says, and what
+approving it would do.
 
-| Column | What it tells you |
+| Columns | What they tell you |
 |---|---|
-| `resolution` | Why this row needs you (see the table below) |
-| `baseline_value` vs `resolved_value` | What we had vs what the search found |
-| `winning_source_tier` vs `baseline_tier` | Whose claim is more credible |
-| `baseline_source` | Which dataset supplied the value we already had (blank if there was none) |
-| `winning_source_url` | The actual source. **Open it.** |
-| `evidence_summary` | The pipeline's one-line explanation of the decision. A shaded **CHECK** note says the winning source's quote, or the location it states, isn't on its page, as the link check read it: open the page and look |
-| `match` | Why the value is filed under this site: where its source places the facility, and how far from the site searched |
-| `source_coordinates` | Where the source places the facility, as `lat, lon`, read from `stated_location`. Paste it into Google Maps beside `baseline_coordinates`. Where `match` says "placed on its street", it is a point on that street, not the building. Blank where the source's location couldn't be placed; `match` says why |
+| `site_id`, `site_name`, `original_site_name`, `source_language`, `country_iso3` | **Our site.** `site_name` is our database's name, machine-translated into English; `original_site_name` is the same name before translation, in `source_language`, and blank where it was never translated. The search uses the original, so a source about *EL HONGO* is the right facility even though `site_name` says *THE FUNGUS*. |
+| `our_coordinates` | Where our database puts the site, as `lat, lon`. Paste it into Google Maps' search box. |
+| `our_place` | The municipality and state our site is in, looked up from `our_coordinates`. |
+| `source_title`, `attributes` | **The source**, and what approving it loads for this site of ours, one line per value, so you know what to look for on the page: `attribute = value`, with the year for a yearly attribute, such as `facility_status = Active (2024)`. A line marked *(check independently)* has its own ↳ row. One value loads per site, attribute and year, so a line can lose to a better-tier value for the same field: the flags say where another source's would. |
+| `source_url`, `publisher`, `source_tier`, `link_status` | **Open the source.** `link_status` is `OK` where our check opened the page and read it. Where it couldn't, it says why, so you know none of its quotes were checked: `Unverified: the site refuses automated readers (403), so quotes weren't checked` (it may still open for you), or `OK, but it's a scanned PDF, so quotes weren't checked`. |
+| `facility_name_in_source`, `facility_name_english`, `source_address`, `source_place`, `stated_coordinates` | The facility the source describes, as the source writes it: its name, address, town and state, and coordinates or grid reference; `facility_name_english` is the name in English. |
+| `source_coordinates`, `coordinates_from`, `distance_km`, `location_note` | Where the source places the facility, as `lat, lon`: paste it into Google Maps beside `our_coordinates`. `coordinates_from` says what it came from: coordinates the source states, a grid reference, or its address placed on the building or only on the street. A street point can be a kilometre or more off. `distance_km` is how far it is from our site. Where the source states a location but `source_coordinates` is blank, `location_note` says why (too coarse, its address and coordinates disagree, copied from the prompt, a postcode centroid), and `distance_km`, if filled, is roughly how far it is. |
+| `flags` | Why the row needs a second look, shaded where there are any (see below). |
+| `evidence` | On a source row, the agent's notes on the page's values, each once: where a page names our site only by its town, the agent says so here. On a ↳ row, the quote, the value as the page writes it where that differs, and the agent's note; on a source row that checks its one value, those too. |
+| `review_id`, `check` | Hidden, at the end. The pair's id, and on a ↳ row which value it checks (`page: ` and the value on a source row that checks its one value): your decisions are read back by them. |
 
-Every site column (`site_id`, the names, `country_iso3`, `baseline_coordinates` and the `baseline_`
-columns) describes the site the value is filed under. `searched_site_id` is the one column about the
-search that found it. `facility_name_in_source` and `stated_location` are the facility as the
-winning source writes it, `source_coordinates` the point read from that location, and
-`location_basis`, on a `found_location` row, how its point was read.
+| Flag | What to do |
+|---|---|
+| quote not found on the page (attributes), or only partly found | Our automated check couldn't find the agent's quote for those values on the source's page. Look yourself: the check can't read images or maps, and it makes mistakes. |
+| address or coordinates not found on the page, or only partly found | The same, for where the source places the facility. |
+| same page and name also cited for site(s) X | Searches for other sites of ours cited this page under the same facility name. It is about one of them at most, unless they are one facility recorded twice. The row is listed under each of those sites too, and the pair of sites is on `possible_duplicates.csv`. |
+| more than 5 km from our site | Compare `source_coordinates`, or where it is blank `stated_coordinates`, with `our_coordinates`. |
+| in a different state from our site: the source says X | The source puts the facility in another state or province than `our_place`. States are compared as Nominatim names them, so "N.L." and "Nuevo León" are one state. A site near a border may be described from the next state, so look at the map before rejecting it. |
+| the source puts the site in X; ours is in Y - check it is our site | In our state, or where the source's state is unknown, the source names a municipality that shares no word with ours or with our site's name. Accents, case and words such as *ciudad*, *villa*, *municipio*, *de*, *San* and *Santa* don't count, so San Juan Mixtepec and San Sebastián Tecomaxtlahuaca are two towns. It may be about the dump that town uses rather than ours: at 9233, four pages about El Guayabo in Medellín de Bravo were cited for our landfill in Veracruz. But a landfill can serve one town from the next, and our municipality is looked up from our coordinates, so it can be the city rather than the municipio ("Ciudad Obregón" for Cajeme). Check, don't reject on the flag alone. |
+| we also hold X in T: check the page is about this site | Another of our sites is in the same municipality. A page naming the site only by its town could be about either; the agent takes such a page for ours only where we hold no other site in the town. Look for the page's name, place or history. |
+| the source names no facility | The source gives no name for the facility it describes. Check that it is about one facility, and that it is ours. |
+| says Not a Waste Facility | Approving loads that verdict. Check the source says the site was never a waste site: a closed landfill still is one. Where the run also found the site closed, the flag says so. |
+| a Tier N source here gives `attribute = value`; if both are approved, that one loads (or this one loads) | Another source on this tab gives a different value for the same field and year. One value loads, the best tier first, so the flag says which would if you approve both. If you think the one that loses is right, say so in `notes`. Two spellings of one operator's name are not different values: names are compared without small words, legal forms such as "S.A. de C.V.", a council's "H." and its years, so "H. Ayuntamiento de Tixkokob 2024-2027" and "Ayuntamiento de Tixkokob" are one operator. So are two names where one's words are all in the other, and a name and its bracketed acronym. |
 
-Rows are colour-coded by `resolution`, and the tier scale is on the `Definitions` tab. The `match`
-cell has a colour of its own where the value needs a second look at its site: orange where it is
-filed under a site other than the one searched, blue where its source gives no location, and
-yellow where several of our sites tied.
-
-**Find the site.** `baseline_coordinates` is where the database puts the facility, as `lat, lon`. Paste it into Google Maps' search box to see the site, and `source_coordinates`, where the source places the facility it describes, beside it. A `found_location` row is where its source says the site is — coordinates, a grid reference, or an address placed on its building — in the same form: accept or reject it as one point. `evidence.csv` shows what the source wrote, in `stated_location`.
-
-**Check the name first.** `site_name` is machine-translated; `original_site_name` beside it is the source's own spelling, in `source_language`. The search uses the original, so a source about *EL HONGO* is the right facility even though the row says *THE FUNGUS*. If the translation is wrong or misleading, say so in `translation_note`, which sits next to the names, rather than in `researcher_notes`. The same three name columns appear in every tab and in `evidence.csv`; they are blank where the source was never translated.
-
-**Source links.** `winning_link_status` beside the URL says whether it was checked and found working (`OK`) or could not be verified (`Unverified` — usually a site refusing automated checks, so it may still open for you). A source whose link is dead never wins: it is routed to Leads instead. `winning_source_url` is clickable, and shows the URL exactly as the source gave it. The link behind it is made safe (spaces and accented characters encoded), so it opens even when the text has them. A URL that is not `http`/`https`, or longer than Excel can follow, is shown as plain text rather than linked.
+**Source links.** `source_url` is clickable, and shows the URL exactly as the source gave it. The
+link behind it is made safe (spaces and accented characters encoded), so it opens even when the
+text has them. A URL that is not `http`/`https`, or longer than Excel can follow, is shown as plain
+text rather than linked.
 
 ### 3. Decide
 
-| `resolution` | What to check |
-|---|---|
-| **Filled empty baseline** | The field was empty and now has a value. Open the URL: does the source actually say this, and is it about *this* facility? |
-| **Overrides baseline** | A more credible source contradicts existing data. Confirm the new value is right before it replaces a database value. |
-| **Conflict - needs review** | Two sources of equal or near-equal credibility disagree, and the pipeline will not pick a winner. You pick, or reject both. |
+Pick `decision` from its dropdown:
 
-**The single highest-value check: is the source about this site?** Tier cannot detect a perfectly
-credible document that describes the *wrong landfill*. In the pilot, one search's findings were
-238 km from the facility. `match` starts with the rule that filed the value here:
+| `decision` | When | What happens |
+|---|---|---|
+| **Correct site** | The source is about this site of ours. | Its values load here: everything in `attributes`, a line marked *(check independently)* once its ↳ row is Correct, unless a flag says a better-tier value for the same field loads instead. |
+| **Different site** | It is about another site of ours. Put that site's id in `other_site_id`. | Its values load at that site, where that site's fields are empty. |
+| **New site** | It is about a landfill that isn't in our database. | Nothing loads. The source is listed in `new_facility_candidates.csv` for ingestion. |
+| **Junk** | The source is no use: it isn't about one facility, or you can't tell which. | Nothing loads. |
+| *(blank)* | Not decided yet. | Nothing loads yet. |
 
-| `match` starts | What it means |
-|---|---|
-| **Located** | The source places the facility within 2 km of this site and no other. If `searched_site_id` is another site, that search found it. |
-| **Named among several** | Several of our sites are within 2 km, and the source's name picked this one. |
-| **Tie** | Several of our sites are within 2 km and the name couldn't pick. `corrected_site_id` offers them. |
-| **Name nearby** | The source places it just beyond 2 km, but its name strongly matches this site: its location is a coordinate correction. |
-| **Moved by name** | The source gives no location, but its name strongly matches this site and not the one searched. |
-| **No location** | The source gives no location, so the value stays with the site searched, and only you can tell whether it is about this facility. The note names any of our sites nearby that the name also fits, and says if the same page was cited for other searches; `corrected_site_id` offers all of them. |
-
-A renamed site is fine. If the value is right but about another of our sites, put that site's id
-in `corrected_site_id` (a dropdown where there were several candidates; any site id may be typed)
-and validate it. If it is about another of our sites and you can't tell which, reject it as
-`Wrong facility - another site in our database`; if it is about a landfill we don't hold, as
-`New facility - not in our database`.
+- **A decision covers the whole row.** Correct site loads every line of `attributes` that wins its
+  field (best tier, then newest, then most sources, among every value approved for that site,
+  attribute and year), and the other decisions load none. Where an auto-approved source you don't
+  see here would win, a flag says so.
+- **A source giving only one value to check has no ↳ row.** Its own row checks the value: Correct
+  site or Different site says the value is right too. If it is wrong, type the right one in
+  `corrected_value`, which then loads instead; if you don't know it, pick Junk.
+- **If it is about another of our sites but you can't tell which,** leave `decision` blank and say so
+  in `notes`. A Different site with no `other_site_id` can't be read back.
+- **A renamed site is fine.** The question is whether it is the same facility, not the same name.
+- **A page may name the site only by its town** ("basurero municipal de Tolcayuca"). It is ours
+  unless it mentions a replacement or another place, or we hold another site in that town, as the
+  agent is told: a flag names our other sites there, `evidence` may say where the agent took a page
+  on that basis, and another flag says where the town the page names isn't ours.
+- **The same page under two sites** is decided under each on its own: Correct site under one, and
+  Different site or Junk under the other, say.
 
 ### 4. Record the decision
 
@@ -1203,51 +1484,100 @@ Edit only these columns; everything else is read-only:
 
 | Column | Enter |
 |---|---|
-| `validation_status` | `Validated` or `Rejected` (dropdown) |
-| `rejection_reason` | For a rejection: `Wrong facility - another site in our database`, `New facility - not in our database`, `Not in source`, `Wrong value`, `Outdated` or `Other` (dropdown). Plain `Wrong facility` stays for batch 1's workbook. Counted by cause to find where the AI errs |
-| `corrected_value` | If you know the right value: enter it here. For categorical fields (site type, status, waste type, depth, yes/no fields, cover and gas-project types) it is a dropdown of the allowed values for that row's attribute; multi-value fields also accept a typed combination. A location is `lat, lon`. Never edit `resolved_value` — it keeps the AI's own answer, which is how its error rate is measured |
-| `corrected_value_date` | Only if your corrected value is for a different date than `value_date`: that date, as `YYYY`, `YYYY-MM` or `YYYY-MM-DD`. Never a year that has its own row for the site and attribute (see below) |
-| `corrected_site_id` | Only if the value belongs to another of our sites: that site's id. A dropdown of the candidates where there were several. First filter `site_id` to that site: if it already has a row for the same attribute and year, reject one of the two |
+| `decision` | `Correct site`, `Different site`, `New site` or `Junk` (dropdown) |
+| `other_site_id` | Only for Different site: the id of the site of ours the source is about. Not this row's own site, and only a site in the run's seed |
 | `reviewer` | Your name |
 | `reviewed_date` | The date |
-| `researcher_notes` | Why, especially for a rejection |
+| `notes` | Anything worth knowing, especially where you left the decision blank |
 
-`Validated` means the value is correct and may be merged. `Rejected` means the search's value must not be; a `corrected_value` you give is merged instead. Ingestion reads these decisions straight from this tab.
+### 5. Load what is approved: `accept-reviews`
 
-**One value per site, attribute and year.** Ingestion takes one value for each, and stops on two.
-Each row of a yearly attribute (status, waste received, waste in place, depth, cover types, gas
-figures) is that year's value: the year of `value_date`, or the run's year where `value_date` is
-blank. So an older year's value is not `Outdated`: validate it if it was right for its year, and
-put a current figure on the newest year's row instead. A 2024 status rejected as `Outdated` with a
-current `Active` and no `corrected_value_date` lands in the run's year, and where the run's year
-has a status row of its own, ingestion stops on the two. For the same reason, a
-`corrected_value_date` never names a year that has its own row, and before re-filing a value with
-`corrected_site_id`, check that site has no row of its own for the same attribute and year; if it
-has, reject one of the two.
+```bash
+uv run waste-ai-search accept-reviews --run-id <run_id> [--workbook <reviewed .xlsx>]
+```
 
-Once the review is done, `collect-new-facilities --run-id <run_id>` adds the values rejected as `New facility - not in our database` to the run's `new_facility_candidates.csv`, once each, for the ingestion team. It reads the workbook in the SharePoint folder, else the run folder's, or the one `--workbook` names.
+It reads the reviewed workbook from the SharePoint folder, else the run folder, or the one
+`--workbook` names, and matches each decision to its pair by `review_id`. Case, spacing and dashes
+in a decision don't matter, and a site id Excel stored as a number is read as an id
+([`accept_reviews.py`](src/waste_ai_search/accept_reviews.py)).
 
-### 5. Optional tabs
+| The pair | What loads |
+|---|---|
+| Auto-approved, no decision | Its values, at the site searched |
+| Correct site | Its values, at the site searched |
+| Different site, with `other_site_id` | Its values, at that site, where that site's fields are empty. Values not used only because they confirm or would change ours at the site searched are weighed again there, since that says nothing of the other site |
+| New site | Nothing. The source is added to `new_facility_candidates.csv` once, with our nearest site where it gives a location |
+| Junk | Nothing |
+| For SME review, no decision | Nothing yet |
 
-- **Leads** — findings that lost: below the credibility floor, weaker than the baseline, a dead
-  link, or unconvertible units. Read-only. If you judge one good enough, promote it by hand.
+An SME's decision applies whatever the pair's status: a pair marked Junk loads nothing, even if a
+later arbitration auto-approves it. Where the values accepted for one site, attribute and year
+disagree, one is picked: the best tier, then the newest, then the value most sources give.
+
+It writes `accepted_values.csv` for ingestion, and fills `found_values.csv`'s `sme_decision` (such as
+`Different site (900)`) and `loaded` (`yes`, or `no` where another value was picked for the same
+site, attribute and year). It prints what it did: the decisions by type, the pairs not yet decided,
+the values to load (auto-approved and SME-approved), the accepted values not loaded, and the new
+sites added.
+
+**It stops, and writes nothing, on a decision it can't read back,** naming every row at fault: one
+that isn't Correct site, Different site, New site or Junk; a Different site with no
+`other_site_id`, one not in the run's seed, or the row's own site; an `other_site_id` beside
+another decision; a filled row with no `review_id`; or two rows deciding one pair two ways.
+
+**It applies, but points out, a Different site worth a second look:** one in another country than
+the site searched, one the run didn't search, or one more than 5 km from where the source places
+the facility. The seed holds our whole database, so a mistyped `other_site_id` is still a site of
+ours, and its values would otherwise load there unremarked; and a site another run searched gets
+values from two runs. Each is printed with its Site_Review row. Correct the id and run it again if
+one is wrong.
+
+**Run it any time.** A pair not yet decided loads nothing until it runs again, and running it again
+on the same decisions writes the same files. Arbitrating a run again empties `accepted_values.csv`
+to its header row and blanks `sme_decision` and `loaded`, since it sorts the values again. The file
+is emptied, not deleted, because a push never deletes a blob: the emptied file replaces the old copy
+in blob, so a later pull, here or on another machine, doesn't bring the old values back. `review_id`
+stays the same, so run `accept-reviews` again on the same reviewed workbook. A decision on a pair the run no longer
+has (the search no longer cites that page under that name) is reported, not applied.
+
+**Re-arbitrating writes a new workbook with blank decisions.** Published to SharePoint, it goes
+beside an SME's edited copy, never over it, and `accept-reviews` reads the edited copy. A pair that
+appears only in the new workbook stays undecided until someone copies the decisions across: nothing
+does that yet. So does a ↳ row that appears only in the new workbook, under a pair already approved:
+its value loads nothing, and `accept-reviews` says how many values wait on a row the reviewed
+workbook doesn't have. Without a SharePoint folder, arbitrating again overwrites the run folder's
+workbook, decisions and all, so keep a copy of a reviewed workbook and pass it with `--workbook`.
+
+A workbook from before Site_Review has a Review_Queue tab instead, and `accept-reviews` says it
+can't read it. Batch 1's reviewed Review_Queue is for a one-off conversion script (build step 5 of
+[the approve-sources plan](docs/plans/2026-10-21-approve-sources-site-by-site.md), not built yet).
+
+### 6. Other tabs
+
+- **ReadMe** — these steps, and what each file in the run folder is for.
+- **Run_Config** — the run's settings and counts: pairs auto-approved and for review, values not
+  used by reason, links checked, locations read.
 - **Parse_Warnings** — values the pipeline dropped or could not map, and citations of the two
   dropped map sites, each attributed to its `site_id` and `site_name`. Worth scanning for
   systematic problems (a recurring unit or enum failure usually means an upstream fix, not 50
   individual reviews).
-- **Definitions** — the allowed values, mirrored from the live database enums.
+- **Definitions** — the four decisions, the tiers, and the allowed values, mirrored from the live
+  database enums.
 
 ### Bing cost
 
 Bing grounding bills per query, so the run log records the queries each site made in
-`web_searches` (every retried attempt, resumed run and follow-up pass included, since each is
-billed), and the search prints the run's total.
+`web_searches` (every retried attempt and resumed run included, since each is billed), and the
+search prints the run's total. The log has a row for each site and pass: `pass_label` is blank for
+the first pass, `gccs` for the gas follow-up, and a second pass's own label (see
+[A second model on the largest sites](#a-second-model-on-the-largest-sites)).
 
-**Model tokens are recorded too, and the run is priced.** Each site's row also gives the model that
+**Model tokens are recorded too, and the run is priced.** Each row also gives the model that
 answered (`model`) and its tokens: `input_tokens`, of which `cached_input_tokens` were read from the
 prompt cache, `output_tokens`, and of those `reasoning_tokens`. Like `web_searches`, the token counts
-add up across every attempt and pass. A search prints its queries, tokens and estimated cost at list
-prices:
+add up across every attempt at the pass, and each pass is priced at its own model. A site searched in
+two passes counts once among the searched sites. A search prints its queries, tokens and estimated
+cost at list prices:
 
 ```text
 Bing queries: 157 across 10 searched site(s), ~$2.20 at $14 per 1,000.
@@ -1267,71 +1597,117 @@ Foundry errors (`AZURE_FOUNDRY_MAX_RETRIES`) and reported search-tool failures
 (`--search-tool-retries`), so a site runs the agent at most 4 times, down from 9. A local `.env` that
 still sets `AZURE_FOUNDRY_MAX_RETRIES=3` overrides the new default.
 
-Searches per attempt are capped at 6 (`--max-web-searches`, 0 = no cap). The cap is sent as the
-Responses API's `max_tool_calls`, which Foundry enforces; asking in the prompt alone was ignored. It
-caps searches, not queries — each search sends about 4 queries. Each retry gets a fresh cap, so a
-site that uses all 4 attempts can make up to 24 searches. On the same 10 sites:
+The web search tool's calls per attempt are capped at 6 (`--max-web-searches`, 0 = no cap): a
+search, or a page opened or searched in. The cap is sent as the Responses API's `max_tool_calls`,
+which Foundry enforces; asking in the prompt alone was ignored. It caps calls, not queries — each
+search sends about 4 queries. Each retry gets a fresh cap, so a site that uses all 4 attempts can
+make up to 24 calls. On the same 10 sites:
 
 | | No cap | Prompt only (12) | Cap of 6 |
 |---|---|---|---|
 | Bing queries | 235 | 233 | 189 |
 | Values found | 21 | 23 | 18 |
-| SME review queue | 16 | 16 | 9 |
+| Review queue rows (before Site_Review) | 16 | 16 | 9 |
 
 Repeat runs of one site vary widely (one used 12, 30 and 39 queries), so treat the last two rows as
 noise-level.
 
+**What each search did is kept.** The run log's `tool_calls` counts each site's calls of the web
+search tool: its searches, and the pages it opened or found text in, every attempt added up like
+`web_searches`. The response saved for each site lists them in order, in `_search_actions`: a search
+with its queries, a page with its URL and any text it looked for, and with each the attempt that made
+it, since every attempt has its own cap. Nothing reads them back. They show how often the cap binds,
+and which pages the agent opened.
+
 ### If a site could not be searched
 
-`sites_to_retry.csv` lists sites where the agent's own web-search tool failed. These are **not**
-"no data found" — nothing was searched. They need a re-run, not review:
+`sites_to_retry.csv` lists each search that couldn't be done: the agent's own web-search tool
+failed, or the search raised an error (a timeout, say) and saved nothing. These are **not** "no data
+found" — nothing was searched. They need a re-run, not review. Each row names its pass
+(`pass_label`, blank for the first) and the agent that searched it, and arbitration prints one
+command per pass, to retry it as itself:
 
 ```bash
-uv run waste-ai-search search --run-id <run_id> --force --site-ids <ids from that file>
+AZURE_AI_AGENT_NAME=<agent> uv run waste-ai-search search --run-id <run_id> [--pass-label <pass_label>] --force --site-ids <ids>
 uv run waste-ai-search arbitrate --run-id <run_id>
 ```
 
+A failed pass is listed even where another pass of the site found pages. A gas follow-up (`gccs`)
+isn't retried with `search`, which would ask the first pass's attributes: delete its
+`site_<id>__gccs.json` and run the batch's `run` command again.
+
 ### Auditing a decision
 
-Nothing is accepted automatically, so `resolved.csv` has a header and no rows. Every value awaiting
-a decision is in the review queue. A source that confirms what we hold is in `evidence.csv` but not
-in the queue, and attributes not found are not written anywhere. `evidence.csv` holds one row per
-source-backed claim with the tier rule applied to each source, so you can see exactly why a value
-won or lost.
-`sources.csv` holds one row per exact URL; a row's `source_id` in `evidence.csv` finds its URL,
-title and publisher there.
+`found_values.csv` holds every value the search found, one row per site, year, source and
+attribute, with its status and `status_reason`, the source's tier and the rule that gave it
+(`tier_rule_applied`), and our value for that year. So you can see why each value was approved,
+sent to SMEs or not used. Once `accept-reviews` has run, `sme_decision` gives the pair's decision
+and `loaded` whether the value is the one written to `accepted_values.csv`. Attributes not found
+are not written anywhere. `sources.csv` holds one row per exact URL; a row's `source_id` finds its
+URL, title and publisher there.
 
 ## Reverse Geocoding
 
-Reverse geocoding is optional but strongly recommended for live pilot runs. The
-pipeline supports cache-only geocoding through JSONL records with either a
-`site_id` or a rounded coordinate key.
+Each prompt names the municipality and state our site is in, so the agent can search the right
+town and reject a page about another one. Brazil's seed has them from SINIR; every other site's
+are looked up from our coordinates when the site is searched, with Nominatim (the locate step's
+geocoder, `WASTE_AI_SEARCH_GEOCODER=nominatim`), one request a second. Each answer goes into
+`data/geocode_cache.jsonl`, so a site is looked up once whatever run it is in; Mexico's 1,553
+sites take about half an hour the first time. `--no-geocode-cache` turns it off. Azure Maps can't
+look points up here yet, so with it the prompt names no town.
 
-Example cache row:
+A cache row holds a municipality and a state, never a street: a street address next to our site
+would say more of our point than the prompt's rounded coordinates.
 
 ```json
-{"site_id":"11489","municipality":"Lagos","admin1":"Lagos","admin2":"","formatted_address":"Olushosun, Lagos, Nigeria","geocoder_provider":"manual","geocoder_confidence":"High"}
+{"site_id":"6086","coord_key":"17.38000,-98.02100","municipality":"San Sebastián Tecomaxtlahuaca","admin1":"Oaxaca","admin2":"","formatted_address":"","geocoder_provider":"nominatim","geocoder_confidence":"","geocoded_at":"2026-10-30"}
 ```
 
-Pass the cache to the search phase so the prompt can use municipality and admin names, which
-matters most for local-language searching. Outside Brazil this cache is the only source of them,
-and since the prompt's point is rounded to about 1 km, the town is the most precise place it can
-name:
+The run keeps the place each prompt named in `site_places.json`. The locate step names every state
+it meets, ours and each source's `stated_state`, as Nominatim does ("N.L.", "Nuevo Leon" and
+"Nuevo León" are all "Nuevo León"), in `state_names.json`; arbitration reads both, offline, to
+show `our_place` beside `source_place` on Site_Review and flag a source in another state.
 
-```bash
-uv run waste-ai-search search --run-id pilot10 --use-geocode-cache \
-  --geocode-cache data/geocode_cache.jsonl
-```
+**Our other sites near each site.** Since 30 October 2026 each prompt also names our other sites
+in the same country that are within 15 km, or within 60 km and in the same municipality and state,
+nearest first. Las Varas, in Madera, gets "BASURERO NICOLAS BRAVO (Madera, 18 km away)" and two
+more. They come from the whole seed, so a site skipped for its generic name is named too, but as
+one: 'unnamed site, recorded as "BASURERO MUNICIPAL" (Madera, 31 km away)'. The ten nearest are
+named and the rest counted.
 
-Without `--use-geocode-cache` those fields stay empty and every site records
-`geocode_status = disabled`.
+- The 15 km is there because the geocoder names a site in a town by the town ("Texcoco de Mora")
+  and one outside it by its municipio ("Texcoco"), so the names alone miss some.
+- The 60 km is a cut-off for matching municipalities as well as for lookups: only our sites that
+  close have their places looked up (236 for the Mexico sample, against 841 within 150 km), so a
+  site farther off in one of the largest municipios is named only if it is within 15 km.
+- Our records under 1 km away go in `our_records_within_1_km`, the rest in
+  `our_other_sites_nearby`. Mexico's INEGI rows hold some dumps twice at the same point (8690 and
+  8689 are 3 m apart), and the prompt gives our point only to about 1 km. So the prompt says such a
+  record may be this site recorded twice, and a page about it may be cited for both, which is how
+  `possible_duplicates.csv` finds a site recorded twice.
 
-Live Azure Maps batch reverse geocoding should be added later as a separate
-pre-processing command that writes this cache.
+Every prompt also says that a town can have waste sites we don't hold, such as a new landfill that
+replaced an old dump. A page about the town's waste, another of its sites, or one of our other
+sites nearby is not about our site unless it also describes ours: its name, place or history. From
+such a page the agent uses only what it says about ours. In test10-mex-sample2, the first search
+gave Las Varas two NADBank pages and a Chihuahua state government page about Madera's new landfill.
+None named Las Varas, and the second search declined pages like them.
 
-This is separate from the locate step's geocoder, which places the addresses sources state (see
-[Locating each source](#locating-each-source)). The prompt passes the municipality and admin names
-on, but no longer `formatted_address`: a street address next to our site would leak our point.
+A generic phrase such as "basurero municipal" doesn't by itself name a site. But a page about the
+dump of the place our site is named after, or about the town's dump where we hold no other site in
+that town, describes ours unless it speaks of a replacement or another location. The agent returns
+it and says in `evidence_summary` that it names the site only by its place. In the 31 October Mexico
+tests the judges called 34 of the 84 good pages ours on that basis ("basurero municipal de
+Tolcayuca"), while Terra and Sol declined some, such as San Ignacio Cerro Gordo's, where we hold no
+other site nearby. Where our name looks like an operator's, only the town's dump counts: 7 of the 8
+sites named "Promotora Ambiental de la Laguna" are outside La Laguna.
+
+The rule adds about 660 characters to every prompt (Thunder Bay's is 20,483, under the size test's
+20,600). Where a site has others nearby, the first named adds about 210 more and each further one
+about 65.
+
+This is separate from the locate step's address geocoding, which places the addresses sources
+state (see [Locating each source](#locating-each-source)).
 
 ## Standardized Facility Schema
 
@@ -1463,7 +1839,9 @@ default, so a search runs against whatever was last committed. The regeneration 
 name-provenance fields also grew the corpus from 15,559 to 19,492 facilities, and brought Brazil
 from 303 sites (all with exact locations) to 4,225, of which **3,913 are flagged inexact**. The
 `COORDINATES_ONLY_ISO3` rule that had never matched anything now fires for all 3,913, scoping each
-to a coordinate-only search.
+to a coordinate-only search. Since the approve-sources plan a location is no longer asked for, so
+those sites have nothing to ask (see rule 2 under
+[What is actually searched](#what-is-actually-searched--read-this-before-a-full-run)).
 
 This is now **optional**. `search` and `run` read `consolidation.consolidated_facility` directly,
 so no file is needed to start a run. Use this script only to pin a corpus you want to re-run
@@ -1508,6 +1886,14 @@ independent facts, and the prompt branches on both:
 A facility whose original matches its translation is left blank rather than repeating the string —
 but its `source_language` is still recorded, because a Portuguese source that translated to itself
 still needs searching in Portuguese.
+
+For a Spanish-language site, neither the translation nor English is searched, except for
+gas-project records (see [What the agent returns](#what-the-agent-returns)).
+
+Every prompt also says our recorded name may be misspelt or garbled, and asks the agent to try
+close spellings before it concludes a site is undocumented. At 5099, "RELLENO SANITARIO EL ASALTO",
+Terra's six searches were all for El Asalto and found nothing; Sol tried El Salto, and found the one
+page judged ours.
 
 ### How duplicate rows are collapsed
 

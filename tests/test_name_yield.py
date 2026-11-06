@@ -2,8 +2,10 @@
 site name found, before any class is skipped. Offline: a fake run folder, a fake blob client."""
 from __future__ import annotations
 
+import contextlib
 import csv
 import importlib.util
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -43,7 +45,7 @@ from waste_ai_search.searchable_names import GENERIC, MINING, NAMED, NO_NAME, NO
         ("Bladensburg Landfill", NAMED),  # a whole word only
     ],
 )
-def test_names_fall_into_four_classes(name, expected):
+def test_each_name_falls_in_its_class(name, expected):
     assert name_class(name) == expected
 
 
@@ -77,6 +79,8 @@ def _fake_run(run_dir: Path, manifest: dict | None = None) -> Path:
         {"site_id": "2", "attribute_name": "facility_status", "resolution": "Filled empty baseline", "resolved_value": "Active", "researcher_notes": ""},
         {"site_id": "2", "attribute_name": "found_latitude", "resolution": "Confirmed baseline", "resolved_value": "48.5", "researcher_notes": ""},
         {"site_id": "4", "attribute_name": "found_latitude", "resolution": "Confirmed baseline", "resolved_value": "49.8", "researcher_notes": ""},
+        # finding the name we hold is finding a name, though not a new value
+        {"site_id": "4", "attribute_name": "found_facility_name", "resolution": "Confirmed baseline", "resolved_value": "Brady Road Landfill", "researcher_notes": ""},
     ], ["site_id", "attribute_name", "resolution", "resolved_value", "researcher_notes"])
     _write(run_dir / "review_queue.csv", [
         {"site_id": "1", "searched_site_id": "1", "attribute_name": "found_facility_name", "resolution": "Conflict - needs review",
@@ -115,14 +119,18 @@ def test_each_searched_site_says_what_its_search_found(tmp_path):
     assert rows["4"]["source_group"] == ny.OTHER_SOURCES and rows["4"]["answered"]
     assert rows["4"]["web_searches"] == 0
     assert rows["4"]["new_values_to_review"] == 0  # its operator row was found by site 1's search
+    assert rows["4"]["found_name"] and rows["4"]["new_values_accepted"] == 0
+    assert not named["found_name"]
 
 
-def test_a_search_is_credited_with_the_values_it_found_wherever_they_are_filed(tmp_path):
-    """Replaces the identity gate's count (build step 5): a search that found another site's values
-    is no longer flagged by a distance, so name_yield counts the values filed under another site.
+def test_a_run_with_found_values_is_measured_from_them(tmp_path):
+    """Since step 2 of the approve-sources plan a run's values are in found_values.csv, every one
+    filed under the site searched: an auto-approved value counts as accepted, one for SME review as
+    to review, and a source naming the facility as a name found.
 
     End to end: a "domestic landfill" search finds a permit for Brady Road Landfill, 40 km away,
-    which states its coordinates. The permit is filed under Brady Road; the search gets the credit.
+    which states its coordinates, and the council's page, which gives none. The permit goes to an
+    SME, more than 5 km away; the council's page is approved.
     """
     from waste_ai_search.arbitrate import run_arbitration
     from waste_ai_search.input_loader import write_csv_records
@@ -145,21 +153,24 @@ def test_a_search_is_credited_with_the_values_it_found_wherever_they_are_filed(t
     permit = {"url": "https://winnipeg.example.ca/brady-road", "source_title": "Brady Road permit",
               "publisher": "Manitoba Environment", "source_type": "Permit or registry", "publication_date": "2024-03-01",
               "facility_name_in_source": "Brady Road Resource Management Facility",
-              "stated_location": "49.7012, -97.2034", "stated_location_kind": "coordinates",
+              "stated_address": "", "stated_coordinates": "49.7012, -97.2034",
               "values": [{"attribute_name": "operator", "value": "City of Winnipeg", "value_basis": "Direct",
                           "confidence_score": "High", "value_date": "2024", "evidence_summary": "Names the operator."}]}
+    council = {**permit, "url": "https://winnipeg.example.ca/landfill", "stated_coordinates": "",
+               "values": [{**permit["values"][0], "attribute_name": "opening_year", "value": "1973"}]}
     raw = run_dir / "raw_foundry_responses"
     raw.mkdir()
-    (raw / "site_7.json").write_text(json.dumps({"site_id": "7", "sources": [permit]}))
+    (raw / "site_7.json").write_text(json.dumps({"site_id": "7", "sources": [permit, council]}))
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
     run = ny.load_run("run", ny.local_reader(run_dir))
-    assert sorted((row["site_id"], row["searched_site_id"], row["attribute_name"]) for row in run.review) == [
-        ("8", "7", "found_location"), ("8", "7", "operator"),
-    ]
+    # Nothing is approved automatically (key-values plan): both wait on an SME.
+    assert [(row["site_id"], row["attribute_name"]) for row in run.review] == [("7", "operator"), ("7", "opening_year")]
+    assert run.resolved == []
     [row] = ny.site_rows(run)
     assert row["site_id"] == "7"
-    assert (row["new_values_to_review"], row["filed_under_another_site"]) == (2, 2)
+    assert (row["new_values_accepted"], row["new_values_to_review"], row["filed_under_another_site"]) == (0, 2, 0)
+    assert row["found_name"]
 
 
 def test_the_summary_compares_each_class_with_named_sites_from_the_same_sources(tmp_path):
@@ -189,6 +200,8 @@ def test_the_bar():
     wrong = ny.verdict(_stats(rate=0.3, validated=2, rejected=5, wrong=4), named_rate=0.2, is_named=False)
     assert wrong.startswith("below the bar: SMEs rejected most")
     assert ny.verdict(_stats(rate=0.3), named_rate=None, is_named=False) == "no named sites to compare with"
+    # Named sites were answered and none got a new value: the class is compared, not left out.
+    assert ny.verdict(_stats(rate=0.0), named_rate=0.0, is_named=False) == "clears the bar"
 
 
 def test_sme_decisions_come_from_the_reviewed_workbook(tmp_path):
@@ -216,6 +229,30 @@ def test_sme_decisions_come_from_the_reviewed_workbook(tmp_path):
     assert rows["4"]["sme_rejected"] == 0
     assert (rows["2"]["sme_validated"], rows["2"]["sme_rejected"]) == (0, 0)
     assert ny.read_review_workbook(tmp_path / "missing.xlsx") is None
+
+
+def test_sme_decisions_come_from_a_site_review_tab_since_the_approve_sources_plan(tmp_path):
+    """One row per site-source pair: Correct site is validated; Different site and New site are the
+    wrong facility; Junk is rejected for another reason; a blank decision is undecided."""
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Site_Review"
+    sheet.append(["review_id", "site_id", "decision", "other_site_id"])
+    sheet.append(["WAIREV-1-a", "1", "Correct site", None])
+    sheet.append(["WAIREV-1-b", "1", "different site", 4])
+    sheet.append(["WAIREV-1-c", "1", "New site", None])
+    sheet.append(["WAIREV-1-d", "1", "Junk", None])
+    sheet.append(["WAIREV-2-a", "2", None, None])
+    path = tmp_path / "run_review.xlsx"
+    workbook.save(path)
+
+    run = ny.load_run("batch1", ny.local_reader(_fake_run(tmp_path / "batch1")))
+    run.sme = ny.read_review_workbook(path)
+    rows = {row["site_id"]: row for row in ny.site_rows(run)}
+    assert (rows["1"]["sme_validated"], rows["1"]["sme_rejected"], rows["1"]["sme_wrong_facility"]) == (1, 3, 2)
+    assert (rows["2"]["sme_validated"], rows["2"]["sme_rejected"]) == (0, 0)
 
 
 def test_a_run_that_was_never_arbitrated_is_refused(tmp_path):
@@ -293,13 +330,43 @@ def test_the_script_measures_a_run_folder_and_writes_its_csvs(tmp_path, capsys):
 
     assert code == 0
     printed = capsys.readouterr().out
-    assert "Run batch1: 4 sites searched; no reviewed workbook found." in printed
+    assert "Run batch1: 4 sites searched; no reviewed workbook with a Review_Queue or Site_Review tab found." in printed
     assert "Consolidation run its seed read: x (the only run in the table)." in printed
     assert "Sites from OSM or Global Plastic Watch only" in printed
     assert (out / "batch1_sites.csv").exists()
     with (out / "summary.csv").open(newline="", encoding="utf-8") as handle:
         summary = list(csv.DictReader(handle))
     assert {row["name_class"] for row in summary} == {NO_NAME, GENERIC, NAMED}
+
+
+def _forecast_script(monkeypatch, tmp_path, *argv):
+    """The script's forecast, run against fake seed sites; returns what it printed."""
+    import waste_ai_search.seed_source as seed_source
+
+    spec = importlib.util.spec_from_file_location(
+        "measure_name_yield", Path(__file__).resolve().parents[1] / "scripts" / "measure_name_yield.py"
+    )
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    sites = [{"site_id": "5", "site_name": "domestic landfill", "country_iso3": "UKR"}]
+    monkeypatch.setattr(seed_source, "load_seed_sites", lambda: sites)
+    every_site = [{"name_class": GENERIC, "web_searches": 20}]
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        script.forecast(every_site, script.parse_args(list(argv)), tmp_path)
+    return out.getvalue()
+
+
+def test_a_price_of_zero_is_used_as_given(monkeypatch, tmp_path):
+    printed = _forecast_script(monkeypatch, tmp_path, "--cost-per-1000-queries", "0")
+    assert "At $0 per 1,000 Bing queries" in printed
+    with (tmp_path / "forecast.csv").open(newline="", encoding="utf-8") as handle:
+        assert {row["est_cost_usd"] for row in csv.DictReader(handle)} == {"0.0"}
+
+
+def test_the_printed_forecast_shows_cents_as_forecast_csv_holds_them(monkeypatch, tmp_path):
+    printed = _forecast_script(monkeypatch, tmp_path, "--cost-per-1000-queries", "14")
+    assert "generic label 1 (~$0.28)" in printed  # 20 queries at $14 per 1,000
 
 
 @pytest.mark.parametrize(
@@ -311,8 +378,10 @@ def test_the_script_measures_a_run_folder_and_writes_its_csvs(tmp_path, capsys):
         ("4000", "a bare number"),
         ("update the tag landuse after survey", "a survey note"),
         ("domestic landfill", "a listed generic phrase"),
-        ("Garbage dump", "only words like landfill, dump, waste, garbage, rubbish, tip"),
-        ("Municipal Landfill", ""),  # "municipal" counts as an identifying word: named
+        ("Garbage dump", "only words for a kind of site, such as landfill, dump, basurero, relleno sanitario, municipal"),
+        ("Municipal Landfill", "only words for a kind of site, such as landfill, dump, basurero, relleno sanitario, municipal"),
+        ("NO NAME", "says it has no name"),
+        ("Municipal Landfill North", ""),  # "north" says which one: named
     ],
 )
 def test_each_skippable_name_says_which_rule_it_tripped(name, reason):

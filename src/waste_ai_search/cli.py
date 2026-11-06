@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -68,6 +69,22 @@ def non_negative_int(text: str) -> int:
     return value
 
 
+def pass_label(text: str) -> str:
+    """A pass's label, which names its response files (site_<id>__<label>.json): letters, digits,
+    dashes and single underscores. Blank is the first pass."""
+    if text and not re.fullmatch(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*", text):
+        raise argparse.ArgumentTypeError(f"use letters, digits, - and _, not {text!r}")
+    return text
+
+
+def tonnes(text: str) -> float:
+    """A tonnage of zero or more: a negative one would take every site, a typo that costs a batch."""
+    number = float(text)
+    if number < 0:
+        raise argparse.ArgumentTypeError(f"give 0 or more tonnes, not {text}")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="waste-ai-search",
@@ -106,6 +123,19 @@ def build_parser() -> argparse.ArgumentParser:
         choices=range(1, LAST_BATCH + 1),
         help="Search one country batch of the full run (see COUNTRY_BATCHES), most-needed first.",
     )
+    search.add_argument(
+        "--min-tonnes",
+        type=tonnes,
+        default=0,
+        help="Search only sites our seed says take at least this many tonnes of waste a year (0 = any).",
+    )
+    search.add_argument(
+        "--pass-label",
+        type=pass_label,
+        default="",
+        help="Search again as a second pass, kept beside the first (site_<id>__<label>.json) and merged "
+        "with it by arbitrate, such as a second model's on the largest sites.",
+    )
     search.add_argument("--force", action="store_true", help="Re-query sites that already have a cached response.")
     search.add_argument("--site-delay-seconds", type=float, default=3.0)
     search.add_argument("--hard-site-timeout-seconds", type=int, default=240)
@@ -116,9 +146,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sites searched at once (1 = one at a time). Higher is faster until Foundry rate-limits.",
     )
     search.add_argument(
-        "--use-geocode-cache",
+        "--no-geocode-cache",
         action="store_true",
-        help="Fill municipality/admin context from the geocode cache so the prompt can use it.",
+        help=(
+            "Don't name each site's municipality and state in its prompt. By default they are looked up "
+            "from our coordinates (Nominatim) into the geocode cache, once per site."
+        ),
     )
     search.add_argument(
         "--geocode-cache",
@@ -135,7 +168,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-web-searches",
         type=int,
         default=DEFAULT_MAX_WEB_SEARCHES,
-        help="Web searches allowed per attempt at a site, enforced by the service; each sends several billed Bing queries (0 = no cap).",
+        help="Web search tool calls allowed per attempt at a site, a search or a page opened, enforced by the service; "
+        "each search sends several billed Bing queries (0 = no cap).",
     )
 
     search.add_argument(
@@ -154,8 +188,8 @@ def build_parser() -> argparse.ArgumentParser:
     arbitrate.add_argument(
         "--keep-broken-link-evidence",
         action="store_true",
-        help="Let a source whose link is dead (404/410/redirect loop) stay promotable instead of "
-        "routing it to leads.",
+        help="Let a source whose link is dead (404/410/redirect loop) stay usable instead of listing "
+        "its values as not used.",
     )
 
     links = subparsers.add_parser(
@@ -164,6 +198,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common(links)
     links.add_argument("--no-page-text", action="store_true", help=PAGE_TEXT_HELP)
+    links.add_argument(
+        "--retry-unverified",
+        action="store_true",
+        help="Fetch again, with 45 s to answer, URLs left Unverified by a timeout, a failed connection, a "
+        "name that didn't resolve, a 429 or a server error. Never a 403, which refuses automated readers.",
+    )
 
     locate = subparsers.add_parser(
         "locate",
@@ -191,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     full.add_argument("--search-tool-retries", type=int, default=SEARCH_TOOL_RETRY_ATTEMPTS)
     full.add_argument("--max-web-searches", type=int, default=DEFAULT_MAX_WEB_SEARCHES)
-    full.add_argument("--use-geocode-cache", action="store_true")
+    full.add_argument("--no-geocode-cache", action="store_true")
     full.add_argument("--geocode-cache", default=str(Path.cwd() / "data" / "geocode_cache.jsonl"))
     full.add_argument(
         "--no-followup",
@@ -204,16 +244,17 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument(
         "--keep-broken-link-evidence",
         action="store_true",
-        help="Let a source with a dead link stay promotable instead of routing it to leads.",
+        help="Let a source with a dead link stay usable instead of listing its values as not used.",
     )
 
-    collect = subparsers.add_parser(
-        "collect-new-facilities",
-        help="Add the values SMEs rejected as 'New facility - not in our database' to the run's "
-        "new_facility_candidates.csv (no agent calls).",
+    accept = subparsers.add_parser(
+        "accept-reviews",
+        help="Apply the SMEs' Site_Review decisions: write the auto-approved and SME-approved values to "
+        "accepted_values.csv, and the sources marked New site to new_facility_candidates.csv (no agent "
+        "calls). Run it any time; undecided pairs load nothing yet.",
     )
-    add_common(collect)
-    collect.add_argument(
+    add_common(accept)
+    accept.add_argument(
         "--workbook",
         default="",
         help="The reviewed workbook. Default: <run_id>/<run_id>_review.xlsx in WASTE_AI_SEARCH_REVIEW_DIR, "
@@ -222,65 +263,47 @@ def build_parser() -> argparse.ArgumentParser:
 
     refresh = subparsers.add_parser(
         "refresh-seed",
-        help="Merge a run's promoted values into the seed so a second pass sees them.",
+        help="Merge a run's found values, auto-approved or for SME review, into the seed so a second "
+        "pass sees them.",
     )
     add_common(refresh)
     refresh.add_argument("--output-csv", default="", help="Refreshed seed path.")
-    refresh.add_argument(
-        "--merge-identity",
-        action="store_true",
-        help="Also overwrite seed site_name/latitude/longitude with promoted identity findings.",
-    )
 
     return parser
 
 
 def read_arbitrated_rows(run_dir: Path) -> list[dict[str, str]]:
-    """Every arbitrated value worth carrying into the next pass: resolved.csv plus the review queue.
-
-    Nothing is accepted automatically, so a run's resolved.csv is header-only and every value it
-    found is in the queue, awaiting review. A refresh merges those too, so a gas collection system
-    found in pass 1 still unlocks the pass-2 follow-up. resolved.csv is still read for runs
-    arbitrated before (batch 1), which wrote the values they accepted there.
-
-    Rows are keyed by the site a value is filed under, which may not be the site searched. A yearly
-    attribute has a row per year, newest first, so the newest is the one kept.
-    """
+    """A run's found_values.csv, which a refresh merges into the seed: its values auto-approved or
+    for SME review, so a gas collection system found in pass 1 still unlocks the pass-2 follow-up
+    before anyone has reviewed it (seed_refresh.mergeable_rows). Empty where the run has none."""
     import csv
 
-    rows: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for name in ("resolved.csv", "review_queue.csv"):
-        path = run_dir / name
-        if path.exists():
-            with path.open(newline="", encoding="utf-8-sig") as handle:
-                for csv_row in csv.DictReader(handle):
-                    row = dict(csv_row)
-                    key = (row.get("site_id", ""), row.get("attribute_name", ""))
-                    if key not in seen:
-                        seen.add(key)
-                        rows.append(row)
-    return rows
+    from .found_values import FOUND_VALUES_FILE
+
+    path = run_dir / FOUND_VALUES_FILE
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
 
 
-def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: bool) -> int:
+def run_refresh_seed(config: PipelineConfig, output_csv: Path) -> int:
 
+    from .found_values import FOUND_VALUES_FILE
     from .input_loader import resolve_sites
-    from .match import run_selection
     from .prompt_builder import has_gas_collection, requested_attributes
     from .schema import normalize_scalar
     from .seed_refresh import refresh_sites, write_refreshed_seed
 
-    resolved_path = config.run_dir / "resolved.csv"
-    if not resolved_path.exists():
-        print(f"No resolved.csv in {config.run_dir}. Run arbitrate first.")
+    if not (config.run_dir / FOUND_VALUES_FILE).exists():
+        print(f"No {FOUND_VALUES_FILE} in {config.run_dir}. Run arbitrate first.")
         return 1
 
     sites, headers = resolve_sites(config, allow_database=False)
-    resolved_rows = read_arbitrated_rows(config.run_dir)
+    found = read_arbitrated_rows(config.run_dir)
 
     before = sum(len(requested_attributes(site)) for site in sites)
-    refreshed, stats = refresh_sites(sites, resolved_rows, config.run_id, merge_identity=merge_identity)
+    refreshed, stats = refresh_sites(sites, found, config.run_id)
     after = sum(len(requested_attributes(site)) for site in refreshed)
 
     write_refreshed_seed(output_csv, refreshed, headers)
@@ -294,13 +317,13 @@ def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: b
     # The refreshed seed holds the whole seeded corpus, not just the sites this run searched, so
     # a search on it without --site-ids would search everything again.
     had_gas = {normalize_scalar(site.get("site_id")) for site in sites if has_gas_collection(site)}
-    selection = run_selection(sites, searched_site_ids(config.run_dir))
+    searched = searched_site_ids(config.run_dir)
     unlocked = [
         site_id
         for site in refreshed
         if has_gas_collection(site)
         and (site_id := normalize_scalar(site.get("site_id"))) not in had_gas
-        and site_id in selection
+        and site_id in searched
     ]
     if unlocked:
         print("\nGas collection was discovered at these sites; to search them again by hand:")
@@ -336,6 +359,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         include_unsearchable_names=getattr(args, "include_unsearchable_names", False),
         iso3=list(getattr(args, "iso3", []) or []),
         batch=getattr(args, "batch", None) or 0,
+        min_tonnes=getattr(args, "min_tonnes", 0) or 0,
         site_ids=list(getattr(args, "site_ids", []) or []),
         force=getattr(args, "force", False),
         site_delay_seconds=getattr(args, "site_delay_seconds", 3.0),
@@ -346,7 +370,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         geocode_cache=(
             Path(args.geocode_cache).expanduser().resolve() if getattr(args, "geocode_cache", "") else None
         ),
-        use_geocode_cache=getattr(args, "use_geocode_cache", False),
+        use_geocode_cache=not getattr(args, "no_geocode_cache", False),
         check_links=not getattr(args, "no_link_check", False),
         keep_broken_links=getattr(args, "keep_broken_link_evidence", False),
         keep_page_text=not getattr(args, "no_page_text", False),
@@ -415,8 +439,8 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
 
     from .arbitrate import run_arbitration
     from .input_loader import resolve_sites
-    from .match import run_selection
     from .prompt_builder import has_gas_collection
+    from .run_context import FOLLOW_UP_PASS
     from .schema import GCCS_ATTRIBUTES, normalize_scalar
     from .search import run_search
     from .seed_refresh import refresh_sites, write_refreshed_seed
@@ -432,24 +456,22 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
     if not followup:
         return 0
 
-    resolved_rows = read_arbitrated_rows(config.run_dir)
+    found = read_arbitrated_rows(config.run_dir)
 
     sites, headers = resolve_sites(config, allow_database=False)
     before = {
         normalize_scalar(site.get("site_id")): has_gas_collection(site) for site in sites
     }
-    refreshed, _stats = refresh_sites(sites, resolved_rows, config.run_id)
+    refreshed, _stats = refresh_sites(sites, found, config.run_id)
 
-    # A value is keyed by the site it is filed under, which may not be the site searched. Only a
-    # site in the run's selection is followed up: a value is never filed outside it, and an older
-    # run's resolved.csv must not send the follow-up into a country the run left out.
-    selection = run_selection(sites, searched_site_ids(config.run_dir))
+    # Every value is filed under the site searched, so only a site this run searched is followed up.
+    searched = searched_site_ids(config.run_dir)
     unlocked = [
         normalize_scalar(site.get("site_id"))
         for site in refreshed
         if has_gas_collection(site)
         and not before.get(normalize_scalar(site.get("site_id")))
-        and normalize_scalar(site.get("site_id")) in selection
+        and normalize_scalar(site.get("site_id")) in searched
     ]
     if not unlocked:
         print("\n== no newly discovered gas collection; no follow-up needed ==")
@@ -470,7 +492,7 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
         pilot_size=0,
         force=False,
     )
-    run_search(followup_config, pass_label="gccs", only_attributes=sorted(GCCS_ATTRIBUTES))
+    run_search(followup_config, pass_label=FOLLOW_UP_PASS, only_attributes=sorted(GCCS_ATTRIBUTES))
     after_search()
 
     print("\n== pass 2: arbitrate ==")
@@ -484,10 +506,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return dispatch(args, config)
     except Exception as exc:  # noqa: BLE001
+        from .search import NothingToSearch
         from .storage import StorageError
 
-        if isinstance(exc, StorageError):
-            # A firewall block or a missing container is an instruction to the user, not a bug.
+        if isinstance(exc, (StorageError, NothingToSearch)):
+            # A firewall block, a missing container, or a selection with nothing to search is an
+            # instruction to the user, not a bug.
             print(f"error: {exc}", file=sys.stderr)
             return 1
         raise
@@ -500,7 +524,7 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
         sync = RunSync(config, local=args.local)
         sync.down()
         try:
-            run_search(config)
+            run_search(config, pass_label=args.pass_label)
         finally:
             # Pushed even when the search fails or is interrupted: every finished site is saved
             # and should outlive this laptop too.
@@ -511,7 +535,7 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
     if args.command == "check-links":
         from .search import check_run_links
 
-        check_run_links(config.run_dir, keep_text=config.keep_page_text)
+        check_run_links(config.run_dir, keep_text=config.keep_page_text, retry_unverified=args.retry_unverified)
         print(f"\nNow arbitrate to apply the verdicts:\n  uv run waste-ai-search arbitrate --run-id {config.run_id}")
         return 0
 
@@ -533,18 +557,26 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
             sync.up()
         return code
 
-    if args.command == "collect-new-facilities":
-        from .new_facilities import collect_new_facilities, reviewed_workbook
+    if args.command == "accept-reviews":
+        from .accept_reviews import ReviewError, accept_reviews, reviewed_workbook
+        from .arbitrate import remove_retired_outputs
         from .publish import review_dir
 
         sync = RunSync(config, local=args.local)
-        sync.down()  # the run's list as arbitration last left it
+        sync.down()  # found_values.csv and the new-facility list as arbitration last left them
+        # A pull brings back what an earlier arbitration wrote and the last one removed, as blob
+        # keeps it. Left beside accepted_values.csv, an old resolved.csv would look current.
+        remove_retired_outputs(config.run_dir)
         workbook = (
             Path(args.workbook).expanduser()
             if args.workbook
             else reviewed_workbook(config.run_dir, config.run_id, review_dir())
         )
-        collect_new_facilities(config.run_dir, workbook)
+        try:
+            accept_reviews(config.run_dir, workbook)
+        except (FileNotFoundError, ReviewError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         sync.up()
         return 0
 
@@ -554,7 +586,7 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
             if args.output_csv
             else refreshed_seed_path(config)
         )
-        return run_refresh_seed(config, output, args.merge_identity)
+        return run_refresh_seed(config, output)
 
     if args.command == "arbitrate":
         sync = RunSync(config, local=args.local)

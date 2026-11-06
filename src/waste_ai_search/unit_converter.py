@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -478,7 +479,9 @@ def parse_numbers(value: str, unit: str = "") -> tuple[list[float], float]:
     asks for digits in value and the source's unit in unit. Only whole words are read from the
     unit: an abbreviation there is a unit in its own right ("mm" is millimetres).
     """
-    text = value.lower().replace(",", "")
+    # A comma followed by one or two digits is a decimal comma ("1,4 millones"), since a thousands
+    # group always has three; any other comma groups thousands ("1,235,000") and is dropped.
+    text = re.sub(r"(?<=\d),(?=\d{1,2}(?!\d))", ".", _plain(value.lower())).replace(",", "")
     # A hyphen BETWEEN two digits is a range separator, not a sign: sources write "3-8 metres"
     # far more often than they write a negative quantity. Left as-is, "3-8" parses to [3, -8],
     # which then reads as a negative measurement and the whole value is discarded. A leading
@@ -492,13 +495,32 @@ def parse_numbers(value: str, unit: str = "") -> tuple[list[float], float]:
         multiplier = 1_000_000.0
     elif re.search(r"\b(thousand|k)\b", text):
         multiplier = 1_000.0
-    elif re.search(r"\bbillions?\b", unit.lower()):
-        multiplier = 1_000_000_000.0
-    elif re.search(r"\bmillions?\b", unit.lower()):
-        multiplier = 1_000_000.0
-    elif re.search(r"\bthousands?\b", unit.lower()):
-        multiplier = 1_000.0
+    else:
+        unit_text = _plain(unit.lower())
+        for words, scale in _MAGNITUDES:
+            if re.search(words, text) or re.search(words, unit_text):
+                multiplier = scale
+                break
     return [float(match) for match in matches], multiplier
+
+
+def _plain(text: str) -> str:
+    """Text with its accents taken off: "millón" reads as "millon"."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+# A magnitude written out as a word, in English or the languages _FOREIGN_UNITS reads, whole words
+# only and with accents off. In the 1 November retest Terra gave 7482's waste in place as "1.4" with
+# unit "millones de toneladas", and it loaded as 1.4 t. Spanish "mil millones" and the French,
+# Italian and German words for a thousand million are 10^9, so they come before the millions, and
+# the millions before the thousands. Spanish "billón" is 10^12, too rare in these sources to read.
+_MAGNITUDES = [
+    (r"\bbillions?\b|\bmil millones\b|\bmilliards?\b|\bmiliard[oi]\b|\bmilliarden?\b", 1_000_000_000.0),
+    (r"\bmillions?\b|\bmillon(?:es)?\b|\bmilh(?:ao|oes)\b|\bmilion[ei]\b|\bmillionen\b", 1_000_000.0),
+    # Not Spanish "miles" (thousands), which is the English unit too; "5 mil" is how a figure is written.
+    (r"\bthousands?\b|\bmil\b|\bmilliers?\b|\bmille\b|\bmila\b|\btausend\b", 1_000.0),
+]
 
 
 def detect_unit_text(value: str, unit: str) -> str:
@@ -512,8 +534,50 @@ def detect_unit_text(value: str, unit: str) -> str:
     return text if UNIT_WORD_PATTERN.search(text) else ""
 
 
+# Units as sources in other languages write them, put into English so the patterns here read them.
+# In the Mexico tests "toneladas", "metros cuadrados" and "Hectáreas" were dropped as unsupported
+# units (30 October 2026). Spanish, Portuguese, French, Italian and German, for batches 3 to 5; read
+# with accents taken off. Order matters: square and cubic metres before metres.
+_FOREIGN_UNITS = [
+    (r"\b(?:toneladas?|tonnellat[ae]|tonnen)(?:\s+metricas?)?\b", "tonnes"),
+    (r"\b(?:kilogramos?|quilogramas?|kilogrammes?|kilogramm[ei]?)\b", "kg"),
+    (r"\b(?:kilometros?|quilometros?|kilometres?|chilometri)\s+(?:cuadrados?|quadrados?|carres?|quadrati)\b"
+     r"|\bquadratkilometer\b", "square kilometers"),
+    (r"\b(?:metros?|metres?|metri)\s+(?:cuadrados?|quadrados?|carres?|quadrati)\b|\bquadratmeter\b", "square meters"),
+    (r"\b(?:metros?|metres?|metri)\s+(?:cubicos?|cubes?|cubi)\b|\bkubikmeter\b", "cubic meters"),
+    (r"\b(?:hectareas?|ettar[io]|hektar(?:en|e)?)\b", "hectares"),
+    (r"\b(?:metros?|metri)\b", "meters"),
+    # German "t/a" is tonnes a year.
+    (r"\bt\s*/\s*a\b", "t/year"),
+]
+# "por día", "par jour", "al giorno", "pro Tag", "/día", "diarias": a time denominator.
+_PER = r"\s*(?:\b(?:por|par|pro|al|all')\s*|/\s*)"
+_FOREIGN_PERIODS = [
+    (_PER + r"(?:dia|jour|giorno|tag)\b|\s*\b(?:diari[ao]s?|quotidien(?:ne)?s?|giornalier[ei]|taglich)\b", "/day"),
+    (_PER + r"(?:semana|semaine|settimana|woche)\b|\s*\b(?:semanal(?:es)?|hebdomadaires?|settimanal[ei]|wochentlich)\b", "/week"),
+    (_PER + r"(?:mes|mois|mese|monat)\b|\s*\b(?:mensual(?:es)?|mensuel(?:le)?s?|mensil[ei]|monatlich)\b", "/month"),
+    (_PER + r"(?:ano|an|anno|jahr)\b|\s*\b(?:anual(?:es)?|annuel(?:le)?s?|annu[ei]|jahrlich)\b", "/year"),
+    (_PER + r"(?:hora|heure|ora|stunde)\b", "/hour"),
+]
+
+
+def _in_english(text: str) -> str:
+    """A unit written in another language, in English. "ton" counts as tonnes only beside words in
+    one of those languages ("ton/día"), where it means the metric tonne; an English "tons" stays
+    ambiguous."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in decomposed if not unicodedata.combining(c))
+    foreign = 0
+    for pattern, english in (*_FOREIGN_UNITS, *_FOREIGN_PERIODS):
+        text, count = re.subn(pattern, english, text)
+        foreign += count
+    if foreign:
+        text = re.sub(r"\btons?\b", "tonnes", text)
+    return text
+
+
 def normalize_unit_text(value: str) -> str:
-    text = value.lower().strip()
+    text = _in_english(value.lower().strip())
     # Gas-flow abbreviations bundle the volume scale and the time denominator into one token, so
     # split them out or the per-day factor is silently lost. MMCFD is the spec's own example.
     text = re.sub(r"\bmmscfd\b|\bmmcfd\b", "mmcf/day", text)

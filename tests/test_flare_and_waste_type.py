@@ -35,10 +35,12 @@ def _mapped(*claims):
     return [row["mapped_value"] for row in rows]
 
 
-def test_bulk_waste_type_is_asked_everywhere_and_flares_only_with_gas_collection():
+def test_bulk_waste_type_is_no_longer_asked_and_flares_only_with_gas_collection():
+    """bulk_waste_type was retired on 30 October 2026: whether incoming waste is municipal is marked
+    on the amount itself (not_municipal)."""
     no_gas = requested_attributes({"site_id": "1", "has_landfill_gas_collection": "FALSE"})
     gas = requested_attributes({"site_id": "1", "has_landfill_gas_collection": "TRUE"})
-    assert "bulk_waste_type" in no_gas and "bulk_waste_type" in gas
+    assert "bulk_waste_type" not in no_gas and "bulk_waste_type" not in gas
     assert "has_flare" not in no_gas and "flare_efficiency" not in no_gas
     assert "has_flare" in gas and "flare_efficiency" in gas
 
@@ -50,8 +52,35 @@ def test_three_methane_volumes_are_no_longer_searched_or_prompted():
     assert "gccs_ch4_flared_metric_tonnes" in attributes  # the rest of GCCS is still asked
     prompt = build_site_prompt(site, attributes)
     assert not [name for name in UNSEARCHED if name in prompt]
-    assert "inert waste - waste that does not decompose" in prompt
-    assert "do not return bulk_waste_type" in prompt  # no source, no value
+    assert "bulk_waste_type" not in prompt
+
+
+def test_incoming_waste_counts_municipal_waste_only():
+    """The standardized spec's rule: municipal waste only, as far as the source allows; where it
+    doesn't say, the amount is taken as municipal (Hugh, 30 October)."""
+    prompt = " ".join(build_site_prompt({"site_id": "1", "site_name": "Deponie"}).split())
+    assert "Municipal solid waste only. Where the source splits the amount by kind of waste, return the municipal part." in prompt
+    assert "Where it says the amount is mainly other waste" in prompt
+    assert "return it with not_municipal = true. Where it doesn't say, return it as written." in prompt
+    assert '"not_municipal": "true only for an incoming waste amount the source says is mainly other waste; otherwise false"' in prompt
+
+
+def test_gas_collection_is_a_system_that_exists_and_a_project_status_is_the_projects():
+    """In test10-mex-sample2-run2 an order to "implement ... biogas management" at Naucalpan was read
+    as gas collection, and the gas follow-up then read the landfill's own status, operating or
+    sealed, as its gas project's (Hugh, 30 October)."""
+    asked = " ".join(build_site_prompt({"site_id": "1", "site_name": "Deponie"}, ["has_landfill_gas_collection"]).split())
+    assert "Whether the landfill has a system collecting its gas through wells and pipes, to a flare or an engine." in asked
+    assert (
+        "Yes only where the source says one exists or existed; not one that is ordered, required, planned or "
+        "proposed, and not vents that only let gas escape."
+    ) in asked
+    site = {"site_id": "1", "site_name": "Deponie", "has_landfill_gas_collection": "TRUE"}
+    followed_up = " ".join(build_site_prompt(site, ["gccs_current_project_status"]).split())
+    assert (
+        "The status of each landfill gas energy project, never of the landfill itself: a landfill that is "
+        "operating, closed or sealed says nothing of its gas project."
+    ) in followed_up
 
 
 def test_new_values_are_typed_and_checked():
@@ -68,3 +97,14 @@ def test_new_values_are_typed_and_checked():
 def test_an_older_response_with_a_dropped_attribute_still_reads():
     """Re-arbitrating a run cached before F31 keeps its methane volumes."""
     assert _mapped(_claim("gccs_ch4_collected_metric_tonnes", "1200", "metric tonnes CH4")) == ["1200"]
+
+
+def test_a_landfill_for_other_waste_is_a_non_municipal_waste_landfill():
+    """The standardized spec's type for a site taking mainly waste other than municipal solid
+    waste (waste_data_ingestion_pipeline #238). With bulk_waste_type retired, it is the one place
+    a page saying "inert waste landfill" is recorded."""
+    prompt = build_site_prompt({"site_id": "1", "site_name": "Deponie"}, ["facility_type"])
+    assert "Non-Municipal Waste Landfill - a disposal site taking mainly waste other than municipal solid waste" in " ".join(prompt.split())
+    assert "What it takes decides this, whatever its engineering." in prompt
+    for claimed in ("Non-Municipal Waste Landfill", "inert landfill", "C&D landfill", "hazardous waste landfill"):
+        assert _mapped(_claim("facility_type", claimed)) == ["Non-Municipal Waste Landfill"], claimed

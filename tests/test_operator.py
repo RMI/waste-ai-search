@@ -1,6 +1,6 @@
 """WP-531 item 2: search for the facility operator, in the review layer only.
 
-The upstream standardized spec has no operator column yet, so operator reaches the review queue but
+The upstream standardized spec has no operator column yet, so operator reaches found_values.csv but
 has no standardized column to go to. Adding one is a separate follow-up once upstream adds the
 column; these tests pin today's boundary so that change is deliberate.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 
 from waste_ai_search.arbitrate import extract_evidence
-from waste_ai_search.arbitration import resolve
+from waste_ai_search.found_values import SME_REVIEW, sort_values
 from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
 from waste_ai_search.schema import (
     ATTRIBUTE_TO_STANDARD_COLUMN,
@@ -41,7 +41,8 @@ def site(**overrides):
     return base
 
 
-def resolve_operator(value, sources):
+def sort_operator(value, sources):
+    """The site, and the operator's row in found_values.csv."""
     s = site()
     payload = {"site_id": "1", "attributes": [{
         "attribute_name": "operator",
@@ -52,8 +53,12 @@ def resolve_operator(value, sources):
         "evidence_summary": "Contract awarded.",
         "sources": sources,
     }]}
-    by_attr, _evidence, _sources, _warn = extract_evidence(s, payload, "run", "v", date(2026, 1, 1))
-    return s, resolve(s, "operator", by_attr.get("operator", []))
+    _by_attr, evidence, sources, _warn = extract_evidence(s, payload, "run", "v", date(2026, 1, 1))
+    cited = {}
+    for entry in sources:
+        cited.setdefault((entry["site_id"], entry["source_index"]), entry)
+    [row] = sort_values(evidence, list(cited.values()), {"1": s}, 2026).rows
+    return s, row
 
 
 def test_operator_is_requestable_and_gap_filled():
@@ -75,24 +80,38 @@ def test_coordinates_only_countries_are_not_asked_for_an_operator():
 
 
 def test_the_prompt_asks_for_the_operator_not_the_owner_or_regulator():
-    prompt = build_site_prompt(site(), attributes=requested_attributes(site()))
+    prompt = " ".join(build_site_prompt(site(), attributes=requested_attributes(site())).split())
     assert '"attribute_name": "operator"' in prompt
-    assert "not the owner, landlord or regulator" in prompt
+    assert (
+        "Not a body the source names only for owning, regulating, inspecting or visiting it, hauling waste to it, "
+        "building, cleaning up or closing it, or giving a figure."
+    ) in prompt
 
 
-def test_a_found_operator_is_resolved_as_text_with_its_source_and_tier():
-    _s, row = resolve_operator("Lagos Waste Management Authority", [NEWS])
-    assert row["resolved_value"] == "Lagos Waste Management Authority"
-    assert row["resolution"] == "Filled empty baseline"
-    assert row["winning_source_tier"] == "Tier 3"
-    assert row["winning_source_url"] == NEWS["url"]
+def test_the_operator_is_the_body_the_source_says_runs_it_by_its_full_name():
+    """In the 31 October Mexico tests, 17 operators named a body the page mentions in another role -
+    leading a supervision tour, hauling waste, lending machinery for a clean-up, running the closure
+    project - or gave a description: 'empresa que opera el relleno sanitario', 'Autoridad Municipal'.
+    8 of them were labelled Direct. The name is still the source's own, as before."""
+    prompt = " ".join(build_site_prompt(site(), attributes=["operator"]).split())
+    assert (
+        "The organisation the source says runs the facility day to day - a company, municipality, utility or "
+        "public agency - by its full name as the source writes it, never a description ('la empresa', "
+        "'autoridad municipal')."
+    ) in prompt
+    assert "Text only; if a concession changed hands, give the operator for the source's value_date." in prompt
 
 
-def test_a_tier_3_operator_reaches_the_review_queue():
-    from waste_ai_search.arbitration import needs_review
+def test_a_found_operator_is_listed_as_text_with_its_source_and_tier():
+    _s, row = sort_operator("Lagos Waste Management Authority", [NEWS])
+    assert row["value"] == "Lagos Waste Management Authority"
+    assert row["source_tier"] == "Tier 3"
+    assert row["source_url"] == NEWS["url"]
 
-    _s, row = resolve_operator("Lagos Waste Management Authority", [NEWS])
-    assert needs_review(row)
+
+def test_a_tier_3_operator_goes_to_an_sme():
+    _s, row = sort_operator("Lagos Waste Management Authority", [NEWS])
+    assert row["status"] == SME_REVIEW
 
 
 def test_operator_has_no_standardized_column():
@@ -105,19 +124,17 @@ def test_a_found_operator_is_carried_into_the_next_pass_seed():
     """A gap-fill attribute: once found, a later pass does not ask again."""
     from waste_ai_search.seed_refresh import refresh_sites
 
-    s, row = resolve_operator("Lagos Waste Management Authority", [NEWS])
+    s, row = sort_operator("Lagos Waste Management Authority", [NEWS])
     [refreshed], _stats = refresh_sites([s], [row], "run")
 
     assert refreshed["operator"] == "Lagos Waste Management Authority"
     assert "operator" not in requested_attributes(refreshed)
 
 
-def test_a_tier_1_operator_reaches_the_review_queue_too():
-    """Reversed on purpose: a Tier 1-2 fill once auto-validated. Like any attribute, every found
-    operator now reaches the review queue, whatever its tier."""
-    from waste_ai_search.arbitration import needs_review
-
+def test_a_tier_1_operator_goes_to_an_sme_like_any_attribute():
+    """Reversed three times on purpose: a Tier 1-2 fill once auto-validated, then every found value
+    was reviewed, then batch 1's rule came back (step 2 of the approve-sources plan), and now an SME
+    checks every source's match (key-values plan)."""
     regulator = dict(NEWS, source_type="Regulator", url="https://agency.example.gov/permit")
-    _s, row = resolve_operator("Lagos Waste Management Authority", [regulator])
-    assert row["validation_status"] == "Needs review"
-    assert needs_review(row)
+    _s, row = sort_operator("Lagos Waste Management Authority", [regulator])
+    assert row["status"] == SME_REVIEW

@@ -72,9 +72,10 @@ def test_bulk_waste_type_maps_the_prompts_own_examples(claimed, expected):
 
 def test_refresh_seed_prints_a_search_narrowed_to_the_unlocked_sites(tmp_path, capsys):
     from waste_ai_search.cli import run_refresh_seed
+    from waste_ai_search.found_values import AUTO_APPROVED, FOUND_VALUES_FILE
     from waste_ai_search.input_loader import run_seed_path, write_csv_records
     from waste_ai_search.run_context import PipelineConfig
-    from waste_ai_search.schema import RESOLVED_HEADERS
+    from waste_ai_search.schema import FOUND_VALUES_HEADERS
 
     config = PipelineConfig(input_csv=None, run_dir=tmp_path / "run", run_id="r")
     write_csv_records(
@@ -84,17 +85,16 @@ def test_refresh_seed_prints_a_search_narrowed_to_the_unlocked_sites(tmp_path, c
         ["site_id", "site_name", "country_iso3", "has_landfill_gas_collection"],
     )
     write_csv_records(
-        config.run_dir / "resolved.csv",
-        [{"site_id": "2", "attribute_name": "has_landfill_gas_collection", "resolved_value": "TRUE",
-          "resolution": "Filled empty baseline", "winning_source_tier": "Tier 1"}],
-        RESOLVED_HEADERS,
+        config.run_dir / FOUND_VALUES_FILE,
+        [{"site_id": "2", "year": "2024", "attribute_name": "has_landfill_gas_collection", "value": "TRUE",
+          "source_tier": "Tier 1", "status": AUTO_APPROVED}],
+        FOUND_VALUES_HEADERS,
     )
-    # Only a site in the run's selection is followed up, and the selection is the countries the run
-    # searched (build step 5), so the run needs a cached response.
+    # Every value is filed under the site searched, and only a site the run searched is followed up.
     (config.run_dir / "raw_foundry_responses").mkdir()
-    (config.run_dir / "raw_foundry_responses" / "site_1.json").write_text('{"sources": []}')
+    (config.run_dir / "raw_foundry_responses" / "site_2.json").write_text('{"sources": []}')
 
-    assert run_refresh_seed(config, config.run_dir / "refreshed_seed.csv", merge_identity=False) == 0
+    assert run_refresh_seed(config, config.run_dir / "refreshed_seed.csv") == 0
     out = capsys.readouterr().out
     assert "--site-ids 2" in out
     assert "Do not search the refreshed seed without --site-ids" in out
@@ -138,7 +138,7 @@ def test_an_interrupted_search_still_pushes_to_blob(tmp_path, monkeypatch):
         def up(self):
             events.append("up")
 
-    def interrupted(config):  # noqa: ARG001
+    def interrupted(config, pass_label=""):  # noqa: ARG001
         raise KeyboardInterrupt
 
     monkeypatch.setattr(cli, "RunSync", _Sync)
@@ -179,6 +179,58 @@ def test_zero_retries_still_makes_one_attempt():
     client.config = FoundryClientConfig(max_retries=0)
     client._invoke_agent = lambda prompt, limit: '{"attributes": []}'
     assert client.search_site({}, "prompt") == {"attributes": []}
+
+
+def test_an_answer_the_content_filter_stopped_is_said_and_retried(monkeypatch):
+    """Azure's filter stopped the answer at 2479 Cerro Bastón after the agent read news of the town's
+    dump. It depends on the pages an attempt reads, so a stopped search is tried again, and named if
+    every attempt is stopped."""
+    from types import SimpleNamespace
+
+    from waste_ai_search import foundry_client
+    from waste_ai_search.foundry_client import AzureFoundryAgentClient, ContentFiltered, FoundryClientConfig
+
+    monkeypatch.setattr(foundry_client.time, "sleep", lambda seconds: None)
+
+    stopped = SimpleNamespace(
+        status="incomplete", incomplete_details=SimpleNamespace(reason="content_filter"), model="gpt-5.6-terra",
+        output=[], output_text="I'm sorry, but I cannot assist with that request.", usage=None,
+    )
+    calls = []
+
+    class Responses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return stopped
+
+    openai = SimpleNamespace(conversations=SimpleNamespace(create=lambda: SimpleNamespace(id="c")), responses=Responses())
+    openai.with_options = lambda **kwargs: openai
+    client = AzureFoundryAgentClient.__new__(AzureFoundryAgentClient)
+    client.config = FoundryClientConfig(agent_name="a", max_retries=4)
+    client.project_client = SimpleNamespace(
+        agents=SimpleNamespace(), get_openai_client=lambda agent_name: openai,
+    )
+    with pytest.raises(ContentFiltered, match="content filter"):
+        client.search_site({}, "prompt")
+    assert len(calls) == 4
+
+
+def test_a_rate_limited_call_waits_out_the_minute_before_its_retry():
+    """Batch 3's first run had most sites refused (429) and retried two seconds later, into the same
+    minute's limit."""
+    from types import SimpleNamespace
+
+    from waste_ai_search.foundry_client import retry_delay
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+        def __init__(self, headers=None):
+            self.response = SimpleNamespace(headers=headers or {})
+
+    assert [retry_delay(RateLimitError(), attempt) for attempt in (1, 2, 4, 9)] == [15, 30, 60, 60]
+    assert retry_delay(RateLimitError({"retry-after": "40"}), 1) == 40
+    assert [retry_delay(ValueError("not JSON"), attempt) for attempt in (1, 9)] == [2, 10]
 
 
 @pytest.mark.parametrize("option", ["--limit", "--pilot-size"])

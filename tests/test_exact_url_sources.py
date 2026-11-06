@@ -2,7 +2,7 @@
 
 Cleaning a URL once dropped its query string, which merged 103 different Natural Resources Wales
 documents into one source. Now sources.csv has one row per exact URL, each with a source_id derived
-from that URL, and every evidence.csv row carries the id of its source, so the two files join. In
+from that URL, and every found_values.csv row carries the id of its source, so the two files join. In
 batch 1, 6,641 of 10,485 evidence rows had a source_id missing from sources.csv. Within one
 attribute, a URL cited twice is one source when corroboration is counted.
 """
@@ -108,7 +108,7 @@ def test_a_citation_without_a_url_keeps_a_source_row_of_its_own():
     assert {row["source_id"] for row in dedupe_sources(sources)} == set(ids)
 
 
-def test_evidence_and_sources_join_in_a_real_run(tmp_path):
+def test_found_values_and_sources_join_in_a_real_run(tmp_path):
     from waste_ai_search.input_loader import write_csv_records
     from waste_ai_search.seed_source import seed_headers
 
@@ -128,10 +128,11 @@ def test_evidence_and_sources_join_in_a_real_run(tmp_path):
 
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
-    evidence = list(csv.DictReader((run_dir / "evidence.csv").open()))
+    found = list(csv.DictReader((run_dir / "found_values.csv").open()))
     sources = list(csv.DictReader((run_dir / "sources.csv").open()))
-    assert len(evidence) == 6
-    assert {row["source_id"] for row in evidence} == {row["source_id"] for row in sources}
+    # Site 1's two spellings of the news story are one source, so its status is one row.
+    assert len(found) == 5
+    assert {row["source_id"] for row in found} == {row["source_id"] for row in sources}
     by_url = {row["url_normalized"]: row for row in sources}
     assert sorted(by_url) == sorted([normalize_url(NRW + "1"), normalize_url(NRW + "2"), NEWS["url"]])
     assert by_url[NEWS["url"]]["times_cited"] == "3"

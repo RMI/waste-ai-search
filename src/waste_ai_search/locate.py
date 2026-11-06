@@ -1,17 +1,26 @@
-"""Turn the location each source states into a point (build step 3 of the source-matching plan).
+"""Turn where each source puts the facility into a point (build step 3 of the source-matching plan).
 
-The agent copies where each source puts the facility, as the source writes it: coordinates, a grid
-reference or the site's street address. This module turns that text into a latitude and longitude,
-and says how far the point can be trusted, as its `basis`:
+The agent copies where each source puts the facility, as the source writes it, in two fields:
+stated_coordinates, its coordinates or grid reference, and stated_address, the site's address
+(step 1 of the approve-sources plan; older responses are split into the two by payload.py). This
+module turns them into a latitude and longitude, and says how far the point can be trusted, as its
+`basis`, and where it came from, as `coordinates_from`:
 
-| Basis | From | Used for |
-|---|---|---|
-| coordinates | Coordinates with 3 or more decimals (or seconds) | Matching, and a location value |
-| grid reference | A UK or Irish grid reference, 100 m or finer | Matching, and a location value |
-| rooftop | An address geocoded to the building or address point | Matching, and a location value |
-| street | An address geocoded only to its street | Matching only |
-| hint | Coordinates with fewer decimals, or a coarser grid reference | Nothing yet: approximate |
-| none | Anything else, or a location a guard throws out | - |
+| Basis | From | coordinates_from | Used for |
+|---|---|---|---|
+| coordinates | Coordinates with 3 or more decimals (or seconds) | stated | The 5 km check |
+| grid reference | A UK or Irish grid reference, 100 m or finer | grid reference | The 5 km check |
+| rooftop | An address geocoded to the building or address point | address (building) | The 5 km check |
+| street | An address geocoded only to its street | address (street) | The 5 km check, though a point on a street can be a kilometre or more from the address |
+| hint | Coordinates with fewer decimals, or a coarser grid reference | - | Nothing yet: approximate |
+| none | Anything else, or a location a guard throws out | - | - |
+
+The 5 km check (found_values.py) sends a Tier 1-2 source to SME review where it places the facility
+more than 5 km from our site.
+
+Stated coordinates win over the address, unless the address puts the facility more than 2 km from
+them, when the source has no location. A source's name and location are only ever used to check
+that it is about the site searched: they never replace ours.
 
 Coordinates and grid references are parsed here, with no network, so arbitration can do it too.
 Addresses go to a geocoder, which only the locate step calls: it runs in the search phase, beside
@@ -20,10 +29,14 @@ geocoded points from that file and stays offline. No geocoder is configured by d
 an address stays unlocated.
 
 A facility name is never geocoded: geocoders find landfills by name from OpenStreetMap, which is
-where most of our sites came from, so it would hand us our own point back. Only text the agent
-labelled a street address is sent, with any leading facility name taken off, and never text that
-has no civic number and a part ending in a word for a waste site ("Mapleward Road Landfill, Thunder
-Bay, ON"), which is a name too.
+where most of our sites came from, so it would hand us our own point back. Only the stated address
+is sent, with any leading facility name taken off, and never text that has no civic number and a
+part ending in a word for a waste site ("Mapleward Road Landfill, Thunder Bay, ON"), which is a
+name too.
+
+An address is sent with the town and state the source gives (with_place), so a geocoder doesn't
+take a namesake in another town; one with neither isn't sent, and a match in another state than
+the source's isn't used.
 """
 from __future__ import annotations
 
@@ -33,20 +46,22 @@ import os
 import re
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from .payload import is_converted
+from .payload import PART_SEPARATOR, is_converted
 from .schema import normalize_scalar
 
 
 SOURCE_LOCATIONS_FILE = "source_locations.json"
 
-# What a stated location became. The first three are a location value; street is good enough to
-# match a source to a site but not to load; a hint is too coarse for either.
+# What a stated location became. The first four place the facility well enough to measure how far
+# it is from our site (MATCHING_BASES); the first three are exact to the building; a hint is too
+# coarse for either.
 COORDINATES = "coordinates"
 GRID_REFERENCE = "grid reference"
 ROOFTOP = "rooftop"
@@ -57,12 +72,14 @@ VALUE_BASES = (COORDINATES, GRID_REFERENCE, ROOFTOP)
 MATCHING_BASES = (*VALUE_BASES, STREET)
 BASES = (*MATCHING_BASES, HINT, NONE)
 
-# The kinds of location the agent is asked to label each stated location with.
-STREET_ADDRESS = "street address"
-LOCATION_KINDS = [COORDINATES, GRID_REFERENCE, STREET_ADDRESS, "place description", "none"]
-# A source that gives both coordinates and an address writes them as two parts, "a | b", with the
-# kinds written the same way.
-PART_SEPARATOR = "|"
+# Where a source's point came from, by its basis, as the outputs say it. A point on its street can
+# be a kilometre or more from the address. A hint and none have no point to use.
+COORDINATES_FROM = {
+    COORDINATES: "stated",
+    GRID_REFERENCE: "grid reference",
+    ROOFTOP: "address (building)",
+    STREET: "address (street)",
+}
 
 # 0.001 degrees is about 110 m. Two decimals (about 1 km) is what the prompt itself gives, so it
 # can only ever be a hint.
@@ -110,6 +127,18 @@ STREET_OR_NUMBER = re.compile(
     r"rang|concession|strasse|straße|weg|calle|avenida|rua|rodovia|estrada|carretera|via)\b",
     re.IGNORECASE,
 )
+# A kilometre marker or a distance places a site along a road or away from a town, which a geocoder
+# can't: it finds the road or the town by name, and any stretch of the road will do. "Carretera
+# Colotlán km 15.5" came back 129 km from the site. Such an address is never sent.
+ALONG_A_ROAD = re.compile(
+    r"(?<![A-Za-z])(?:km|kms|kil[oó]met(?:ro|re|er)s?)\.?\s*\d"
+    r"|\d\s*(?:km|kms|kil[oó]met(?:ro|re|er)s?)(?![A-Za-z])",
+    re.IGNORECASE,
+)
+ALONG_A_ROAD_REASON = "a kilometre marker or a distance can't be placed: a geocoder finds only the road or the town"
+# An address is sent with the town and state the source puts the facility in (with_place). One that
+# is still a single part has neither, so a geocoder would take whatever place of that name it finds.
+NO_PLACE_REASON = "an address with no town or state could be anywhere in the country, so it isn't sent"
 
 
 @dataclass
@@ -124,12 +153,27 @@ class Located:
     # For a hint, how far the true point may be from this one: the half-diagonal of the square its
     # last digit names. An address can agree with a hint only within this, and DOUBTFUL_ADDRESS_KM.
     uncertainty_km: float = 0.0
+    # For a doubtful source, which has no point: its coordinates and its address, each with how far
+    # off it may be (rough_points).
+    doubtful_points: tuple[tuple[float, float, float], ...] = ()
+    # For a geocoded address, the state the geocoder put it in, where it says (Nominatim does).
+    state: str = ""
 
     @property
     def point(self) -> tuple[float, float] | None:
         if self.latitude is None or self.longitude is None:
             return None
         return self.latitude, self.longitude
+
+    def rough_points(self) -> tuple[tuple[float, float, float], ...]:
+        """Where a source puts the facility when it gives no point good enough to use, each as
+        (latitude, longitude, how far off it may be in km): a hint's own point, or a doubtful
+        source's coordinates and address. Neither is shown as the source's point, but each still
+        says roughly where the source puts the facility, so the 5 km check measures them
+        (found_values.py): coordinates 100 km from our site are a reason to look, however coarse."""
+        if self.basis == HINT and self.point is not None:
+            return ((self.latitude, self.longitude, self.uncertainty_km),)
+        return self.doubtful_points
 
     def value(self) -> str:
         """The point as "lat, lon", which Google Maps finds when pasted into its search box."""
@@ -150,9 +194,39 @@ def format_coordinate(number: float | None) -> str:
     return "0" if text in {"-0", ""} else text
 
 
+def _stated(source: dict[str, Any], field: str) -> str:
+    text = normalize_scalar(source.get(field))
+    return "" if text.lower() in NO_LOCATION_TEXT else text
+
+
+def stated_address(source: dict[str, Any]) -> str:
+    """The address a source gives for the facility, as written; "" where it gives none."""
+    return _stated(source, "stated_address")
+
+
+def stated_coordinates(source: dict[str, Any]) -> str:
+    """The coordinates or grid reference a source gives for the facility, as written; "" where it
+    gives none."""
+    return _stated(source, "stated_coordinates")
+
+
 def states_location(source: dict[str, Any]) -> bool:
-    """Whether a source states a location at all."""
-    return normalize_scalar(source.get("stated_location")).lower() not in NO_LOCATION_TEXT
+    """Whether a source states a location at all: an address, coordinates or both."""
+    return bool(stated_address(source) or stated_coordinates(source))
+
+
+def stated_location_text(source: dict[str, Any]) -> str:
+    """Everything a source states about where the facility is, as one text: its coordinates, then
+    its address, joined by " | " where it gives both. For notes, which show them together; the
+    locate step reads the two apart. `source` may be a source or an evidence
+    row, which carries both fields."""
+    return f" {PART_SEPARATOR} ".join(text for text in (stated_coordinates(source), stated_address(source)) if text)
+
+
+def coordinates_from(basis: str) -> str:
+    """Where a point with this basis came from (COORDINATES_FROM): "stated", "grid reference",
+    "address (building)" or "address (street)"; "" for a hint or none, which have no point to use."""
+    return COORDINATES_FROM.get(normalize_scalar(basis), "")
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -187,8 +261,31 @@ def prompt_point(site: dict[str, Any]) -> tuple[float, float] | None:
 # --- coordinates -----------------------------------------------------------------------------
 _HEMISPHERE_SIGN = {"N": 1, "S": -1, "E": 1, "W": -1}
 _MINUS = "-−–"
-# A hemisphere written as a word, "49.1234 North, 97.1234 West", is read as its letter.
-_HEMISPHERE_WORDS = re.compile(r"(?<![A-Za-z])(north|south|east|west)(?![A-Za-z])", re.IGNORECASE)
+# West is O in Spanish, Portuguese, French and Italian (oeste, ouest, ovest), so a Mexican page's
+# "98° 50’ 42.8” O" is west. In German and Dutch O is east (Ost, oost): it is east in the countries
+# that write them, which all lie east of Greenwich.
+O_IS_EAST_ISO3 = {"AUT", "BEL", "CHE", "DEU", "LIE", "LUX", "NLD"}
+# A hemisphere written as a word, "49.1234 North, 97.1234 West" or "98.8452 oeste", is read as its
+# letter. Words that are also common words in these languages ("sur", "est", "este") are not.
+_HEMISPHERE_LETTERS = {"north": "N", "south": "S", "east": "E", "west": "W", "oeste": "W", "ouest": "W", "ovest": "W"}
+_HEMISPHERE_WORDS = re.compile(
+    rf"(?<![A-Za-z])({'|'.join(_HEMISPHERE_LETTERS)})(?![A-Za-z])", re.IGNORECASE
+)
+# A hemisphere written with its axis rather than beside the number: "98° 50’ 42.8” longitud oeste",
+# "Longitude West: 97.1234", "south latitude". Read once words are letters, and only for a number
+# with no sign or hemisphere of its own. After a latitude's name, south may be a word ("latitud
+# sur", "latitude sul", "latitude sud"): there it can't be anything else.
+_SOUTH_AFTER_LATITUDE = {"sur": "S", "sul": "S", "sud": "S"}
+_AXIS_HEMISPHERE = {
+    axis: re.compile(
+        rf"(?<![A-Za-z]){label}\.?\s*:?\s*(?P<after>{after})(?![A-Za-z])"
+        rf"|(?<![A-Za-z])(?P<before>[{letters}])\s+{label}(?![A-Za-z])"
+    )
+    for axis, label, letters, after in (
+        ("lat", r"(?i:lat(?:itud(?:e|ine)?)?)", "NS", rf"[NS]|(?i:{'|'.join(_SOUTH_AFTER_LATITUDE)})"),
+        ("lon", r"(?i:long?(?:itud(?:e|ine)?)?)", "EWO", "[EWO]"),
+    )
+}
 # A number followed by a unit is a distance, an area or the like, never a coordinate: "12.345 ha
 # at 48.8434, -87.4296".
 _UNIT = re.compile(
@@ -204,18 +301,19 @@ _KM_PER_DEGREE = 111.32
 
 # Degrees, minutes and seconds: 63° 43' 58.15" N, or 51°30.25'N. The degree mark is required, so a
 # bare number in an address is never read as a coordinate. A hemisphere letter goes before or
-# after, never both: in "N 48.8 W 87.4" the W belongs to the second number.
+# after, never both: in "N 48.8 W 87.4" the W belongs to the second number. O is west or east by
+# country (O_IS_EAST_ISO3).
 _DMS = re.compile(
-    r"(?<![A-Za-z])(?P<pre>[NSEW](?![A-Za-z]))?\s*(?P<sign>[-+−–])?\s*"
+    r"(?<![A-Za-z])(?P<pre>[NSEWO](?![A-Za-z]))?\s*(?P<sign>[-+−–])?\s*"
     r"(?P<deg>\d{1,3}(?:\.\d+)?)\s*[°º˚]\s*"
     r"(?:(?P<min>\d{1,2}(?:[.,]\d+)?)\s*['′’`]\s*"
     r"(?:(?P<sec>\d{1,2}(?:[.,]\d+)?)\s*(?:\"|″|”|''|’’)?\s*)?)?"
-    r"(?(pre)|(?P<post>[NSEW](?![A-Za-z]))?)"
+    r"(?(pre)|(?P<post>[NSEWO](?![A-Za-z]))?)"
 )
 # Decimal degrees: 48.8434, -87.4296, or 48.8434°N 87.4296°W. A decimal point is required.
 _DECIMAL = re.compile(
-    r"(?<![A-Za-z\d.])(?P<pre>[NSEW](?![A-Za-z]))?\s*(?P<sign>[-+−–])?\s*"
-    r"(?P<deg>\d{1,3}\.\d+)(?!\d|\.\d)\s*[°º˚]?\s*(?(pre)|(?P<post>[NSEW](?![A-Za-z]))?)"
+    r"(?<![A-Za-z\d.])(?P<pre>[NSEWO](?![A-Za-z]))?\s*(?P<sign>[-+−–])?\s*"
+    r"(?P<deg>\d{1,3}\.\d+)(?!\d|\.\d)\s*[°º˚]?\s*(?(pre)|(?P<post>[NSEWO](?![A-Za-z]))?)"
 )
 _LAT_LABEL = re.compile(r"\blat(?:itude)?\b", re.IGNORECASE)
 _LON_LABEL = re.compile(r"\b(?:lon|long|lng|longitude)\b", re.IGNORECASE)
@@ -260,14 +358,22 @@ def _axis_label(text: str) -> str:
     return "lon" if lon else "lat" if lat else ""
 
 
-def _component(match: re.Match, text: str, previous_end: int, dms: bool) -> _Component:
+def _hemisphere(letter: str, iso3: str) -> str:
+    """N, S, E or W for a hemisphere letter, O being west or east by country."""
+    letter = letter.upper()
+    if letter == "O":
+        return "E" if iso3.upper() in O_IS_EAST_ISO3 else "W"
+    return letter
+
+
+def _component(match: re.Match, text: str, previous_end: int, dms: bool, iso3: str = "") -> _Component:
     degrees = float(match["deg"])
     minute_text = match.groupdict().get("min") or ""
     second_text = match.groupdict().get("sec") or ""
     value = degrees + float(minute_text.replace(",", ".") or 0) / 60 + float(second_text.replace(",", ".") or 0) / 3600
     if match["sign"] and match["sign"] in _MINUS:
         value = -value
-    hemisphere = (match["pre"] or match["post"] or "").upper()
+    hemisphere = _hemisphere(match["pre"] or match["post"] or "", iso3)
     if hemisphere and _HEMISPHERE_SIGN[hemisphere] < 0:
         value = -abs(value)
     if dms and minute_text:
@@ -289,7 +395,7 @@ def _component(match: re.Match, text: str, previous_end: int, dms: bool) -> _Com
     return _Component(value, hemisphere, fine, label, match.span(), resolution, unit)
 
 
-def _components(text: str) -> list[_Component]:
+def _components(text: str, iso3: str = "") -> list[_Component]:
     found: list[tuple[re.Match, bool]] = [(match, True) for match in _DMS.finditer(text)]
     taken = [match.span() for match, _dms in found]
     for match in _DECIMAL.finditer(text):
@@ -299,9 +405,20 @@ def _components(text: str) -> list[_Component]:
     out: list[_Component] = []
     previous_end = 0
     for match, dms in found:
-        out.append(_component(match, text, previous_end, dms))
+        out.append(_component(match, text, previous_end, dms, iso3))
         previous_end = match.end()
     return out
+
+
+def _axis_hemispheres(text: str, iso3: str) -> dict[str, str]:
+    """The hemisphere written with each axis's name, by axis: {"lon": "W"} for "longitud oeste"."""
+    said: dict[str, str] = {}
+    for axis, pattern in _AXIS_HEMISPHERE.items():
+        match = pattern.search(text)
+        if match:
+            written = match["after"] or match["before"]
+            said[axis] = _hemisphere(_SOUTH_AFTER_LATITUDE.get(written.lower(), written), iso3)
+    return said
 
 
 def _only_labels(text: str, spans: list[tuple[int, int]]) -> bool:
@@ -333,18 +450,19 @@ def _in_range(latitude: float, longitude: float) -> bool:
     return -90 <= latitude <= 90 and -180 <= longitude <= 180 and not (latitude == 0 and longitude == 0)
 
 
-def parse_coordinates(text: str, strict: bool = False) -> Located | None:
+def parse_coordinates(text: str, strict: bool = False, iso3: str = "") -> Located | None:
     """Read a latitude and longitude from text, or None if it holds no coordinate pair.
 
     "lat, lon" is assumed. "lon, lat" is read only when it is unambiguous: a hemisphere letter or
     word, or a label, says so, or the first number is beyond 90. `strict` asks for text that is
     nothing but the coordinates and their labels, for text the agent labelled something else.
+    `iso3` is the site's country, which says whether O is west or east (O_IS_EAST_ISO3).
     """
     text = normalize_scalar(text)
     if "." not in text and ";" in text:
         text = re.sub(r"(\d),(\d)", r"\1.\2", text)  # decimal commas: "48,8434; 2,3488"
-    text = _HEMISPHERE_WORDS.sub(lambda match: match[1][0].upper(), text)
-    components = [component for component in _components(text) if not component.unit]
+    text = _HEMISPHERE_WORDS.sub(lambda match: _HEMISPHERE_LETTERS[match[1].lower()], text)
+    components = [component for component in _components(text, iso3) if not component.unit]
     if len(components) < 2:
         return None
     if strict and (len(components) > 2 or not _only_labels(text, [c.span for c in components])):
@@ -357,6 +475,11 @@ def parse_coordinates(text: str, strict: bool = False) -> Located | None:
     latitude, longitude = (precise or in_range or pairs)[0]
 
     lat, lon = latitude.value, longitude.value
+    said = _axis_hemispheres(text, iso3)
+    if said.get("lat") == "S" and not latitude.hemisphere and lat > 0:
+        lat = -lat
+    if said.get("lon") == "W" and not longitude.hemisphere and lon > 0:
+        lon = -lon
     if not _in_range(lat, lon):
         return None if strict else Located(reason=f"coordinates out of range ({lat:g}, {lon:g})")
     if latitude.fine and longitude.fine:
@@ -538,18 +661,29 @@ def parse_grid_reference(text: str, iso3: str = "", strict: bool = False) -> Loc
 
 def parse_point(text: str, iso3: str = "", strict: bool = False) -> Located | None:
     """Coordinates or a grid reference, read locally; None if the text holds neither."""
-    return parse_coordinates(text, strict=strict) or parse_grid_reference(text, iso3, strict=strict)
+    return parse_coordinates(text, strict=strict, iso3=iso3) or parse_grid_reference(text, iso3, strict=strict)
 
 
 # --- addresses ---------------------------------------------------------------------------------
+# A match on a major road itself, its house number not found: the road runs for kilometres, and the
+# geocoder picks a stretch of it by name. Each of the four in the October 2026 test runs was more
+# than 5 km from the site (one 129 km), so none is used.
+MAJOR_ROAD = "major road"
+MAJOR_ROAD_REASON = "only a major road matched, and any stretch of it could be the one meant, so not used"
+# OpenStreetMap's classes of road between towns, which in a city are its arterials.
+MAJOR_ROADS = {"motorway", "trunk", "primary", "secondary"}
+
+
 @dataclass
 class GeocodeMatch:
     latitude: float
     longitude: float
-    # ROOFTOP or STREET, or "" for anything coarser, which is not used.
+    # ROOFTOP or STREET; MAJOR_ROAD, or "" for anything coarser, are not used.
     precision: str
     # What the geocoder said about the match, kept in source_locations.json.
     match: str
+    # The state, province or region the match is in, as the geocoder names it; "" where it doesn't say.
+    state: str = ""
 
 
 class Geocoder(Protocol):
@@ -723,14 +857,56 @@ class NominatimGeocoder:
         results = response.json() or []
         return nominatim_match(results[0]) if results else None
 
+    def reverse(self, latitude: float, longitude: float) -> dict[str, str]:
+        """The municipality and state a point is in (nominatim_place), or {} where it finds none."""
+        params = {"lat": latitude, "lon": longitude, "format": "jsonv2", "zoom": 10, "addressdetails": 1}
+        self._wait()
+        response = self.session.get(
+            f"{self.url}/reverse", params=params, headers={"User-Agent": self.user_agent}, timeout=self.timeout
+        )
+        response.raise_for_status()
+        return nominatim_place((response.json() or {}).get("address") or {})
+
+    def state(self, text: str, iso2: str) -> str:
+        """A state, province or region's name as Nominatim writes it, from any way of writing it:
+        "N.L.", "Nuevo Leon" and "Nuevo León" are all "Nuevo León". "" where it finds none."""
+        params: dict[str, Any] = {"q": text, "format": "jsonv2", "limit": 1, "featureType": "state"}
+        if iso2:
+            params["countrycodes"] = iso2.lower()
+        self._wait()
+        response = self.session.get(
+            f"{self.url}/search", params=params, headers={"User-Agent": self.user_agent}, timeout=self.timeout
+        )
+        response.raise_for_status()
+        results = response.json() or []
+        return normalize_scalar(results[0].get("name")) if results else ""
+
+
+def nominatim_place(address: dict[str, Any]) -> dict[str, str]:
+    """Nominatim's address parts as our place fields. The municipality is the smallest of its
+    local-government names: Mexico's municipios come back as `county`, a city as `city`. The state
+    is `state`, or a country's other first-level name."""
+    municipality = next(
+        (normalize_scalar(address.get(key)) for key in ("municipality", "city", "town", "village", "county") if address.get(key)),
+        "",
+    )
+    admin1 = next(
+        (normalize_scalar(address.get(key)) for key in ("state", "province", "region") if address.get(key)), ""
+    )
+    if not municipality and not admin1:
+        return {}
+    return {"municipality": municipality, "admin1": admin1, "admin2": normalize_scalar(address.get("state_district"))}
+
 
 def nominatim_match(result: dict[str, Any]) -> GeocodeMatch | None:
-    """Read one Nominatim result: an address point or building is rooftop, a road is street.
+    """Read one Nominatim result: an address point or building is rooftop, a road is street, and the
+    state it is in.
 
     A house number Nominatim interpolated along its street comes back as place=house too, but on
     the interpolation line, a way, so it counts as street, as Azure Maps' interpolated addresses
-    do. Anything else - a town, a postcode, or a mapped feature such as a landfill that happens to
-    carry the address - is not used: the last would be OpenStreetMap's own point for the site.
+    do. A major road is not used (MAJOR_ROAD). Anything else - a town, a postcode, or a mapped
+    feature such as a landfill that happens to carry the address - is not used: the last would be
+    OpenStreetMap's own point for the site.
     """
     lat, lon = _float(result.get("lat")), _float(result.get("lon"))
     if lat is None or lon is None:
@@ -749,8 +925,10 @@ def nominatim_match(result: dict[str, Any]) -> GeocodeMatch | None:
     elif category == "place" and kind in {"house", "building"}:
         precision = STREET if on_way else ROOFTOP
     elif category == "highway":
-        precision = STREET
-    return GeocodeMatch(lat, lon, precision, described)
+        precision = MAJOR_ROAD if kind.removesuffix("_link") in MAJOR_ROADS else STREET
+    # The state it is in, from the address details asked for with it, at no extra request.
+    state = nominatim_place(result.get("address") or {}).get("admin1", "")
+    return GeocodeMatch(lat, lon, precision, described, state)
 
 
 def _env(name: str) -> str:
@@ -811,6 +989,11 @@ def iso2(iso3: Any) -> str:
 def _plain(text: Any) -> str:
     """Words only, in one case, with "&" read as "and"."""
     return re.sub(r"[\W_]+", " ", normalize_scalar(text).casefold().replace("&", " and ")).strip()
+
+
+def _bare(text: Any) -> str:
+    """Words only, in one case, without accents: "Nuevo León" is "nuevo leon"."""
+    return "".join(c for c in unicodedata.normalize("NFKD", _plain(text)) if not unicodedata.combining(c))
 
 
 def _leading_name(name: str) -> re.Pattern:
@@ -887,6 +1070,30 @@ _LOT = re.compile(r"^(?:lots?|units?|suites?|parcels?|plots?|blocks?)\s+\S", re.
 _LOCAL_GOVERNMENT = re.compile(r"^(?:city|town|village|township|municipality|borough)\s+of\s+", re.IGNORECASE)
 
 
+def with_place(text: str, municipality: str, state: str) -> str:
+    """An address with the town and the state the source puts the facility in, each added where the
+    text doesn't already name it, accents and case aside: "colonia El Zarco" is sent as "colonia El
+    Zarco, Yautepec, Morelos". Sent bare, it was matched to a street of that name 66 km away, in
+    another state. A place is named by a part that is it, or that a later part holds: the first part
+    is the street or place itself, which is often named after a state, as Calle Morelos is. "" stays
+    "".
+    """
+    parts = [_bare(part) for part in re.split(r"[,;]", text) if _bare(part)]
+    placed = text
+    for place in (municipality, state):
+        bare = _bare(place)
+        named = any(part == bare or (index and f" {bare} " in f" {part} ") for index, part in enumerate(parts))
+        if text and bare and not named:
+            placed = f"{placed}, {place}"
+            parts.append(bare)
+    return placed
+
+
+def _one_part(text: str) -> bool:
+    """Whether an address is a single part, with no town or state after a comma."""
+    return len([part for part in re.split(r"[,;]", text) if part.strip()]) < 2
+
+
 def plainer_address(text: str, names: list[str]) -> str:
     """The address without the words around it that keep a geocoder from finding it, or "" when
     there are none, or taking them out leaves no street with its place.
@@ -911,8 +1118,8 @@ def plainer_address(text: str, names: list[str]) -> str:
             continue
         parts.append(part)
     plainer = address_to_send(", ".join(parts), names)
-    with_place = len([part for part in plainer.split(",") if part.strip()]) >= 2
-    if plainer == original or not with_place or not STREET_OR_NUMBER.search(plainer):
+    has_place = len([part for part in plainer.split(",") if part.strip()]) >= 2
+    if plainer == original or not has_place or not STREET_OR_NUMBER.search(plainer):
         return ""
     return plainer
 
@@ -961,6 +1168,9 @@ def _record(cache: dict[str, dict[str, Any]], text: str, iso3: Any, located: Loc
         "geocoder": located.geocoder,
         "match": match,
     }
+    if located.state:
+        # Where the geocoder put it, so a match in another state than the source's isn't used.
+        entry["state"] = located.state
     earlier = cache.get(key) or {}
     same = all(earlier.get(field) == value for field, value in entry.items())
     entry["located_at"] = earlier.get("located_at") if same and earlier.get("located_at") else date.today().isoformat()
@@ -974,6 +1184,7 @@ def _from_entry(entry: dict[str, Any]) -> Located:
         normalize_scalar(entry.get("basis")) or NONE,
         normalize_scalar(entry.get("reason")),
         normalize_scalar(entry.get("geocoder")),
+        state=normalize_scalar(entry.get("state")),
     )
 
 
@@ -1009,15 +1220,64 @@ def geocode_address(
         if found is None:
             located, match = Located(reason="the geocoder found no match", geocoder=geocoder.name), ""
         elif found.precision in (ROOFTOP, STREET):
-            located, match = Located(found.latitude, found.longitude, found.precision, "", geocoder.name), found.match
+            located = Located(found.latitude, found.longitude, found.precision, "", geocoder.name, state=found.state)
+            match = found.match
         else:
-            located = Located(
-                found.latitude, found.longitude, NONE,
-                "geocoded only coarser than a street, so not used", geocoder.name,
-            )
+            reason = MAJOR_ROAD_REASON if found.precision == MAJOR_ROAD else "geocoded only coarser than a street, so not used"
+            located = Located(found.latitude, found.longitude, NONE, reason, geocoder.name, state=found.state)
             match = found.match
     if cache is not None:
         _record(cache, address, iso3, located, match)
+    return located
+
+
+# --- states ------------------------------------------------------------------------------------
+# A state written any way ("N.L.", "Edo. Méx.", "CDMX") as the geocoder names it, by country, so
+# where a source puts the facility can be compared with where our site is (found_values.py).
+STATE_NAMES_FILE = "state_names.json"
+
+
+def canonical_state(
+    text: Any, iso3: Any, cache: dict[str, dict[str, Any]] | None, geocoder: Any, live: bool
+) -> str:
+    """A state's name as the geocoder writes it, from the cache first; only a live locate step asks
+    a geocoder that can look states up (Nominatim). "" where none is known."""
+    written = normalize_scalar(text)
+    if not written:
+        return ""
+    key = cache_key(written, iso3)
+    entry = (cache or {}).get(key)
+    if entry is not None:
+        return normalize_scalar(entry.get("name"))
+    if not live or geocoder is None or not hasattr(geocoder, "state"):
+        return ""
+    try:
+        name = geocoder.state(written, iso2(iso3))
+    except Exception as exc:  # noqa: BLE001 - one bad lookup must not end the locate step
+        raise GeocoderError(f"{geocoder.name}: {type(exc).__name__}: {exc}") from exc
+    if cache is not None:
+        cache[key] = {
+            "text": written, "country": normalize_scalar(iso3).upper(), "name": name,
+            "geocoder": geocoder.name, "located_at": date.today().isoformat(),
+        }
+    return name
+
+
+def same_state(ours: str, theirs: str) -> bool:
+    """Whether two states' names, as canonical_state gives them, are one state, accents aside: a
+    seed's own state may be written without them."""
+    return _bare(ours) == _bare(theirs)
+
+
+def _in_state(located: Located, state: str) -> Located:
+    """A geocoded address the geocoder put in another state than the source's is a namesake there,
+    and isn't used. Only where both states are known: an answer kept before the geocoder's state was
+    has none."""
+    if located.basis in MATCHING_BASES and located.state and state and not same_state(located.state, state):
+        return Located(
+            reason=f"the geocoder put it in {located.state}, not {state} as the source says, so not used",
+            geocoder=located.geocoder,
+        )
     return located
 
 
@@ -1064,14 +1324,11 @@ def names_a_facility(text: str) -> bool:
     return any(_ENDS_IN_FACILITY_WORD.search(part) for part in parts) and not _CIVIC_NUMBER.search(text)
 
 
-def _parts(text: str, kind: str) -> list[tuple[str, str]]:
-    texts = [part.strip() for part in text.split(PART_SEPARATOR)]
-    kinds = [part.strip().lower() for part in kind.split(PART_SEPARATOR)]
-    out = []
-    for index, part in enumerate(texts):
-        if part:
-            out.append((part, kinds[index] if index < len(kinds) else ""))
-    return out
+def _parts(text: str) -> list[str]:
+    """The parts of a stated field: usually one, several where an older response gave several of a
+    kind (payload.split_stated_location)."""
+    parts = [part.strip() for part in text.split(PART_SEPARATOR)]
+    return [part for part in parts if part and part.lower() not in NO_LOCATION_TEXT]
 
 
 def locate_source(
@@ -1080,18 +1337,25 @@ def locate_source(
     cache: dict[str, dict[str, Any]] | None = None,
     geocoder: Geocoder | None = None,
     live: bool = False,
+    states: dict[str, dict[str, Any]] | None = None,
 ) -> Located:
     """Where one source puts the facility, after the guards. `site` is the site searched.
 
-    Coordinates and grid references are read here. An address is looked up in `cache`, and only a
-    `live` call (the locate step) asks `geocoder` for one that isn't there, and records every part
-    it reads in `cache`.
+    The source's stated coordinates or grid reference are read here, and so is an address that is
+    nothing but coordinates: the agent does not always fill the right field. Any other address is
+    looked up in `cache`, and only a `live` call (the locate step) asks `geocoder` for one that
+    isn't there, and records every part it reads in `cache`.
+
+    An address goes with the town and state the source puts the facility in (with_place), the state
+    named as `states`, the run's state_names.json, names it. The locate step and arbitration both
+    pass it, so both look up the same text. A match the geocoder put in another state isn't used.
     """
-    text = normalize_scalar(source.get("stated_location"))
-    kind = normalize_scalar(source.get("stated_location_kind"))
     if not states_location(source):
         return Located(reason="no location stated")
     iso3 = normalize_scalar(site.get("country_iso3")).upper()
+    municipality = _stated(source, "stated_municipality")
+    known_state = canonical_state(_stated(source, "stated_state"), iso3, states, None, live=False)
+    state = known_state or _stated(source, "stated_state")
     # Every name the facility goes by, the source's and ours: none of them is ever geocoded.
     names = [
         source.get("facility_name_in_source"),
@@ -1106,40 +1370,49 @@ def locate_source(
 
     point: Located | None = None
     address: Located | None = None
-    unread: list[str] = []
-    for part, part_kind in _parts(text, kind):
-        if part_kind in {COORDINATES, GRID_REFERENCE}:
-            found = parse_point(part, iso3) or Located(reason=f"could not read the {part_kind}")
-        else:
-            # The agent's labels are unreliable, so coordinates labelled anything else still count.
-            found = parse_point(part, iso3, strict=True)
-        if found is not None:
-            if live and cache is not None:
-                _record(cache, part, iso3, found)
-            if point is None or (point.point is None and found.point is not None):
-                point = found
-            continue
-        if part_kind != STREET_ADDRESS:
-            unread.append(
-                "no location stated" if part_kind == "none"
-                else f"a {part_kind} is not located" if part_kind
-                else "not coordinates, a grid reference or a street address"
-            )
+
+    def take_point(part: str, found: Located) -> None:
+        nonlocal point
+        if live and cache is not None:
+            _record(cache, part, iso3, found)
+        if point is None or (point.point is None and found.point is not None):
+            point = found
+
+    for part in _parts(stated_coordinates(source)):
+        take_point(part, parse_point(part, iso3) or Located(reason="could not read the stated coordinates"))
+    for part in _parts(stated_address(source)):
+        written_as_point = parse_point(part, iso3, strict=True)
+        if written_as_point is not None:
+            take_point(part, written_as_point)
             continue
         if address is not None and address.point is not None:
             continue
         # A PO box is taken out, and what is left is sent if it still has a street or a number.
         rest, boxed = without_po_box(part)
         sent = address_to_send(rest, names)
+        # A name taken off the front can leave only its town ("Mapleward Road Landfill, Thunder
+        # Bay, ON" sends "Thunder Bay, ON"), which places the town, not the site.
+        only_its_town = sent != normalize_scalar(rest) and not STREET_OR_NUMBER.search(sent)
         if boxed and not STREET_OR_NUMBER.search(rest):
             tried = Located(reason="a PO box is not where the site is")
-        elif not sent or names_a_facility(sent):
+        elif not sent or only_its_town or names_a_facility(sent):
             tried = Located(reason="the stated location is the facility's name, which is never geocoded")
         else:
-            tried = geocode_address(sent, iso3, cache, geocoder, live)
-            plainer = plainer_address(sent, names) if tried.basis not in MATCHING_BASES else ""
-            if plainer:
-                retried = geocode_address(plainer, iso3, cache, geocoder, live)
+            placed = with_place(sent, municipality, state)
+            # Text with a kilometre marker or a distance is never sent, nor one with no town or
+            # state, but its plainer form, with the directions taken out, may be: "4 Sand Dam Road,
+            # North Bay".
+            if ALONG_A_ROAD.search(placed):
+                tried = Located(reason=ALONG_A_ROAD_REASON)
+                if live and cache is not None:
+                    _record(cache, placed, iso3, tried)
+            elif _one_part(placed):
+                tried = Located(reason=NO_PLACE_REASON)
+            else:
+                tried = _in_state(geocode_address(placed, iso3, cache, geocoder, live), known_state)
+            plainer = with_place(plainer_address(placed, names), municipality, state) if tried.basis not in MATCHING_BASES else ""
+            if plainer and not ALONG_A_ROAD.search(plainer):
+                retried = _in_state(geocode_address(plainer, iso3, cache, geocoder, live), known_state)
                 if retried.basis in MATCHING_BASES:
                     tried = retried
         # A later address takes over from one that placed nothing, such as a mailing address.
@@ -1162,6 +1435,10 @@ def locate_source(
                 return Located(
                     reason=f"doubtful: its address lands {km:.1f} km from its coordinates",
                     geocoder=address.geocoder,
+                    doubtful_points=(
+                        (*point.point, point.uncertainty_km if point.basis == HINT else 0.0),
+                        (*address.point, 0.0),
+                    ),
                 )
             if point.basis == HINT:
                 # Coarse coordinates say less than an address that agrees with them.
@@ -1171,7 +1448,7 @@ def locate_source(
         return address
     if point is not None:
         return point
-    return Located(reason="; ".join(dict.fromkeys(unread)) or "no location stated")
+    return Located(reason="no location stated")
 
 
 def describe_bases(located: list[Located]) -> str:

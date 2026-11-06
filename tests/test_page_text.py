@@ -13,6 +13,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 
+import pytest
 from openpyxl import Workbook
 
 from waste_ai_search.link_check import LINK_CHECK_FILE, OK, Fetched, check_urls, load_results
@@ -159,6 +160,22 @@ def test_a_spreadsheets_cell_limit_is_across_its_sheets(monkeypatch):
     book.save(data)
     read = extract_text(data.getvalue(), "", "https://x.example/register.xlsx")
     assert "s0r0a" in read.text and "s2r0a" not in read.text
+    # Sheet 0 used 9 of the 10 cells, so sheet 1's first row is read only to its first cell.
+    assert "s1r0a" in read.text and "s1r0b" not in read.text
+    assert "first 10 cells read" in read.note
+
+
+def test_a_wide_row_is_read_only_as_far_as_the_cell_limit(monkeypatch):
+    import waste_ai_search.page_text as page_text
+
+    monkeypatch.setattr(page_text, "MAX_SHEET_CELLS", 10)
+    book = Workbook()
+    book.active.append([f"c{column}" for column in range(50)])
+    book.create_sheet().append(["next sheet"])
+    data = io.BytesIO()
+    book.save(data)
+    read = extract_text(data.getvalue(), "", "https://x.example/register.xlsx")
+    assert "c9" in read.text and "c10" not in read.text and "next sheet" not in read.text
     assert "first 10 cells read" in read.note
 
 
@@ -366,4 +383,52 @@ def test_a_server_dripping_bytes_cant_hold_a_reader_past_its_deadline(monkeypatc
     finally:
         server.shutdown()
     assert page.cut == "time" and 0 < len(page.body) < 1000
+    assert elapsed < 5
+
+
+@pytest.mark.parametrize("protocol", ["HTTP/1.0", "HTTP/1.1"])  # closing the connection after, or keeping it
+def test_a_server_that_stops_sending_cant_hold_a_reader_past_its_deadline(monkeypatch, protocol):
+    """Each read waits only the time left, not the whole read timeout, once the server goes quiet."""
+    import time
+
+    import requests
+
+    import waste_ai_search.link_check as lc
+
+    quiet = threading.Event()
+
+    class Stall(BaseHTTPRequestHandler):
+        protocol_version = protocol
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", "1000")
+            self.end_headers()
+            try:
+                self.wfile.write(b"x" * 10)
+                self.wfile.flush()
+                quiet.wait(lc.TIMEOUT_SECONDS)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Stall)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    real = lc._public_address
+    monkeypatch.setattr(lc, "_public_address", lambda host, p: "127.0.0.1" if p == port else real(host, p))
+    monkeypatch.setattr(lc, "READ_SECONDS", 1)
+    try:
+        session = requests.Session()
+        session.mount("http://", lc._pinned_adapter_class()())
+        started = time.monotonic()
+        page = lc._original_fetch(session, f"http://public.example:{port}/", lc._HostThrottle(0), keep_text=True)
+        elapsed = time.monotonic() - started
+    finally:
+        quiet.set()
+        server.shutdown()
+    assert (page.body, page.cut) == (b"x" * 10, "time")
     assert elapsed < 5

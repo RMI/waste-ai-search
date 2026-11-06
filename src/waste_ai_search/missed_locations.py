@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .link_check import LINK_CHECK_FILE
-from .locate import COORDINATES, GRID_REFERENCE, MATCHING_BASES, haversine_km, parse_point, seed_point
+from .locate import COORDINATES, GRID_REFERENCE, haversine_km, parse_point, seed_point
 from .page_text import PAGE_TEXT_DIR, read_page_text
 from .schema import normalize_scalar
 
@@ -197,13 +197,20 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+# What found_values.csv states of where each source puts the facility: its address and coordinates
+# as written.
+STATED_COLUMNS = ("source_address", "stated_coordinates")
+
+
 def measure(run_dir: Path) -> Measurement:
     """Measure one arbitrated run whose link check kept page text."""
-    evidence = _read_csv(run_dir / "evidence.csv")
-    if evidence and "stated_location" not in evidence[0]:
+    from .found_values import FOUND_VALUES_FILE
+
+    if not (run_dir / FOUND_VALUES_FILE).exists():
         raise SystemExit(
-            f"{run_dir / 'evidence.csv'} predates stated locations: arbitrate the run again with this version first."
+            f"No {FOUND_VALUES_FILE} in {run_dir}: arbitrate the run again with this version first."
         )
+    found = _read_csv(run_dir / FOUND_VALUES_FILE)
     sources = {row["source_id"]: row for row in _read_csv(run_dir / "sources.csv")}
     sites: dict[str, Site] = {}
     for row in _read_csv(run_dir / "seed.csv"):
@@ -224,7 +231,7 @@ def measure(run_dir: Path) -> Measurement:
             measurement.text_kinds[record.get("text_kind") or "other"] += 1
 
     by_source: dict[str, list[dict[str, str]]] = {}
-    for row in evidence:
+    for row in found:
         by_source.setdefault(row.get("source_id", ""), []).append(row)
     text_dir = run_dir / PAGE_TEXT_DIR
     for source_id, rows in sorted(by_source.items()):
@@ -232,8 +239,8 @@ def measure(run_dir: Path) -> Measurement:
         text = read_page_text(text_dir, name) if name else None
         if not text:
             continue
-        searched = sorted({row.get("searched_site_id") or row.get("site_id", "") for row in rows} - {""})
-        stated = [row for row in rows if normalize_scalar(row.get("stated_location"))]
+        searched = sorted({row.get("site_id", "") for row in rows} - {""})
+        stated = [row for row in rows if any(normalize_scalar(row.get(column)) for column in STATED_COLUMNS)]
         source = sources.get(source_id, {})
         measurement.reports.append(PageReport(
             source_id=source_id,
@@ -241,7 +248,7 @@ def measure(run_dir: Path) -> Measurement:
             source_type=source.get("source_type", ""),
             searched=searched,
             agent_stated=bool(stated),
-            agent_usable=any(row.get("location_basis") in MATCHING_BASES for row in stated),
+            agent_usable=any(normalize_scalar(row.get("coordinates_from")) for row in stated),
             finding=find_location(text, [sites[site_id] for site_id in searched if site_id in sites]),
         ))
     return measurement
@@ -259,9 +266,9 @@ def summary(measurement: Measurement) -> str:
         f"({', '.join(f'{verdict} {count:,}' for verdict, count in measurement.verdicts.most_common())})",
         f"Pages with text kept: {sum(measurement.text_kinds.values()):,} "
         f"({', '.join(f'{kind} {count:,}' for kind, count in measurement.text_kinds.most_common())})",
-        f"Pages measured (text kept, cited in evidence.csv): {len(reports):,}",
+        f"Pages measured (text kept, cited in found_values.csv): {len(reports):,}",
         f"  The agent stated a location for: {_share(sum(1 for r in reports if r.agent_stated), len(reports))}, "
-        f"usable for matching: {sum(1 for r in reports if r.agent_usable):,}",
+        f"placed by it: {sum(1 for r in reports if r.agent_usable):,}",
     ]
     for kind in KINDS:
         stating = [r for r in reports if r.finding and r.finding.kind == kind]

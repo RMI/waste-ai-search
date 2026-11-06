@@ -1,9 +1,11 @@
-"""WP-531 item 5: don't re-search a facility_name a Tier 1-2 source already supplied.
+"""WP-531 item 5: a facility_name a Tier 1-2 source already supplied is trusted.
 
-This reverses Q30 - "identity is always requested" - for those facilities only. Their identity
-confirmation rests on coordinates, unless those are trusted too (F29, test_trusted_coordinates).
+Since step 1 of the approve-sources plan no site's name is asked for as a value: each source gives
+its own name for the facility, only to check that it is about this site. A trusted name is called
+confirmed in the prompt, and arbitration records the names an older response returned for such a
+site rather than queueing them. These tests were rewritten on purpose for that change.
 
-The rule needs POSITIVE per-attribute provenance. With none, the name is still searched: the
+The rule needs POSITIVE per-attribute provenance. With none, the name is not trusted: the
 facility-wide composite takes the best tier of everything a facility draws on, and would credit an
 OSM name with a regulator's tier.
 """
@@ -37,10 +39,11 @@ def site(**overrides):
         "found_facility_name@mexico_inegi_2016",  # Tier 1
     ],
 )
-def test_a_tier_1_or_2_name_is_not_searched(provenance):
+def test_a_tier_1_or_2_name_is_trusted(provenance):
     s = site(attribute_sources=provenance)
     assert trusted_baseline_name(s)
     assert "found_facility_name" not in requested_attributes(s)
+    assert "The name is already confirmed by an authoritative source." in " ".join(build_site_prompt(s).split())
 
 
 @pytest.mark.parametrize(
@@ -51,17 +54,18 @@ def test_a_tier_1_or_2_name_is_not_searched(provenance):
         "found_facility_name@gpw_2021",                    # Tier 4
     ],
 )
-def test_a_lower_tier_name_is_still_searched(provenance):
+def test_a_lower_tier_name_is_not_trusted_nor_asked_for(provenance):
     s = site(attribute_sources=provenance)
     assert not trusted_baseline_name(s)
-    assert "found_facility_name" in requested_attributes(s)
+    assert "found_facility_name" not in requested_attributes(s)
+    assert "already confirmed" not in build_site_prompt(s)
 
 
-def test_no_per_attribute_provenance_means_the_name_is_still_searched():
+def test_no_per_attribute_provenance_means_the_name_is_not_trusted():
     """The composite here includes lmop_2024 (Tier 1) but says nothing about who supplied the name."""
     s = site(attribute_sources="facility_status@lmop_2024")
     assert not trusted_baseline_name(s)
-    assert "found_facility_name" in requested_attributes(s)
+    assert "already confirmed" not in build_site_prompt(s)
 
 
 def test_a_blank_name_is_never_trusted():
@@ -81,30 +85,14 @@ def test_provenance_written_before_the_rename_still_counts():
     assert trusted_baseline_name(site(attribute_sources="found_site_name@lmop_2024"))
 
 
-def test_a_location_is_still_requested_when_the_name_is_skipped():
-    attributes = requested_attributes(site(attribute_sources="found_facility_name@lmop_2024"))
-    assert "found_location" in attributes
-
-
-def test_a_trusted_name_prompt_does_not_ask_for_a_name():
-    """Changed on purpose for build step 4: the identity rule built from the found_* attributes is
-    gone. Each source still gives its own name for the facility, for code to compare."""
-    s = site(attribute_sources="found_facility_name@lmop_2024")
-    prompt = build_site_prompt(s, attributes=requested_attributes(s))
-
-    assert "Return found_facility_name" not in prompt
-    assert '"attribute_name": "found_facility_name"' not in prompt
-    assert "site_name is already confirmed by an authoritative source. Use it to search; do not" in prompt
-    assert "facility_name_in_source" in prompt
-    assert "Where this facility is matters too" in prompt
-
-
-def test_an_untrusted_name_prompt_asks_for_it():
-    s = site(attribute_sources="found_facility_name@osm_2022")
-    prompt = build_site_prompt(s, attributes=requested_attributes(s))
-
-    assert "Return found_facility_name exactly as your source spells it" in prompt
-    assert '"attribute_name": "found_facility_name"' in prompt
+def test_no_prompt_asks_for_a_name_but_every_source_gives_its_own():
+    """Changed on purpose for step 1 of the approve-sources plan: the name is never a value asked
+    for. Each source still gives its own name for the facility, to check the match."""
+    for provenance in ("found_facility_name@lmop_2024", "found_facility_name@osm_2022"):
+        s = site(attribute_sources=provenance)
+        prompt = build_site_prompt(s, attributes=requested_attributes(s))
+        assert "found_facility_name" not in prompt
+        assert "Give each source's own name for the facility as facility_name_in_source" in " ".join(prompt.split())
 
 
 def test_arbitration_records_no_name_row_for_a_skipped_name():
@@ -121,12 +109,3 @@ def test_arbitration_records_no_name_row_for_a_skipped_name():
 
     assert "found_facility_name" not in {r["attribute_name"] for r in resolved}
 
-
-def test_a_found_name_must_be_specific_and_qualified_by_the_sources_own_place():
-    """'Waste Management Facility' identifies nothing; the municipality the source names does."""
-    from waste_ai_search.prompt_builder import ATTRIBUTE_GUIDANCE
-
-    text = ATTRIBUTE_GUIDANCE["found_facility_name"]
-    assert "over a generic label such as 'Waste Management Facility'" in text
-    assert "add the municipality, town or operator that the same source names" in text
-    assert "Never add a place the source does not mention." in text

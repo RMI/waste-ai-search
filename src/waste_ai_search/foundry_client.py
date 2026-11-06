@@ -11,6 +11,14 @@ from typing import Any, Protocol
 from .costs import Usage
 
 
+class ContentFiltered(RuntimeError):
+    """Azure's content filter stopped the agent's answer part-way: on batch 3's Mexican sites, after
+    it read news of the town's dump (2479 Cerro Bastón: "I'm sorry, but I cannot assist with that
+    request."). It is retried like any other failure: the filter depends on the pages an attempt
+    happens to read. Re-searching 40 batch 3 sites twice, 13 searches were stopped, and only 2 sites
+    both times; in batch 3, 98 answers came only on a retry."""
+
+
 class FoundryClient(Protocol):
     def search_site(self, site: dict[str, Any], prompt: str) -> dict[str, Any]:
         """Run a source-backed waste-site search and return a JSON-like payload."""
@@ -73,16 +81,19 @@ class AzureFoundryAgentClient:
             allow_preview=True,
         )
         # A search's billed use, which the run log records: Bing queries, model tokens, and the
-        # model that answered.
+        # model that answered. And what its web search tool did (web_search_actions), which the
+        # search keeps in the response it saves.
         self.web_searches = 0
         self.usage = Usage()
         self.model = ""
+        self.search_actions: list[dict[str, Any]] = []
 
     def search_site(self, site: dict[str, Any], prompt: str) -> dict[str, Any]:
         # Bing bills per query, and a retry repeats every query, so all attempts are counted; so are
         # their tokens, which the model bills for whether or not its answer could be read.
         self.web_searches = 0
         self.usage = Usage()
+        self.search_actions = []
         limit = self.config.site_timeout_seconds
         deadline = time.monotonic() + limit if limit > 0 else None
         last_error: Exception | None = None
@@ -90,19 +101,25 @@ class AzureFoundryAgentClient:
         # failed every site on an empty loop).
         attempts = max(1, self.config.max_retries)
         for attempt in range(1, attempts + 1):
+            made = len(self.search_actions)
             try:
                 remaining = None if deadline is None else deadline - time.monotonic()
                 text = self._invoke_agent(prompt, remaining)
                 return parse_json_response(text)
             except Exception as exc:  # noqa: BLE001 - preserve retries around SDK/network calls
                 last_error = exc
-                delay = min(2 * attempt, 10)
+                delay = retry_delay(exc, attempt)
                 if attempt >= attempts:
                     break
                 # A retry that cannot finish in time would only add billed queries.
                 if deadline is not None and time.monotonic() + delay >= deadline:
                     break
                 time.sleep(delay)
+            finally:
+                # Which attempt made each tool call: each has its own cap (max_tool_calls), and an
+                # answer read only on a retry keeps the calls of the attempts before it too.
+                for action in self.search_actions[made:]:
+                    action["attempt"] = attempt
         assert last_error is not None
         raise last_error
 
@@ -174,10 +191,19 @@ class AzureFoundryAgentClient:
             limit,
         )
         self.web_searches += count_web_searches(response)
+        if not isinstance(getattr(self, "search_actions", None), list):
+            self.search_actions = []
+        self.search_actions.extend(web_search_actions(response))
         if not isinstance(getattr(self, "usage", None), Usage):
             self.usage = Usage()
         self.usage.add(response)
         self.model = str(getattr(response, "model", "") or getattr(self, "model", ""))
+        reason = getattr(getattr(response, "incomplete_details", None), "reason", "")
+        if reason == "content_filter":
+            raise ContentFiltered(
+                "Azure's content filter stopped the agent's answer, probably over a page it read; "
+                f"{count_web_searches(response)} web searches were made."
+            )
         text = getattr(response, "output_text", "")
         if text:
             return text
@@ -224,21 +250,34 @@ def count_web_searches(response: Any) -> int:
     """Bing queries a response made - what Bing grounding bills for (WP-545).
 
     Each search is a `web_search_call` output item whose action lists the queries it sent. Other
-    actions (opening or reading a page) send no query and are not counted.
+    actions (opening a page, or finding text in one) send no query and are not counted.
     """
-    total = 0
+    return sum(len(action["queries"]) or 1 for action in web_search_actions(response) if action["type"] == "search")
+
+
+def web_search_actions(response: Any) -> list[dict[str, Any]]:
+    """What each of a response's web search tool calls did, in order: a search with the queries it
+    sent, or a page opened (open_page) or searched for a pattern (find_in_page) with its URL. Every
+    one counts toward max_tool_calls."""
+    actions = []
     for item in getattr(response, "output", None) or []:
         if getattr(item, "type", "") != "web_search_call":
             continue
         action = getattr(item, "action", None)
-        if isinstance(action, dict):
-            kind, queries = action.get("type"), action.get("queries")
+        kind = str(_field(action, "type") or "search")
+        if kind == "search":
+            queries = _field(action, "queries") or ([_field(action, "query")] if _field(action, "query") else [])
+            actions.append({"type": kind, "queries": [str(query) for query in queries]})
         else:
-            kind, queries = getattr(action, "type", None), getattr(action, "queries", None)
-        if kind not in (None, "search"):
-            continue
-        total += len(queries or []) or 1
-    return total
+            actions.append({"type": kind, "url": str(_field(action, "url") or "")})
+            if _field(action, "pattern"):
+                actions[-1]["pattern"] = str(_field(action, "pattern"))
+    return actions
+
+
+def _field(action: Any, name: str) -> Any:
+    """One field of a web search call's action, which comes as a dict or as an object."""
+    return action.get(name) if isinstance(action, dict) else getattr(action, name, None)
 
 
 def message_to_text(message: Any) -> str:
@@ -286,3 +325,24 @@ def parse_json_response(text: str) -> dict[str, Any]:
 
 def looks_like_uuid(value: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-fA-F-]{36}", str(value).strip()))
+
+
+
+# A deployment's token limit (429) is counted on what each call might use, not what it does: batch 3's
+# first run, 16 sites at a time, had 130 of 147 refused, and 6 at a time still a quarter, at a fifth of
+# the limit by the tokens billed. A refused call is billed nothing, so it waits out the minute.
+RATE_LIMIT_WAIT_SECONDS = 15
+RATE_LIMIT_MAX_WAIT_SECONDS = 60
+
+
+def retry_delay(exc: Exception, attempt: int) -> float:
+    """Seconds to wait before attempt `attempt + 1`: what a 429 asks for (Retry-After), or 15 s more
+    each time up to a minute; two seconds more each time, up to 10, after any other failure."""
+    if getattr(exc, "status_code", None) != 429 and type(exc).__name__ != "RateLimitError":
+        return min(2 * attempt, 10)
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    try:
+        asked = float(headers.get("retry-after", ""))
+    except (TypeError, ValueError):
+        asked = 0
+    return min(max(asked, RATE_LIMIT_WAIT_SECONDS * attempt), RATE_LIMIT_MAX_WAIT_SECONDS)

@@ -11,6 +11,8 @@ import csv
 import json
 from datetime import date
 
+import pytest
+
 from waste_ai_search.arbitrate import cached_source_urls, extract_evidence, payload_leads, run_arbitration
 from waste_ai_search.payload import (
     ATTRIBUTE_FIRST,
@@ -93,9 +95,9 @@ def test_only_sources_cited_for_the_name_carry_it():
 def test_only_sources_cited_for_both_coordinates_state_a_location():
     sources = by_url(read_payload(OLD))
     permit = sources[PERMIT["url"]]
-    assert (permit["stated_location"], permit["stated_location_kind"]) == ("54.12345, -1.54321", "coordinates")
+    assert (permit["stated_coordinates"], permit["stated_address"]) == ("54.12345, -1.54321", "")
     # The news story was cited for the latitude alone, and half a location is no location.
-    assert sources[NEWS["url"]]["stated_location"] == ""
+    assert (sources[NEWS["url"]]["stated_coordinates"], sources[NEWS["url"]]["stated_address"]) == ("", "")
 
 
 def test_two_spellings_of_one_url_are_one_source_and_blanks_are_filled_from_the_other():
@@ -131,7 +133,8 @@ def test_each_value_keeps_how_its_own_citation_described_the_page():
     assert {entry["source_type"] for entry in sources} == {"Company directory listing", "Operator disclosure"}
 
 
-def test_a_converted_location_is_tiered_by_the_citation_of_its_coordinates():
+def test_a_converted_responses_coordinates_are_where_its_source_places_the_facility():
+    """No longer a value of their own (step 2 of the approve-sources plan): they check the match."""
     blog = dict(NEWS, source_type="Wiki or aggregator", url=PERMIT["url"])
     old = {"site_id": "7", "attributes": [
         attribute("operator", "Ecoserv Ltd", blog),
@@ -140,8 +143,9 @@ def test_a_converted_location_is_tiered_by_the_citation_of_its_coordinates():
     ]}
     site = {"site_id": "7", "internal_facility_id": "7", "site_name": "Ecoserv", "country_iso3": "GBR"}
     _by_attribute, rows, _sources, _warnings = extract_evidence(site, old, "run", "v", date(2026, 1, 1))
-    location = next(row for row in rows if row["attribute_name"] == "found_location")
-    assert (location["location_basis"], location["source_tier"]) == ("coordinates", "Tier 1")
+    [operator] = rows
+    assert operator["attribute_name"] == "operator"
+    assert (operator["stated_coordinates"], operator["location_basis"]) == ("54.12345, -1.54321", "coordinates")
 
 
 def test_a_citation_without_a_url_stays_a_source_of_its_own():
@@ -163,8 +167,8 @@ NEW = {
             **{key: value for key, value in PERMIT.items() if key != "quoted_evidence_short"},
             "facility_name_in_source": "Ecoserv Landfill",
             "facility_name_english": "Ecoserv Landfill",
-            "stated_location": "NZ 123 456",
-            "stated_location_kind": "grid reference",
+            "stated_address": "",
+            "stated_coordinates": "NZ 123 456",
             "values": [
                 {"attribute_name": "operator", "value": "Ecoserv Ltd", "unit": "", "value_basis": "Direct",
                  "confidence_score": "High", "value_date": "2021", "evidence_summary": "Permit holder.",
@@ -182,8 +186,41 @@ def test_a_source_first_response_reads_as_written():
     read = read_payload(NEW)
     assert read["shape"] == SOURCE_FIRST
     assert [source["url"] for source in read["sources"]] == [PERMIT["url"], NEWS["url"]]
-    assert read["sources"][0]["stated_location"] == "NZ 123 456"
+    assert (read["sources"][0]["stated_coordinates"], read["sources"][0]["stated_address"]) == ("NZ 123 456", "")
+    # A source that gives neither field reads as stating nothing.
+    assert (read["sources"][1]["stated_coordinates"], read["sources"][1]["stated_address"]) == ("", "")
     assert validate_foundry_payload(NEW) == []
+
+
+@pytest.mark.parametrize(("stated", "kind", "address", "coordinates"), [
+    ("48.4410, -89.3690 | 1 Gate Road", "coordinates | street address", "1 Gate Road", "48.4410, -89.3690"),
+    # mini, Cowpen Bewley: the address first, then the grid reference.
+    ("Cowpen Bewley, TS23 4HS | NZ4914124539", "street address | grid reference", "Cowpen Bewley, TS23 4HS", "NZ4914124539"),
+    ("Brandon, Manitoba", "place description", "Brandon, Manitoba", ""),
+    ("Not stated", "none", "", ""),
+    # Two parts under one kind: the second has none, and is an address.
+    ("Ball Road in Heatherton | 16 Ball Road in Heatherton", "street address", "Ball Road in Heatherton | 16 Ball Road in Heatherton", ""),
+    # More kinds than parts: the extra one is ignored.
+    ("110 Dunlop Drive in the southeast part of Guelph", "street address | place description", "110 Dunlop Drive in the southeast part of Guelph", ""),
+    ("SU 123 456 | TQ 310 806", "grid reference | coordinates", "", "SU 123 456 | TQ 310 806"),
+    ("", "", "", ""),
+])
+def test_an_older_source_first_location_is_split_by_its_kinds(stated, kind, address, coordinates):
+    """Before step 1 of the approve-sources plan a source gave one stated_location, with a kind for
+    each part. Each is from, or shaped like, a cached response of the 10-site test runs."""
+    [source] = read_payload({"sources": [
+        {"url": "https://a.example", "stated_location": stated, "stated_location_kind": kind, "values": []},
+    ]})["sources"]
+    assert (source["stated_address"], source["stated_coordinates"]) == (address, coordinates)
+    assert "stated_location" not in source and "stated_location_kind" not in source
+
+
+def test_the_new_fields_win_over_an_older_location_in_the_same_source():
+    [source] = read_payload({"sources": [{
+        "url": "https://a.example", "stated_address": "1 Gate Road", "stated_location": "48.44, -89.37",
+        "stated_location_kind": "coordinates", "values": [],
+    }]})["sources"]
+    assert (source["stated_address"], source["stated_coordinates"]) == ("1 Gate Road", "")
 
 
 def test_validation_reports_each_shape_in_its_own_terms():
@@ -203,9 +240,29 @@ def test_validation_reports_each_shape_in_its_own_terms():
         "sources[1].values[1] has unsupported attribute_name 'colour'.",
     ]
     assert validate_foundry_payload({"sources": "none"}) == ["Payload field 'sources' must be a list."]
-    odd_kind = {"sources": [{"url": "https://a.example", "stated_location": "x", "stated_location_kind": "coordinates | postcode", "values": []}]}
+    odd_kind = {"sources": [{"url": "https://a.example", "stated_location": "48.4410, -89.3690 | x", "stated_location_kind": "coordinates | postcode", "values": []}]}
     assert validate_foundry_payload(odd_kind) == ["sources[1] has unrecognised stated_location_kind 'postcode'."]
     assert validate_foundry_payload(["not", "an", "object"]) == ["Response is not a JSON object."]
+
+
+def test_validation_checks_what_a_source_says_about_the_facility():
+    source = {"url": "https://a.example", "values": []}
+    assert validate_foundry_payload({"sources": [{**source, "stated_coordinates": "48.4410, -89.3690", "stated_address": "1 Gate Road"}]}) == []
+    # Coordinates the locate step can't read, such as an address or a land description, are reported.
+    assert validate_foundry_payload({"sources": [{**source, "stated_coordinates": "1 Gate Road, Thunder Bay"}]}) == [
+        "sources[1] stated_coordinates '1 Gate Road, Thunder Bay' is not coordinates or a grid reference.",
+    ]
+    assert validate_foundry_payload({"sources": [{**source, "stated_coordinates": "Not stated"}]}) == []
+    # A grid reference is read in the grids of the site's country.
+    labelled = {"sources": [{**source, "stated_coordinates": "E 452300 N 345600"}]}
+    assert validate_foundry_payload(labelled, "GBR") == []
+    assert validate_foundry_payload(labelled, "FRA") == [
+        "sources[1] stated_coordinates 'E 452300 N 345600' is not coordinates or a grid reference.",
+    ]
+    assert validate_foundry_payload({"sources": [{**source, "stated_address": ["1 Gate Road"], "facility_name_english": {"en": "X"}}]}) == [
+        "sources[1] facility_name_english must be text.",
+        "sources[1] stated_address must be text.",
+    ]
 
 
 def test_passes_of_either_shape_merge():
@@ -267,8 +324,8 @@ def test_a_source_first_run_arbitrates_and_a_tool_failure_is_still_retried(tmp_p
     run_dir = write_run(tmp_path, {"8": {**NEW, "site_id": "8"}, "9": failed})
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
-    queue = list(csv.DictReader((run_dir / "review_queue.csv").open(encoding="utf-8-sig")))
-    assert ("8", "operator", "Ecoserv Ltd") in {(row["site_id"], row["attribute_name"], row["resolved_value"]) for row in queue}
+    found = list(csv.DictReader((run_dir / "found_values.csv").open(encoding="utf-8-sig")))
+    assert ("8", "operator", "Ecoserv Ltd") in {(row["site_id"], row["attribute_name"], row["value"]) for row in found}
     retry = list(csv.DictReader((run_dir / "sites_to_retry.csv").open(encoding="utf-8-sig")))
     assert [row["site_id"] for row in retry] == ["9"]
 

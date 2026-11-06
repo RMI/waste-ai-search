@@ -2,7 +2,7 @@
 
 The link check already opens every cited URL to see whether it loads. For one that does, it now
 also reads the page, up to MAX_PAGE_BYTES, and keeps its text in page_text/ in the run folder: one
-gzip file per exact URL, named by the URL's source_id, so evidence.csv and sources.csv point at it.
+gzip file per exact URL, named by the URL's source_id, so found_values.csv and sources.csv point at it.
 Arbitration reads those files offline, to check whether each quote, and each stated location, is
 really on the page (on_page.py).
 
@@ -24,6 +24,7 @@ import zipfile
 from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
+from itertools import islice
 from pathlib import Path
 
 from .payload import source_id_for
@@ -252,10 +253,11 @@ def _cell(value) -> str:  # noqa: ANN001 - any cell value
 
 
 def _cells_text(rows, budget: int) -> tuple[str, int]:  # noqa: ANN001 - rows of cell values
-    """A sheet's cells as lines, and how many of the workbook's cells it used."""
+    """A sheet's cells as lines, and how many of the workbook's cells it used: never more than
+    `budget`, so a wide row is read only as far as the budget goes."""
     lines, cells = [], 0
     for row in rows:
-        values = [_cell(value) for value in row]
+        values = [_cell(value) for value in islice(row, budget - cells)]
         cells += len(values)
         if any(values):
             lines.append("\t".join(values).rstrip("\t"))

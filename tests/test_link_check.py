@@ -148,11 +148,11 @@ def verdict(url, v, resolved=None, status="404"):
     return LinkResult(url=url, verdict=v, status=status, resolved_url=resolved or url)
 
 
-def test_a_dead_link_is_not_promoted_and_says_why():
+def test_a_dead_link_is_not_used_and_says_why():
     url = "https://x.org/gone.pdf"
     _by, evidence, row = arbitrate(payload(url), {url: verdict(url, BROKEN)})
     assert evidence[0]["promotion_eligible"] == "FALSE"
-    assert evidence[0]["exclusion_reason"] == "Source link broken (404); not promoted."
+    assert evidence[0]["exclusion_reason"] == "Source link broken (404)."
     assert evidence[0]["link_status"] == BROKEN
     assert row["resolution"] == "Not found"
 
@@ -193,7 +193,7 @@ def test_without_a_link_check_nothing_changes():
     assert row["resolved_value"] == "Active"
 
 
-# --- end to end: offline arbitration, leads, and Run_Config ------------------------------------
+# --- end to end: offline arbitration, found_values.csv, and Run_Config ---------------------------
 def build_run(tmp_path, links):
     from waste_ai_search.input_loader import write_csv_records
     from waste_ai_search.seed_source import seed_headers
@@ -219,13 +219,13 @@ def test_arbitration_reads_the_verdicts_without_reaching_the_network(tmp_path, m
         "url": "https://x.org/gone.pdf", "verdict": BROKEN, "status": "404", "resolved_url": "https://x.org/gone.pdf"}})
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
-    leads = (run_dir / "supplementary_leads.csv").read_text()
-    assert "Source link broken (404)" in leads
+    found = (run_dir / "found_values.csv").read_text()
+    assert "Source link broken (404)" in found
 
     from openpyxl import load_workbook
     config = {r[0]: r[1] for r in load_workbook(run_dir / "run_review.xlsx")["Run_Config"].iter_rows(values_only=True)}
     assert config["links_checked"] == 1 and config["links_broken"] == 1
-    assert config["broken_link_route"] == "routed to leads"
+    assert config["broken_link_route"] == "not used"
 
 
 def test_the_search_phase_checks_links_and_can_be_told_not_to(tmp_path, monkeypatch):
@@ -242,7 +242,7 @@ def test_the_search_phase_checks_links_and_can_be_told_not_to(tmp_path, monkeypa
     checked = []
     monkeypatch.setattr(
         pl, "check_urls",
-        lambda urls, cache_path, text_dir=None: checked.append((list(urls), text_dir and text_dir.name)) or {},
+        lambda urls, cache_path, text_dir=None, retry_unverified=False: checked.append((list(urls), text_dir and text_dir.name)) or {},
     )
 
     pl.run_search(pl.PipelineConfig(input_csv=seed, run_dir=tmp_path / "run", run_id="a", site_delay_seconds=0))
@@ -396,8 +396,8 @@ def test_one_malformed_url_does_not_stop_the_others(monkeypatch):
     assert results["https://fine.example/a"].verdict == OK
 
 
-# --- Copilot review: a dead source reaches Leads even when the value was filled elsewhere -------
-def test_a_dead_source_reaches_leads_when_a_working_source_filled_the_attribute(tmp_path, monkeypatch):
+# --- Copilot review: a dead source is listed even when the value was filled elsewhere ------------
+def test_a_dead_source_is_listed_when_a_working_source_filled_the_attribute(tmp_path, monkeypatch):
     from waste_ai_search.arbitrate import run_arbitration
     from waste_ai_search.input_loader import write_csv_records
     from waste_ai_search.run_context import PipelineConfig
@@ -417,10 +417,9 @@ def test_a_dead_source_reaches_leads_when_a_working_source_filled_the_attribute(
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
 
     import csv
-    queued = [r for r in csv.DictReader((run_dir / "review_queue.csv").open()) if r["attribute_name"] == "facility_status"]
-    assert queued[0]["resolved_value"] == "Active"  # filled from the working source
-    leads = list(csv.DictReader((run_dir / "supplementary_leads.csv").open()))
-    assert [l["url"] for l in leads if "Source link broken" in l["exclusion_reason"]] == [dead]
+    found = {r["source_url"]: r for r in csv.DictReader((run_dir / "found_values.csv").open())}
+    assert (found[alive]["value"], found[alive]["status"]) == ("Active", "SME review")  # the working source
+    assert (found[dead]["status"], found[dead]["status_reason"]) == ("not used", "Source link broken (404).")
 
 
 def test_environment_proxies_are_ignored(monkeypatch):
@@ -439,3 +438,141 @@ def test_environment_proxies_are_ignored(monkeypatch):
     monkeypatch.setattr(requests, "Session", recording_session)
     check_urls(["https://x.org/a"], fetch=responder({}))
     assert sessions and sessions[0].trust_env is False
+
+
+# --- check-links --retry-unverified: a failure that may pass is fetched again (#25) --------------
+def test_retry_unverified_fetches_again_only_what_may_pass_with_longer_to_answer(tmp_path):
+    """Of the 32 pages round 2 couldn't read, 20 refused automated readers (403), which asking again
+    won't change; 5 timed out, 2 answered 500 and 1 name didn't resolve, which may pass."""
+    from waste_ai_search.link_check import RETRY_TIMEOUT_SECONDS, save_results
+
+    cache = tmp_path / LINK_CHECK_FILE
+    before = {
+        "https://scielo.example/a": "ConnectTimeout", "https://slow.example/b": "ReadTimeout",
+        "https://down.example/c": "ConnectionError", "https://busy.example/d": "429", "https://opb.example/e": "500",
+        "https://mide.example/f": "DoesNotResolve",
+        "https://oem.example/g": "403", "https://internal.example/h": "BlockedDestination",
+        "https://tls.example/i": "SSLError", "https://fine.example/j": "200", "https://gone.example/k": "404",
+    }
+    save_results(cache, {
+        url: LinkResult(url=url, verdict=classify(int(status) if status.isdigit() else status), status=status, resolved_url=url)
+        for url, status in before.items()
+    })
+    calls = []
+    now = {"https://opb.example/e": 503, "https://mide.example/f": "DoesNotResolve"}
+
+    def fetch(session, url, throttle, timeout=None):
+        calls.append((url, timeout))
+        return now.get(url, 200)
+
+    check_urls(list(before), cache_path=cache, fetch=fetch)
+    assert calls == []  # a plain check fetches nothing it has a verdict for
+    results = check_urls(list(before), cache_path=cache, fetch=fetch, retry_unverified=True)
+    assert sorted(calls) == sorted((url, RETRY_TIMEOUT_SECONDS) for url in list(before)[:6])
+    assert RETRY_TIMEOUT_SECONDS == 45
+    # The new verdict replaces the old, and a failure that persists keeps its new status.
+    assert {url: results[url].status for url in list(before)[:6]} == {
+        "https://scielo.example/a": "200", "https://slow.example/b": "200", "https://down.example/c": "200",
+        "https://busy.example/d": "200", "https://opb.example/e": "503", "https://mide.example/f": "DoesNotResolve",
+    }
+    assert load_results(cache)["https://scielo.example/a"].verdict == OK
+    assert [results[url].status for url in list(before)[6:]] == ["403", "BlockedDestination", "SSLError", "200", "404"]
+
+
+def test_a_page_that_loads_when_fetched_again_has_its_text_kept(tmp_path):
+    """So its quotes are checked against it, as a page that loaded the first time would be."""
+    from waste_ai_search.link_check import RETRY_TIMEOUT_SECONDS, Fetched, save_results
+    from waste_ai_search.page_text import read_page_text, text_file_name
+
+    url, cache, text_dir = "https://scielo.example/a", tmp_path / LINK_CHECK_FILE, tmp_path / "page_text"
+    save_results(cache, {url: LinkResult(url, UNVERIFIED, "ConnectTimeout", url)})
+    asked = []
+
+    def fetch(session, url, throttle, keep_text=False, timeout=None):
+        asked.append((keep_text, timeout))
+        return Fetched(200, b"<html><body><p>El relleno recibe 300 toneladas al dia.</p></body></html>", "text/html")
+
+    fetch.keeps_text = True
+    result = check_urls([url], cache_path=cache, fetch=fetch, text_dir=text_dir, retry_unverified=True)[url]
+    assert asked == [(True, RETRY_TIMEOUT_SECONDS)]
+    assert (result.verdict, result.text_file) == (OK, text_file_name(url))
+    assert read_page_text(text_dir, result.text_file) == "El relleno recibe 300 toneladas al dia."
+    assert load_results(cache)[url].text_file == result.text_file
+
+
+def test_the_check_links_command_retries_unverified_links_when_asked(tmp_path, monkeypatch):
+    from waste_ai_search import cli, search
+
+    asked = []
+    monkeypatch.setattr(search, "check_run_links", lambda run_dir, keep_text=True, retry_unverified=False: asked.append(retry_unverified))
+    run_dir = build_run(tmp_path, None)
+    assert cli.main(["check-links", "--run-id", "run", "--run-dir", str(run_dir), "--retry-unverified"]) == 0
+    assert cli.main(["check-links", "--run-id", "run", "--run-dir", str(run_dir)]) == 0
+    assert asked == [True, False]
+
+
+def test_a_name_that_does_not_resolve_is_its_own_status_and_an_internal_address_is_still_blocked(monkeypatch):
+    """Round 2's www.mide.jalisco.gob.mx was reported BlockedDestination, as an internal address is,
+    though it was only a name that didn't resolve, which may pass."""
+    import requests
+
+    import waste_ai_search.link_check as lc
+
+    _fake_resolution(monkeypatch, {"internal.example": ["10.0.0.5"], "nowhere.example": []})
+    with pytest.raises(lc.DoesNotResolve):
+        lc._public_address("www.mide.example", 443)
+    with pytest.raises(lc.DoesNotResolve):  # a name with no address resolves to nothing either
+        lc._public_address("nowhere.example", 443)
+    session = requests.Session()
+    session.mount("https://", lc._pinned_adapter_class()())
+    assert lc._original_fetch(session, "https://www.mide.example/indicador", lc._HostThrottle(0)) == "DoesNotResolve"
+    assert lc._original_fetch(session, "https://internal.example/x", lc._HostThrottle(0)) == "BlockedDestination"
+    assert classify("DoesNotResolve") == UNVERIFIED
+    assert lc.retryable(verdict("https://www.mide.example/indicador", UNVERIFIED, status="DoesNotResolve"))
+    assert not lc.retryable(verdict("https://internal.example/x", UNVERIFIED, status="BlockedDestination"))
+
+
+# --- Site_Review's link_status says why a page had no automatic check (#25) ----------------------
+@pytest.mark.parametrize("result, words", [
+    (LinkResult("u", OK, "200", "u", text_file="WAISRC-1.txt.gz", text_kind="html", text_chars=5000), "OK"),
+    (LinkResult("u", UNVERIFIED, "403", "u"), "Unverified: the site refuses automated readers (403), so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "ConnectTimeout", "u"), "Unverified: the site timed out, so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "DoesNotResolve", "u"), "Unverified: the address doesn't resolve, so quotes weren't checked"),
+    # An internal address, or, in a run checked before DoesNotResolve, a name that didn't resolve.
+    (LinkResult("u", UNVERIFIED, "BlockedDestination", "u"), "Unverified: the site isn't on the public internet, so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "500", "u"), "Unverified: the site had a server error (500), so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "429", "u"), "Unverified: the site turned away too many requests (429), so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "406", "u"), "Unverified: the site answered 406, so quotes weren't checked"),
+    (LinkResult("u", UNVERIFIED, "ChunkedEncodingError", "u"), "Unverified: the check failed (ChunkedEncodingError), so quotes weren't checked"),
+    (LinkResult("u", BROKEN, "404", "u"), "Broken: the page is gone (404), so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u", text_kind="pdf", text_note="a PDF with no text layer, probably scanned"),
+     "OK, but it's a scanned PDF, so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u", text_file="WAISRC-1.txt.gz", text_kind="html", text_chars=19,
+                text_note="little text: the page may be built by JavaScript"),
+     "OK, but it has almost no text: it may be built by JavaScript, so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u", text_note="not read (binary content)"),
+     "OK, but its text couldn't be read (binary content), so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u", text_kind="pdf", text_note="an encrypted PDF"),
+     "OK, but its text couldn't be read (an encrypted PDF), so quotes weren't checked"),
+    (LinkResult("u", OK, "200", "u"), "OK, but its text wasn't kept, so quotes weren't checked"),
+    (None, ""),
+])
+def test_link_status_says_in_words_why_a_page_had_no_automatic_check(result, words):
+    from waste_ai_search.link_check import describe_link
+
+    assert describe_link(result) == words
+
+
+def test_a_page_whose_text_is_only_its_menu_says_so():
+    from waste_ai_search.link_check import describe_link
+
+    # Not "quotes weren't checked": one in the menu, such as the page's title, is still found.
+    menu = LinkResult("u", OK, "200", "u", text_file="WAISRC-1.txt.gz", text_kind="html", text_chars=593)
+    assert describe_link(menu, menu_only=True) == "OK, but its text is only the site's menu, so a quote missing from it isn't flagged"
+
+
+def test_the_workbook_readme_says_what_link_status_tells_an_sme():
+    from waste_ai_search.workbook_io import REVIEW_INSTRUCTIONS
+
+    [site_review] = [tab for tab in REVIEW_INSTRUCTIONS if tab["tab_name"] == "Site_Review"]
+    assert "If we couldn't read it, link_status says why." in site_review["sme_action"]

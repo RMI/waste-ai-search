@@ -17,12 +17,12 @@ import io
 import json
 from collections import Counter, defaultdict
 from contextlib import redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .schema import CONTRADICTION_CHECK_SOURCES, LAST_BATCH, NOT_A_WASTE_FACILITY, normalize_scalar
-from .searchable_names import NAME_CLASSES, NAMED, name_class, name_reason
+from .searchable_names import NAME_CLASSES, NAMED, site_name_class, site_name_reason
 from .snapshot import MANIFEST_NAME, SNAPSHOT_DIR_NAME, describe_manifest_run
 
 
@@ -31,6 +31,9 @@ Reader = Callable[[str], Optional[bytes]]
 
 SEED = "seed.csv"
 RUN_LOG = "foundry_run_log.csv"
+# What an arbitrated run's values are in: found_values.csv since step 2 of the approve-sources plan,
+# resolved.csv and the review queue before it, as batch 1 still has them.
+FOUND_VALUES = "found_values.csv"
 RESOLVED = "resolved.csv"
 REVIEW_QUEUE = "review_queue.csv"
 MANIFEST = f"{SNAPSHOT_DIR_NAME}/{MANIFEST_NAME}"
@@ -44,7 +47,8 @@ SOURCE_GROUPS = [MAP_ONLY, OTHER_SOURCES]
 # resolved.csv holds the values a run accepted without review. Only batch 1 and earlier runs have
 # any: later runs accept nothing automatically, write it header-only and queue every new value. A
 # confirmation adds nothing new: every row in the review queue is a candidate except one, which
-# batch 1 queued only for a failed identity check and later runs never queue.
+# batch 1 queued only for a failed identity check and later runs never queue. In found_values.csv,
+# a new value is one that fills an empty field: auto-approved, or for SME review.
 CONFIRMED = "Confirmed baseline"
 NEW_VALUE_RESOLUTIONS = {"Filled empty baseline", "Overrides baseline"}
 # An SME's rejection of a value as about another facility. Since build step 5 of the
@@ -107,15 +111,22 @@ class RunFiles:
     run_id: str
     seed: list[dict[str, str]]
     run_log: list[dict[str, str]]
+    # The values accepted without review, and those for review, as resolved.csv and the review
+    # queue gave them; a run with found_values.csv has its rows read into the same shape.
     resolved: list[dict[str, str]]
     review: list[dict[str, str]]
     manifest: Optional[dict[str, Any]]
     # Review_Queue rows from the reviewed workbook; None when there is no workbook to read.
     sme: Optional[list[dict[str, str]]] = None
+    # The sites a source named the facility for. A run with found_values.csv no longer has a name as
+    # a value, so this stands for found_facility_name there.
+    named: set[str] = field(default_factory=set)
 
 
 def load_run(run_id: str, read: Reader) -> RunFiles:
-    data = {name: read(name) for name in (SEED, RUN_LOG, RESOLVED, REVIEW_QUEUE)}
+    found = read(FOUND_VALUES)
+    names = (SEED, RUN_LOG) if found is not None else (SEED, RUN_LOG, RESOLVED, REVIEW_QUEUE)
+    data = {name: read(name) for name in names}
     missing = [name for name, content in data.items() if content is None]
     if missing:
         raise FileNotFoundError(
@@ -123,35 +134,81 @@ def load_run(run_id: str, read: Reader) -> RunFiles:
             "measured."
         )
     manifest = read(MANIFEST)
-    return RunFiles(
+    run = RunFiles(
         run_id=run_id,
         seed=csv_rows(data[SEED]),
-        run_log=csv_rows(data[RUN_LOG]),
-        resolved=csv_rows(data[RESOLVED]),
-        review=csv_rows(data[REVIEW_QUEUE]),
+        run_log=one_row_per_site(csv_rows(data[RUN_LOG])),
+        resolved=csv_rows(data.get(RESOLVED)),
+        review=csv_rows(data.get(REVIEW_QUEUE)),
         manifest=json.loads(manifest) if manifest is not None else None,
     )
+    if found is not None:
+        run.resolved, run.review, run.named = from_found_values(csv_rows(found))
+    return run
+
+
+def from_found_values(rows: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, str]], set[str]]:
+    """found_values.csv read as resolved.csv and the review queue were: its auto-approved values as
+    accepted, and its values for SME review as queued, each a new value filling an empty field; and
+    the sites whose sources named the facility."""
+    from .found_values import AUTO_APPROVED, SME_REVIEW
+
+    accepted, queued = [], []
+    for row in rows:
+        status = normalize_scalar(row.get("status"))
+        if status not in (AUTO_APPROVED, SME_REVIEW):
+            continue
+        (accepted if status == AUTO_APPROVED else queued).append({
+            **row, "resolution": "Filled empty baseline", "resolved_value": normalize_scalar(row.get("value")),
+        })
+    named = {_site_id(row) for row in rows if normalize_scalar(row.get("facility_name_in_source"))}
+    return accepted, queued, named
 
 
 def read_review_workbook(path: Path) -> Optional[list[dict[str, str]]]:
-    """The SMEs' Review_Queue rows, or None when the workbook isn't there. Opened read-only."""
+    """The SMEs' decisions, or None when the workbook isn't there or has neither tab. Opened read-only.
+
+    A workbook from before the approve-sources plan has a Review_Queue, one row per value. One since
+    has a Site_Review, one row per site-source pair, read as the queue was: Correct site validated;
+    Different site and New site rejected as the wrong facility, since the search looked at another
+    place; Junk rejected for another reason.
+    """
     if not Path(path).is_file():
         return None
     from openpyxl import load_workbook
 
+    from .site_review import SITE_REVIEW_SHEET
+
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
-        if REVIEW_SHEET not in workbook.sheetnames:
+        sheet = next((name for name in (REVIEW_SHEET, SITE_REVIEW_SHEET) if name in workbook.sheetnames), None)
+        if sheet is None:
             return None
-        rows = workbook[REVIEW_SHEET].iter_rows(values_only=True)
+        rows = workbook[sheet].iter_rows(values_only=True)
         headers = [normalize_scalar(value) for value in next(rows, ())]
-        return [
+        read = [
             dict(zip(headers, (normalize_scalar(value) for value in row)))
             for row in rows
             if any(value not in (None, "") for value in row)
         ]
     finally:
         workbook.close()
+    return read if sheet == REVIEW_SHEET else [_as_queue_row(row) for row in read]
+
+
+def _as_queue_row(row: dict[str, str]) -> dict[str, str]:
+    """A Site_Review row as a Review_Queue row's validation_status and rejection_reason."""
+    from .accept_reviews import DECISION_BY_TEXT, _folded
+    from .schema import CORRECT_SITE, DIFFERENT_SITE, JUNK, NEW_SITE
+
+    decision = DECISION_BY_TEXT.get(_folded(row.get("decision")), "")
+    status, reason = {
+        CORRECT_SITE: ("Validated", ""),
+        DIFFERENT_SITE: ("Rejected", f"{WRONG_FACILITY} - another site in our database"),
+        NEW_SITE: ("Rejected", f"{WRONG_FACILITY} - not in our database"),
+        JUNK: ("Rejected", JUNK),
+    }.get(decision, ("", ""))
+    return {**row, "validation_status": status, "rejection_reason": reason}
 
 
 def source_group(site: dict[str, Any]) -> str:
@@ -173,9 +230,26 @@ def _searched_id(row: dict[str, Any]) -> str:
     return normalize_scalar(row.get("searched_site_id")) or _site_id(row)
 
 
+def _is_name(row: dict[str, Any]) -> bool:
+    return normalize_scalar(row.get("attribute_name")) == NAME_ATTRIBUTE
+
+
 def _as_int(value: Any) -> int:
     text = normalize_scalar(value)
     return int(text) if text.isdigit() else 0
+
+
+def one_row_per_site(run_log: list[dict[str, str]]) -> list[dict[str, str]]:
+    """A run log with one row per site. A site searched in more than one pass (the gas follow-up, a
+    second model) has a row per pass: its first pass's row is kept, with every pass's Bing queries."""
+    merged: dict[str, dict[str, str]] = {}
+    for row in run_log:
+        first = merged.get(_site_id(row))
+        if first is None:
+            merged[_site_id(row)] = dict(row)
+        else:
+            first["web_searches"] = str(_as_int(first.get("web_searches")) + _as_int(row.get("web_searches")))
+    return list(merged.values())
 
 
 SITE_HEADERS = [
@@ -196,12 +270,20 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
     seed = {_site_id(row): row for row in run.seed}
     accepted: dict[str, list[dict[str, str]]] = defaultdict(list)
     to_review: dict[str, list[dict[str, str]]] = defaultdict(list)
+    # A search found a name whether it was new or confirmed the one we hold, as a source naming the
+    # facility counts in found_values.csv; only the new-value counts leave confirmations out.
+    found_names = set(run.named)
     for row in run.resolved:
-        if normalize_scalar(row.get("resolution")) in NEW_VALUE_RESOLUTIONS:
+        resolution = normalize_scalar(row.get("resolution"))
+        if resolution in NEW_VALUE_RESOLUTIONS:
             accepted[_searched_id(row)].append(row)
+        if resolution in (*NEW_VALUE_RESOLUTIONS, CONFIRMED) and _is_name(row):
+            found_names.add(_searched_id(row))
     for row in run.review:
         if normalize_scalar(row.get("resolution")) != CONFIRMED:
             to_review[_searched_id(row)].append(row)
+        if _is_name(row):
+            found_names.add(_searched_id(row))
     elsewhere = Counter(
         _searched_id(row) for row in [*run.resolved, *run.review] if _searched_id(row) != _site_id(row)
     )
@@ -227,7 +309,7 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
             "country_iso3": normalize_scalar(site.get("country_iso3")) or normalize_scalar(log.get("country_iso3")),
             "site_name": name,
             "original_site_name": normalize_scalar(site.get("original_site_name")),
-            "name_class": name_class(name, site.get("original_site_name")),
+            "name_class": site_name_class({**site, "site_name": name}),
             "source_group": source_group(site),
             "status": status,
             "answered": status.startswith(ANSWERED_STATUSES),
@@ -235,7 +317,7 @@ def site_rows(run: RunFiles) -> list[dict[str, Any]]:
             "new_values_accepted": len(accepted[site_id]),
             "new_values_to_review": len(to_review[site_id]),
             "found_attributes": "; ".join(attributes),
-            "found_name": NAME_ATTRIBUTE in attributes,
+            "found_name": site_id in found_names,
             "filed_under_another_site": elsewhere[site_id],
             "not_a_waste_facility": any(
                 normalize_scalar(row.get("attribute_name")) == "facility_type"
@@ -296,7 +378,8 @@ def verdict(stats: dict[str, Any], named_rate: Optional[float], is_named: bool) 
     decided = stats["sme_validated"] + stats["sme_rejected"]
     if decided and stats["sme_wrong_facility"] * 2 > decided:
         return "below the bar: SMEs rejected most as the wrong facility"
-    if not named_rate:
+    # None when no named site was answered; a rate of 0 is a measurement to compare with.
+    if named_rate is None:
         return "no named sites to compare with"
     if (stats["new_value_rate"] or 0) < BAR * named_rate:
         return "below the bar"
@@ -367,7 +450,7 @@ def skip_candidates(selections: dict[int, list[dict[str, Any]]]) -> list[dict[st
     rows = []
     for batch, selected in selections.items():
         for site in selected:
-            cls, reason = name_reason(site.get("site_name"), site.get("original_site_name"))
+            cls, reason = site_name_reason(site)
             if cls == NAMED:
                 continue
             lat, lon = normalize_scalar(site.get("latitude")), normalize_scalar(site.get("longitude"))
@@ -418,7 +501,7 @@ def forecast(
     """
     rows = []
     for batch, selected in batch_selections(sites).items():
-        counts = Counter(name_class(site.get("site_name"), site.get("original_site_name")) for site in selected)
+        counts = Counter(site_name_class(site) for site in selected)
         for cls in NAME_CLASSES:
             queries = counts[cls] * per_site.get(cls, fallback)
             rows.append({
@@ -432,7 +515,11 @@ def forecast(
 
 
 def describe_run(run: RunFiles) -> str:
-    sme = "no reviewed workbook found" if run.sme is None else f"{len(run.sme):,} reviewed-workbook rows"
+    sme = (
+        "no reviewed workbook with a Review_Queue or Site_Review tab found"
+        if run.sme is None
+        else f"{len(run.sme):,} reviewed-workbook rows"
+    )
     return (
         f"Run {run.run_id}: {len(run.run_log):,} sites searched; {sme}.\n"
         f"  Consolidation run its seed read: {describe_manifest_run(run.manifest)}."

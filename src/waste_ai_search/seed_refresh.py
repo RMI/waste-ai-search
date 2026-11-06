@@ -11,8 +11,10 @@ continue to work. Two columns are added:
   value by the source that produced it rather than by the seed's own datasets.
 - `ai_filled_run_ids` - which run supplied them.
 
-Values still awaiting human review are merged too, because the point is to stop re-asking
-questions already answered; `ai_filled_fields` keeps them distinguishable from source data.
+Values for SME review are merged too, as well as those approved automatically, because the point is
+to stop re-asking questions already answered; `ai_filled_fields` keeps them distinguishable from
+source data. Only values that fill an empty field are merged: a source's name and location never
+replace ours.
 """
 from __future__ import annotations
 
@@ -20,46 +22,33 @@ from pathlib import Path
 from typing import Any
 
 from .credibility import ai_filled_tiers
-from .schema import (
-    COORDINATE_ATTRIBUTES,
-    GAP_FILL_ATTRIBUTES,
-    LOCATION_ATTRIBUTE,
-    is_blank,
-    normalize_scalar,
-)
+from .found_values import pick_values
+from .schema import GAP_FILL_ATTRIBUTES, normalize_scalar
 
 
 REFRESH_COLUMNS = ["ai_filled_fields", "ai_filled_run_ids"]
 
-# Only these resolutions represent a value we are willing to carry forward as a baseline.
-MERGEABLE_RESOLUTIONS = {"Filled empty baseline", "Overrides baseline"}
 
-# Identity findings update the seed's own identity columns rather than a gap-fill attribute.
-IDENTITY_MERGE_COLUMNS = {
-    "found_facility_name": "site_name",
-    "found_latitude": "latitude",
-    "found_longitude": "longitude",
-}
-
-
-def mergeable_rows(resolved_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        row
-        for row in resolved_rows
-        if normalize_scalar(row.get("resolution")) in MERGEABLE_RESOLUTIONS
-        and not is_blank(row.get("resolved_value"))
-    ]
+def mergeable_rows(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The found_values.csv rows worth carrying forward as a baseline: one per site and attribute,
+    among the values auto-approved or for SME review, chosen as accept-reviews chooses one per year
+    (found_values.pick_values), and of a yearly attribute, the newest year's."""
+    newest: dict[tuple[str, str], dict[str, Any]] = {}
+    picked = pick_values(found)
+    for (site_id, attribute, _year), row in sorted(picked.items(), key=lambda item: -int(item[1]["year"])):
+        newest.setdefault((site_id, attribute), row)
+    return list(newest.values())
 
 
 def refresh_sites(
     sites: list[dict[str, Any]],
-    resolved_rows: list[dict[str, Any]],
+    found: list[dict[str, Any]],
     run_id: str,
-    merge_identity: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Return a new site list with promoted values merged in, plus a summary of what changed."""
+    """Return a new site list with a run's found values merged in, plus a summary of what changed.
+    `found` is the run's found_values.csv."""
     by_site: dict[str, list[dict[str, Any]]] = {}
-    for row in mergeable_rows(resolved_rows):
+    for row in mergeable_rows(found):
         by_site.setdefault(normalize_scalar(row.get("site_id")), []).append(row)
 
     stats = {"facilities_updated": 0, "values_merged": 0, "gas_collection_discovered": 0}
@@ -84,37 +73,16 @@ def refresh_sites(
 
         for row in rows:
             attribute = normalize_scalar(row.get("attribute_name"))
-            value = normalize_scalar(row.get("resolved_value"))
-            tier_label_text = normalize_scalar(row.get("winning_source_tier"))
-
-            if merge_identity and attribute == LOCATION_ATTRIBUTE:
-                # Arbitration writes a found location as one "lat, lon" row. Both seed coordinates
-                # change together, each stamped under its own coordinate attribute, since that is
-                # how the next pass reads them (credibility.trusted_baseline_coordinates).
-                for coordinate, part in zip(COORDINATE_ATTRIBUTES, _location_parts(value, row)):
-                    new_site[IDENTITY_MERGE_COLUMNS[coordinate]] = part
-                    if coordinate not in existing:
-                        stamps.append(f"{coordinate}@{tier_label_text}")
-                    merged_here += 1
-                continue
-
-            if attribute in GAP_FILL_ATTRIBUTES:
-                column = attribute
-            elif merge_identity and attribute in IDENTITY_MERGE_COLUMNS:
-                column = IDENTITY_MERGE_COLUMNS[attribute]
-            else:
+            value = normalize_scalar(row.get("value"))
+            tier_label_text = normalize_scalar(row.get("source_tier"))
+            if attribute not in GAP_FILL_ATTRIBUTES:
                 continue
 
             if attribute == "has_landfill_gas_collection" and value.upper() == "TRUE":
                 if normalize_scalar(site.get("has_landfill_gas_collection")).upper() != "TRUE":
                     stats["gas_collection_discovered"] += 1
 
-            new_site[column] = value
-            if column == "site_name" and "facility_name" in new_site:
-                # On reload a site's name is read from facility_name first, so updating site_name
-                # alone lost the merged name while its Tier stamp survived - the old name, maybe
-                # an OSM one, then counted as trusted and was never searched again.
-                new_site["facility_name"] = value
+            new_site[attribute] = value
             if attribute not in existing:
                 stamps.append(f"{attribute}@{tier_label_text}")
             merged_here += 1
@@ -131,16 +99,6 @@ def refresh_sites(
         refreshed.append(new_site)
 
     return refreshed, stats
-
-
-def _location_parts(value: str, row: dict[str, Any]) -> list[str]:
-    """A found_location's two coordinates, as written."""
-    parts = [part.strip() for part in value.split(",")]
-    if len(parts) != len(COORDINATE_ATTRIBUTES) or not all(parts):
-        raise ValueError(
-            f"Site {normalize_scalar(row.get('site_id'))}: {LOCATION_ATTRIBUTE} {value!r} is not 'lat, lon'"
-        )
-    return parts
 
 
 def _existing_labels(value: Any) -> dict[str, str]:

@@ -21,13 +21,15 @@ def site(**overrides):
     return base
 
 
-def resolved(attribute, value, resolution="Filled empty baseline", tier="Tier 1"):
+def resolved(attribute, value, status="auto-approved", tier="Tier 1", year=2024):
+    """A found_values.csv row."""
     return {
         "site_id": "1",
+        "year": year,
         "attribute_name": attribute,
-        "resolution": resolution,
-        "resolved_value": value,
-        "winning_source_tier": tier,
+        "status": status,
+        "value": value,
+        "source_tier": tier,
     }
 
 
@@ -60,11 +62,12 @@ def test_answered_attributes_are_not_asked_again():
     assert "facility_type" not in second
 
 
-def test_unreviewed_conflicts_are_not_merged():
-    """Only promoted values carry forward; a conflict awaiting a human must not become baseline."""
+def test_values_not_used_are_not_merged():
+    """Only a value that would load carries forward; one that confirms or would change ours, or
+    can't be used, must not become baseline."""
     refreshed, stats = refresh_sites(
         [site()],
-        [resolved("facility_status", "Active", resolution="Conflict - needs review")],
+        [resolved("facility_status", "Active", status="not used")],
         "run1",
     )
 
@@ -72,13 +75,24 @@ def test_unreviewed_conflicts_are_not_merged():
     assert refreshed[0]["facility_status"] == ""
 
 
-def test_lead_routed_values_are_not_merged():
+def test_values_awaiting_an_sme_are_merged():
+    """So a gas collection system found in pass 1 unlocks the follow-up before anyone reviews it."""
     refreshed, stats = refresh_sites(
         [site()],
-        [resolved("facility_status", "Active", resolution="Conflict - lower credibility")],
+        [resolved("has_landfill_gas_collection", "TRUE", status="SME review", tier="Tier 3")],
         "run1",
     )
-    assert stats["values_merged"] == 0
+    assert stats["values_merged"] == 1
+    assert refreshed[0]["has_landfill_gas_collection"] == "TRUE"
+
+
+def test_one_value_is_merged_per_attribute_the_best_and_for_a_yearly_one_the_newest_years():
+    refreshed, stats = refresh_sites([site()], [
+        resolved("facility_type", "Dumpsite", tier="Tier 3"), resolved("facility_type", "Sanitary Landfill", tier="Tier 1"),
+        resolved("facility_status", "Inactive", year=2019), resolved("facility_status", "Active", tier="Tier 2", year=2024),
+    ], "run1")
+    assert (refreshed[0]["facility_type"], refreshed[0]["facility_status"]) == ("Sanitary Landfill", "Active")
+    assert stats["values_merged"] == 2
 
 
 def test_merged_values_record_the_tier_that_supplied_them():
@@ -108,14 +122,12 @@ def test_next_pass_tiers_an_ai_filled_baseline_by_its_own_source():
     assert row["resolution"] == "Conflict - needs review"
 
 
-def test_identity_is_only_merged_when_asked():
-    rows = [resolved("found_facility_name", "Real Name Landfill")]
-
-    without, _ = refresh_sites([site()], rows, "run1")
-    assert without[0]["site_name"] == "Test Landfill"
-
-    with_identity, _ = refresh_sites([site()], rows, "run1", merge_identity=True)
-    assert with_identity[0]["site_name"] == "Real Name Landfill"
+def test_a_name_or_location_is_never_merged():
+    """A source's name and location only check the match (step 2 of the approve-sources plan), so
+    refresh-seed's --merge-identity went with them."""
+    rows = [resolved("found_facility_name", "Real Name Landfill"), resolved("found_location", "6.5, 3.3")]
+    refreshed, stats = refresh_sites([site()], rows, "run1")
+    assert refreshed[0]["site_name"] == "Test Landfill" and stats["values_merged"] == 0
 
 
 def test_refresh_columns_are_appended_once():
@@ -152,18 +164,3 @@ def test_values_with_no_database_column_survive_the_refreshed_seed(tmp_path):
     reloaded, _headers = load_sites(path)
     assert {a: reloaded[0][a] for a in found} == found
     assert not set(found) & set(requested_attributes(reloaded[0]))
-
-
-def test_a_merged_name_survives_the_refreshed_seed(tmp_path):
-    """Reload reads facility_name before site_name, so the merge must update both."""
-    from waste_ai_search.input_loader import load_sites
-    from waste_ai_search.seed_refresh import write_refreshed_seed
-
-    database_site = site(facility_name="Test Landfill")
-    refreshed, _stats = refresh_sites(
-        [database_site], [resolved("found_facility_name", "Brand New Name Landfill")], "run1", merge_identity=True
-    )
-    path = write_refreshed_seed(tmp_path / "refreshed_seed.csv", refreshed, list(database_site))
-
-    reloaded, _headers = load_sites(path)
-    assert reloaded[0]["site_name"] == "Brand New Name Landfill"

@@ -17,7 +17,7 @@ from datetime import date
 
 import pytest
 
-from waste_ai_search.arbitrate import cached_source_urls, extract_evidence, run_arbitration
+from waste_ai_search.arbitrate import cached_source_urls, extract_evidence, payload_leads, run_arbitration
 from waste_ai_search.arbitration import resolve
 from waste_ai_search.credibility import DROPPED_SOURCE_SITES, dropped_source_site
 from waste_ai_search.prompt_builder import build_site_prompt, requested_attributes
@@ -105,15 +105,15 @@ def test_drops_are_counted_per_site_and_website():
     assert dropped[1].startswith("Dropped 1 citation(s) of maptons.com")
 
 
-def test_an_attribute_left_with_no_source_is_not_promoted():
-    """Like a value given with no source: no evidence, nothing to resolve, nothing in Leads."""
+def test_an_attribute_left_with_no_source_is_not_used():
+    """Like a value given with no source: no evidence, nothing to resolve, nothing listed."""
     by_attribute, evidence, sources, warnings = extract(
         attribute("operator", "City of Brandon", cite("https://mapcarta.com/W1")),
     )
     assert evidence == [] and sources == []
     assert "operator" not in by_attribute
     assert resolve(site(), "operator", by_attribute.get("operator", []))["resolution"] == "Not found"
-    assert "operator: every source was a dropped map site; not promoted." in warnings
+    assert "operator: every source was a dropped map site; not used." in warnings
 
 
 def test_a_kept_source_still_carries_the_value():
@@ -134,6 +134,17 @@ def test_a_lead_pointing_at_a_map_site_is_counted_with_the_citations():
     ]}
     _by, _evidence, _sources, warnings = extract_evidence(site(), payload, "r", "v", date(2026, 1, 1))
     assert [warning.split(":")[0] for warning in warnings] == ["Dropped 1 citation(s) of mapcarta.com"]
+
+
+def test_a_lead_giving_a_map_site_under_another_key_is_dropped_and_counted_too(tmp_path):
+    """Leads written before the prompt's template named their link as they chose."""
+    payload = {"site_id": "1", "sources": [], "unverified_leads": [
+        {"lead": "Mapcarta lists a landfill here.", "source_url": "https://mapcarta.com/W2"},
+    ]}
+    _by, _evidence, _sources, warnings = extract_evidence(site(), payload, "r", "v", date(2026, 1, 1))
+    assert [warning.split(":")[0] for warning in warnings] == ["Dropped 1 citation(s) of mapcarta.com"]
+    (tmp_path / "site_1.json").write_text(json.dumps(payload))
+    assert payload_leads([tmp_path / "site_1.json"], {}, "r") == []
 
 
 # --- the link check and a whole run -----------------------------------------------------------
@@ -165,8 +176,7 @@ def build_run(tmp_path, attributes=None, leads=None):
 
 def arbitrate(run_dir):
     run_arbitration(PipelineConfig(input_csv=None, run_dir=run_dir, run_id="run", dataset_version="v"))
-    return {name: list(csv.DictReader((run_dir / f"{name}.csv").open()))
-            for name in ("resolved", "review_queue", "parse_warnings", "supplementary_leads")}
+    return {name: list(csv.DictReader((run_dir / f"{name}.csv").open())) for name in ("found_values", "parse_warnings")}
 
 
 def test_dropped_urls_are_not_link_checked(tmp_path):
@@ -183,10 +193,12 @@ def test_a_run_counts_its_drops_in_parse_warnings_and_cites_none_of_them(tmp_pat
         ("1", "Dropped 2 citation(s) of mapcarta.com"),
         ("1", "Dropped 1 citation(s) of maptons.com"),
     ]
-    for name in ("evidence.csv", "sources.csv", "supplementary_leads.csv", "resolved.csv"):
+    for name in ("found_values.csv", "sources.csv"):
         text = (run_dir / name).read_text()
         assert "mapcarta" not in text and "maptons" not in text, name
-    assert [lead["url"] for lead in out["supplementary_leads"]] == [NEWS_LEAD["url"]]
+    # The agent's own leads are listed as not used, the one pointing at a map site left out.
+    leads = [row for row in out["found_values"] if row["status_reason"] == "The agent reported it as unverified."]
+    assert [lead["source_url"] for lead in leads] == [NEWS_LEAD["url"]]
 
 
 # --- the prompt -------------------------------------------------------------------------------

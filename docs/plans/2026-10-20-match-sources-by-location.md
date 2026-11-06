@@ -6,6 +6,17 @@ source-first-output, match-sources-to-sites), not yet merged. The step 4 live te
 The matching #261 changes are ingestion's, still to make. To be built before batch 2.
 **Date:** 20 October 2026
 
+> **Its matching and review parts were dropped on 21 October 2026,** and replaced by
+> [2026-10-21-approve-sources-site-by-site.md](2026-10-21-approve-sources-site-by-site.md). The
+> agent again decides whether a source is about the site searched, and every source is filed under
+> that site, so step 4 (match) and `match.py` are gone. Step 5's review, in which nothing is
+> accepted automatically, is replaced: Tier 1–2 fills of empty fields are approved automatically,
+> with three exceptions, and SMEs decide site–source pairs on a Site_Review tab. Build step 3's
+> "turn off automatic acceptance" is reversed, and the #261 matching changes are not needed. What
+> stays: dropping the map mirrors, skipping unsearchable names, source-first output, rounded prompt
+> coordinates, the locate step, one source per exact URL, per-year keys, and the
+> `possible_duplicates.csv` and `datasets_found.csv` lists.
+
 ## The problem
 
 The search finds real data about real landfills, but files it under the wrong site. Everything

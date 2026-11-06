@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime
 from typing import Any
@@ -72,12 +73,25 @@ GAP_FILL_ATTRIBUTES = [
     "gccs_collection_efficiency",
 ]
 
+# The key values (key-values plan, docs/plans/2026-10-26-smes-check-key-values.md): from a Tier 3-5
+# source an SME checks each of these against the page, on its own Site_Review row, as well as the
+# source's match to our site. A Tier 1-2 source's values are trusted as read, except an operator the
+# agent marked Inferred or Conflicting (found_values.needs_value_check).
+VALUE_CHECKED_ATTRIBUTES = [
+    "facility_type",
+    "closing_year",
+    "annual_incoming_waste_metric_tonnes",
+    "area_square_meters",
+    "has_landfill_gas_collection",
+    "gccs_collection_efficiency",
+]
+
 # Attributes that hold a value for each year, as consolidation keeps them: its
 # TIME_VARYING_ATTRIBUTE_COLUMNS, in RMI/waste_data_ingestion_pipeline's
 # facility_etl/consolidation/consolidation_techniques.py, less the columns this repository never
 # reads (gccs_lfg_collected_cubic_meters, mcf, ch4_emissions_metric_tonnes). Keep the two aligned.
-# Each year a source reports one of these for is reviewed on its own row (build step 5 of the
-# source-matching plan); every other attribute has one row per site.
+# One value is loaded for each year a source reports one of these for (build step 5 of the
+# source-matching plan); every other attribute has one value per site.
 TIME_VARYING_ATTRIBUTES = [
     "facility_status",
     "waste_depth",
@@ -98,11 +112,15 @@ UNSEARCHED_ATTRIBUTES = {
     "gccs_ch4_generated_metric_tonnes",
     "gccs_ch4_collected_metric_tonnes",
     "gccs_ch4_flow_to_project_metric_tonnes",
+    # Retired 30 October 2026: whether incoming waste is municipal is marked on the amount itself
+    # (not_municipal), and a site taking mainly other waste is a Non-Municipal Waste Landfill.
+    # An older response's value is listed as not used (found_values.py).
+    "bulk_waste_type",
 }
 
-# A location is one fact, valued "lat, lon", so it is reviewed and loaded as a pair, from one
-# source, or not at all. It is read from where each source states the facility is (locate.py),
-# not from coordinates the agent returns as values.
+# A location is one fact, valued "lat, lon". Arbitration once read a found location from where
+# each source states the facility is; it no longer does (step 2 of the approve-sources plan), and
+# the name is kept for the seed's provenance and older review queues.
 LOCATION_ATTRIBUTE = "found_location"
 
 # The two coordinates a location is made of. The seed and refresh-seed record a location's
@@ -110,9 +128,10 @@ LOCATION_ATTRIBUTE = "found_location"
 # plan returned them as values.
 COORDINATE_ATTRIBUTES = ["found_latitude", "found_longitude"]
 
-# Always requested, except where a Tier 1-2 source already supplied them. They are how we know
-# the agent found the *right* facility, so they are not gap-filled: the identity check rests on
-# them (Q34). The name is a value; the location comes from what each source states.
+# No longer requested or loaded (steps 1 and 2 of the approve-sources plan): the agent returns only
+# sources about the site searched, and the name and location each source gives are only used to
+# check that, never to replace ours. Kept so older cached responses and the seed's provenance still
+# read them.
 IDENTITY_ATTRIBUTES = [
     "found_facility_name",
     LOCATION_ATTRIBUTE,
@@ -206,7 +225,13 @@ RECYCLING_CENTER = "Recycling Center"
 # and in chk_facility_type on every transformed.* table, but NOT yet in the `facility_type` enum type
 # or consolidation.consolidated_facility's chk_facility_type, so it is pending too.
 TRANSFER_STATION = "Transfer Station"
-PENDING_UPSTREAM_FACILITY_TYPES = [TRANSFER_STATION, RECYCLING_CENTER, NOT_A_WASTE_FACILITY]
+# A disposal site that takes mainly waste other than municipal solid waste: construction and
+# demolition rubble, soil, or industrial, hazardous or mining waste. The standardized spec's type
+# for a site a model of municipal waste leaves out (waste_data_ingestion_pipeline #238, merged
+# 20 October 2026, in consolidated_facility's chk_facility_type). Pending here until
+# check_db_schema.py reports the enum type accepts it too.
+NON_MUNICIPAL_LANDFILL = "Non-Municipal Waste Landfill"
+PENDING_UPSTREAM_FACILITY_TYPES = [TRANSFER_STATION, RECYCLING_CENTER, NON_MUNICIPAL_LANDFILL, NOT_A_WASTE_FACILITY]
 FACILITY_TYPE_ALLOWED = [*FACILITY_TYPE_VALUES, *PENDING_UPSTREAM_FACILITY_TYPES]
 # What every prompt offers. "Not a Waste Facility" is offered only to unconfirmed sites (WP-525).
 FACILITY_TYPE_OFFERED = [value for value in FACILITY_TYPE_ALLOWED if value != NOT_A_WASTE_FACILITY]
@@ -238,11 +263,11 @@ CALCULATED_ATTRIBUTES = [
 
 TARGET_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *CALCULATED_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
 REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
-# What a source reports as a value. A location is not one: each source states where the facility
-# is, and arbitration reads the found location from those (locate.py).
-VALUE_ATTRIBUTES = [
-    name for name in REQUESTABLE_ATTRIBUTES if name not in COORDINATE_ATTRIBUTES and name != LOCATION_ATTRIBUTE
-]
+# What a source reports as a value: an attribute we fill where ours is empty. Older responses also
+# gave the facility's name and coordinates as values. Those are read, and never used as values: a
+# source's name and location only check that it is about the site searched.
+VALUE_ATTRIBUTES = list(GAP_FILL_ATTRIBUTES)
+IDENTITY_VALUES = {*IDENTITY_ATTRIBUTES, *COORDINATE_ATTRIBUTES}
 
 BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover", "has_flare"}
 ARRAY_TARGET_ATTRIBUTES = {"cover_types", "gccs_energy_project_type", "gccs_current_project_status"}
@@ -283,7 +308,7 @@ NUMERIC_TARGET_ATTRIBUTES = {
     "flare_efficiency",
 }
 
-# Ranges the spec states. Checked after conversion; out-of-range values are not promotable.
+# Ranges the spec states. Checked after conversion; out-of-range values are not used.
 ATTRIBUTE_RANGES = {
     "area_square_meters": (0.0, None),
     "annual_incoming_waste_metric_tonnes": (0.0, None),
@@ -352,6 +377,15 @@ FACILITY_TYPE_MAP = {
     "recycling centre": RECYCLING_CENTER,
     "recycling depot": RECYCLING_CENTER,
     "materials recovery facility": RECYCLING_CENTER,
+    "non-municipal waste landfill": NON_MUNICIPAL_LANDFILL,
+    "non municipal waste landfill": NON_MUNICIPAL_LANDFILL,
+    "inert landfill": NON_MUNICIPAL_LANDFILL,
+    "inert waste landfill": NON_MUNICIPAL_LANDFILL,
+    "construction and demolition landfill": NON_MUNICIPAL_LANDFILL,
+    "c&d landfill": NON_MUNICIPAL_LANDFILL,
+    "industrial landfill": NON_MUNICIPAL_LANDFILL,
+    "industrial waste landfill": NON_MUNICIPAL_LANDFILL,
+    "hazardous waste landfill": NON_MUNICIPAL_LANDFILL,
     "not a waste facility": NOT_A_WASTE_FACILITY,
     "not a waste site": NOT_A_WASTE_FACILITY,
     "not waste": NOT_A_WASTE_FACILITY,
@@ -521,33 +555,85 @@ BOOLEAN_INPUT_MAP = {
 # spelling and its language, so a reviewer can check results against the original name.
 SITE_NAME_COLUMNS = ["site_name", "original_site_name", "source_language"]
 
-SOURCE_FACILITY_COLUMNS = [
-    "facility_name_in_source", "facility_name_english", "stated_location", "stated_location_kind",
-    "location_basis", "located_latitude", "located_longitude", "location_reason",
+# found_values.csv: every value the search found, one row per site, year, source and attribute,
+# with its status (found_values.py). It replaces evidence.csv, resolved.csv, review_queue.csv and
+# supplementary_leads.csv.
+FOUND_VALUES_HEADERS = [
+    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "year",
+    # The source, as sources.csv lists it, and its tier.
+    "source_id", "source_url", "source_title", "publisher", "source_tier", "tier_rule_applied", "link_status",
+    # The facility the source describes, as it writes it: its name, address and coordinates or grid
+    # reference (stated_coordinates). source_coordinates is the point read from them (locate.py),
+    # "lat, lon" to paste into Google Maps, coordinates_from says from what, and distance_km is how
+    # far that is from our site's coordinates - or, where they were too rough to give a point, how
+    # far the farthest rough reading of them is. location_note says why there is no point.
+    # source_place is the municipality and state the source puts the facility in.
+    "facility_name_in_source", "facility_name_english", "source_address", "source_place", "stated_coordinates",
+    "source_coordinates", "coordinates_from", "distance_km", "location_note",
+    # The value, converted and mapped, and as the agent wrote it; our_value is ours for that year.
+    "attribute_name", "value", "unit", "value_as_written", "value_date", "our_value",
+    # The agent's quote, and whether it, and the location the source states, are on the source's page
+    # as the link check kept its text (on_page.py).
+    "quote", "quote_on_page", "location_on_page", "agent_note", "value_basis", "agent_confidence",
+    # planned is TRUE for a closing_year the source gives as planned or expected; not_municipal is
+    # TRUE for an incoming waste amount the source says is mainly other waste, which isn't used.
+    "planned", "not_municipal",
+    # review_id is the site-source pair whose status this is. value_check is "required" for a key
+    # value from a Tier 3-5 pair, or an operator the agent marked Inferred or Conflicting from any
+    # pair, which an SME checks on its own row; accept-reviews fills the rest: the pair's decision, the
+    # value's (Correct or Wrong) and any value the SME typed instead, and whether it loads.
+    "review_id", "status", "status_reason", "value_check",
+    "sme_decision", "value_decision", "corrected_value", "loaded",
 ]
 
-EVIDENCE_HEADERS = [
-    "evidence_id", "run_id", "dataset_version", "site_id", *SITE_NAME_COLUMNS, "internal_facility_id",
-    "attribute_name", "claimed_value", "claimed_unit", "normalized_value", "normalized_unit",
-    "unit_conversion_note", "mapped_value", "mapping_note", "value_basis", "value_date",
-    "agent_confidence", "source_id", "link_status", "source_tier", "agent_proposed_tier", "tier_rule_applied",
-    "evidence_summary", "quoted_evidence_short", "search_terms_used", "promotion_eligible",
-    "exclusion_reason", "record_created_date",
-    # The facility each source describes, as it writes it, and the point read from its location
-    # (locate.py): every row of a source carries them. location_reason says why a stated location
-    # is not a usable point.
-    *SOURCE_FACILITY_COLUMNS,
-    # site_id is the site a source is filed under (match.py), blank for a likely new facility, and
-    # searched_site_id the site whose search found it; match says which rule filed it there.
-    "searched_site_id", "match",
-    # Whether the source's quote, and the location it states, are on its page, as the link check
-    # kept its text (on_page.py): found, partly found, not found, or no page text.
-    "quote_on_page", "location_on_page",
+# accepted_values.csv: the one value to load for each site, attribute and year (for a yearly
+# attribute), from the auto-approved pairs and the pairs SMEs approved (accept_reviews.py). What
+# ingestion loads. site_id is where the value loads, which an SME's Different site can make another
+# of our sites than the one searched; review_id names the pair it came from. approved_by is "auto",
+# or the reviewer.
+ACCEPTED_VALUES_HEADERS = [
+    "run_id", "site_id", "site_name", "country_iso3", "attribute_name", "value", "unit", "year",
+    # Whether the source dates the value to that year (TRUE) or the run's year was assumed (FALSE).
+    "is_year_exact",
+    "source_url", "source_tier", "approved_by", "reviewed_date", "review_id",
 ]
 
-# resolved.csv is written with this header and no rows. Nothing is accepted automatically, so every
-# value goes to review, and ingestion reads the SMEs' decisions from the review workbook. The file
-# stays because ingestion's loader expects it, and runs from before still carry rows.
+# The Site_Review tab (site_review.py): one row per site-source pair with values that would load,
+# and under it one row per value an SME checks (found_values.needs_value_check). Left to right as an
+# SME reads a row.
+# What accept-reviews reads a Site_Review row back by: the pair, and on a value row which value it
+# checks.
+SITE_REVIEW_KEYS = ["review_id", "check"]
+SITE_REVIEW_HEADERS = [
+    # Our site, as our database holds it; our_coordinates is "lat, lon", linked to Google Maps, and
+    # our_place the municipality and state it is in.
+    "site_id", *SITE_NAME_COLUMNS, "country_iso3", "our_coordinates", "our_place",
+    # The source, and what approving it would load, "attribute = value (year)", beside its title so an
+    # SME knows what to look for on the page (Hugh, 2 November). On a value row, source_url links to
+    # the page at the value's quote, and source_title says which value the row checks.
+    "source_title", "attributes", "source_url", "publisher", "source_tier", "link_status",
+    # What the source says of the facility it describes, and where it places it, as found_values.csv
+    # gives them: its address and coordinates as written, the point read from them, and why there is
+    # none where a source states a location we couldn't place.
+    "facility_name_in_source", "facility_name_english", "source_address", "source_place", "stated_coordinates",
+    "source_coordinates", "coordinates_from", "distance_km", "location_note",
+    # Why the row needs a second look. On a value row, evidence is the quote, the value as written and
+    # the agent's note.
+    "flags", "evidence",
+    # The SME's.
+    "decision", "other_site_id", "corrected_value", "reviewer", "reviewed_date", "notes",
+    # What accept-reviews reads a row back by: the pair, and on a value row which value it checks.
+    # Hidden in the workbook.
+    *SITE_REVIEW_KEYS,
+]
+# What an SME fills in on Site_Review; everything else there is set by the pipeline.
+SITE_REVIEW_EDITABLE = ["decision", "other_site_id", "corrected_value", "reviewer", "reviewed_date", "notes"]
+
+# Batch 1's resolved.csv, Review_Queue and Leads columns, as main wrote them before the
+# approve-sources plan. Nothing here writes those now (found_values.csv and Site_Review replace them),
+# but the batch 1 re-key (#26, relabel.py) checks batch 1's files against these, and the batch 1
+# conversion (build step 5) reads those files. They are batch 1's columns, not the ones the stack's own runs
+# wrote before step 2.
 RESOLVED_HEADERS = [
     "site_id", "internal_facility_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name",
     "baseline_value", "baseline_source", "baseline_tier",
@@ -557,10 +643,23 @@ RESOLVED_HEADERS = [
     "value_date", "confidence_score", "validation_status", "reviewer", "reviewed_date",
     "researcher_notes",
 ]
+REVIEW_QUEUE_HEADERS = [
+    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "baseline_coordinates",
+    "attribute_name", "resolution",
+    "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
+    "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
+    "agreeing_source_count",
+    "evidence_summary", "validation_status", "rejection_reason", "corrected_value", "reviewer",
+    "reviewed_date",
+    "researcher_notes",
+]
+SUPPLEMENTARY_LEADS_HEADERS = [
+    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name", "lead_value",
+    "source_tier", "lead_summary", "url", "exclusion_reason",
+]
 
-# The validation_status of a row that leaves our database as it is: a source confirmed our value,
-# or nothing was found. It is neither queued nor loaded. A found value that differs from ours is
-# "Needs review", and one weaker than ours "Routed to leads": nothing is accepted automatically.
+# The validation_status resolve gives a decision that leaves our database as it is: a source
+# confirmed our value, or nothing was found.
 NOTHING_TO_REVIEW = "Nothing to review"
 
 SOURCES_HEADERS = [
@@ -570,46 +669,16 @@ SOURCES_HEADERS = [
     "first_seen_run_id", "times_cited", "cited_site_count",
 ]
 
-# The filtered queue an SME actually works through (Q31). One row per (site, attribute), and for
-# a yearly attribute (TIME_VARYING_ATTRIBUTES) per (site, attribute, year): ingestion's key.
-REVIEW_QUEUE_HEADERS = [
-    # translation_note sits beside the names it is about: the SME compares the two spellings and
-    # records a translation problem there, separately from researcher_notes.
-    # baseline_coordinates is "lat, lon" as Google Maps accepts it pasted into its search box.
-    # Every site column describes the site the value is filed under (match.py). searched_site_id
-    # is the one column about the search that found it, and match says why it is filed here.
-    "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "baseline_coordinates",
-    "searched_site_id", "match",
-    "attribute_name", "resolution",
-    "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
-    "winning_source_tier", "winning_source_url", "winning_link_status",
-    # The facility the winning source describes, as it writes it. source_coordinates is where that
-    # places it, "lat, lon" like baseline_coordinates, so an SME can paste both into Google Maps;
-    # blank where its location placed nothing match could use. location_basis says how a
-    # found_location was read: coordinates, a grid reference or a rooftop address.
-    "facility_name_in_source", "stated_location", "source_coordinates", "location_basis",
-    "value_date", "agreeing_source_count",
-    # corrected_value is the right value when the found one is wrong. resolved_value is never
-    # edited, so the AI's own answer survives for measuring its error rate. corrected_value_date
-    # is the date a correction applies to, where that isn't the source's value_date - a current
-    # figure replacing one rejected as outdated, say. corrected_site_id re-files the value under
-    # another of our sites.
-    "evidence_summary", "validation_status", "rejection_reason", "corrected_value",
-    "corrected_value_date", "corrected_site_id", "reviewer", "reviewed_date",
-    "researcher_notes",
-]
-
-SUPPLEMENTARY_LEADS_HEADERS = [
-    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "searched_site_id", "attribute_name",
-    "lead_value", "source_tier", "lead_summary", "url", "exclusion_reason",
-]
-
 FOUNDRY_RUN_LOG_HEADERS = [
-    "run_id", "site_id", "site_name", "country_iso3", "requested_attributes", "agent_id",
+    # One row per site and pass. pass_label is blank for the first pass, "gccs" for the gas
+    # follow-up, and the label a second pass was searched with (search --pass-label).
+    "run_id", "site_id", "pass_label", "site_name", "country_iso3", "requested_attributes", "agent_id",
     "request_started_at", "request_finished_at", "status", "raw_response_path",
     "parsed_attribute_count", "parsed_source_count", "error_message", "retry_count",
-    "web_searches",
-    # The model that answered, and its tokens, every attempt and pass added up (costs.py).
+    # Bing queries, and the web search tool's calls - its searches and the pages it opened or
+    # searched in, which --max-web-searches caps together - every attempt at the pass added up.
+    "web_searches", "tool_calls",
+    # The model that answered, and its tokens, every attempt at the pass added up (costs.py).
     "model", "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens",
 ]
 
@@ -652,8 +721,18 @@ RESOLUTION_VALUES = [
 # Resolutions whose rows belong in the leads sheet and must NOT appear in the review queue.
 LEAD_ROUTED_RESOLUTIONS = {"Conflict - lower credibility"}
 
-WRONG_FACILITY_OURS = "Wrong facility - another site in our database"
-NEW_FACILITY_REASON = "New facility - not in our database"
+# What an SME decides of each site-source pair on the Site_Review tab (site_review.py): the source
+# is about this site of ours, about another site of ours (other_site_id says which), about a
+# landfill not in our database, or of no use.
+CORRECT_SITE = "Correct site"
+DIFFERENT_SITE = "Different site"
+NEW_SITE = "New site"
+JUNK = "Junk"
+SITE_REVIEW_DECISIONS = [CORRECT_SITE, DIFFERENT_SITE, NEW_SITE, JUNK]
+# What an SME decides of a key value on its own Site_Review row: the page bears it out, or not.
+CORRECT = "Correct"
+WRONG = "Wrong"
+VALUE_DECISIONS = [CORRECT, WRONG]
 
 DEFINITION_VALUES = {
     "attribute_name": REQUESTABLE_ATTRIBUTES,
@@ -667,46 +746,19 @@ DEFINITION_VALUES = {
     "boolean_unknown": ["Yes", "No", "Unknown"],
     "value_basis": ["Direct", "Inferred", "Conflicting", "Not found"],
     "confidence_score": ["High", "Medium", "Low", "Excluded candidate"],
-    "resolution": RESOLUTION_VALUES,
     "source_tier": ["Tier 1", "Tier 2", "Tier 3", "Tier 4", "Tier 5"],
-    "validation_status": ["Needs review", "Validated", "Rejected", NOTHING_TO_REVIEW, "Routed to leads"],
-    # What a reviewer may choose. The other statuses are set by the pipeline, not by hand.
-    "review_decision": ["Validated", "Rejected"],
-    # Why a reviewer rejected a value. A fixed list, so rejections can be counted by cause to find
-    # where the AI goes wrong; detail goes in researcher_notes. The two kinds of wrong facility
-    # say whether the site is one of ours (re-file it with corrected_site_id) or new to us
-    # (collect-new-facilities lists it). Plain "Wrong facility" stays for batch 1's workbook, and
-    # the hyphens are plain ones, since ingestion matches the text as typed.
-    "rejection_reason": [
-        WRONG_FACILITY_OURS, NEW_FACILITY_REASON, "Wrong facility", "Not in source", "Wrong value",
-        "Outdated", "Other",
-    ],
-    # Booleans as resolved_value shows them, so a correction reads like the value it replaces.
+    # What an SME decides of a site-source pair on the Site_Review tab.
+    "decision": SITE_REVIEW_DECISIONS,
+    # What an SME decides of a key value on its own row there.
+    "value_decision": VALUE_DECISIONS,
+    # Booleans as found values show them.
     "true_false": ["TRUE", "FALSE"],
-}
-
-# What corrected_value offers, per attribute under review: (Definitions column, strict). A strict
-# list accepts nothing else; a multi-value field suggests single values but still takes a typed
-# combination ("clay cover; sand cover"). Numbers, years and names stay free text.
-CORRECTED_VALUE_CHOICES = {
-    "facility_status": ("facility_status", True),
-    "facility_type": ("facility_type", True),
-    "bulk_waste_type": ("bulk_waste_type", True),
-    "waste_depth": ("waste_depth", True),
-    "has_landfill_gas_collection": ("true_false", True),
-    "has_cover": ("true_false", True),
-    "has_biocover": ("true_false", True),
-    "has_flare": ("true_false", True),
-    "cover_types": ("cover_type", False),
-    "gccs_energy_project_type": ("gccs_energy_project_type", False),
-    "gccs_current_project_status": ("gccs_current_project_status", False),
 }
 
 # Columns a reviewer may edit, and the vocabulary each offers. Anything absent here is
 # read-only in the workbook, so a dropdown never invites editing a pipeline-set field.
 FIELD_TO_DEFINITION = {
-    "validation_status": "review_decision",
-    "rejection_reason": "rejection_reason",
+    "decision": "decision",
 }
 
 # --- scalar helpers ----------------------------------------------------------------------------
@@ -743,6 +795,23 @@ def normalize_for_compare(value: Any) -> str:
     return normalize_scalar(value).lower().replace(",", "").strip()
 
 
+def list_items(value: Any) -> list[Any]:
+    """The members of a list value, however it is written: a list, text separated by commas or
+    semicolons, or the list written as JSON. The prompt asks for cover_types as an "Array", so the
+    agent often writes '["other soil mixture"]', which was split on its commas and dropped whole."""
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    text = normalize_scalar(value)
+    if text.startswith("["):
+        try:
+            members = json.loads(text)
+        except ValueError:
+            members = None
+        if isinstance(members, list):
+            return members
+    return [item.strip(" []\"'“”‘’") for item in re.split(r"[;,]", text)]
+
+
 def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
     """Map a search-vocabulary categorical onto the live database enum. Unmappable -> NULL."""
     if field_name not in ENUM_MAPS:
@@ -750,7 +819,7 @@ def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
     mapping, allowed = ENUM_MAPS[field_name]
 
     if field_name in ARRAY_TARGET_ATTRIBUTES:
-        raw_items = value if isinstance(value, (list, tuple)) else re.split(r"[;,]", normalize_scalar(value))
+        raw_items = list_items(value)
         mapped: list[str] = []
         notes: list[str] = []
         for item in raw_items:
@@ -785,14 +854,18 @@ def map_enum_value(field_name: str, value: Any) -> tuple[Any, str]:
 
 
 
-def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
-    """What is malformed in a cached response, read through the one reader (payload.py).
+def validate_foundry_payload(payload: dict[str, Any], iso3: str = "") -> list[str]:
+    """What is malformed in a cached response, read through the one reader (payload.py). `iso3` is
+    the site's country, which says which grids a grid reference may be in.
 
     A response from before the source-first contract is reported in its own terms, attributes[i],
-    as it always was; a source-first one as sources[i].values[j].
+    as it always was; a source-first one as sources[i].values[j]. The facility a source describes
+    is checked too: each field is text, and stated_coordinates holds coordinates or a grid
+    reference the locate step can read, not an address. An older response's kinds are checked as
+    it is read (payload.read_payload).
     """
-    from .locate import LOCATION_KINDS, PART_SEPARATOR
-    from .payload import REQUIRED_VALUE_FIELDS, is_converted, read_payload
+    from .locate import NO_LOCATION_TEXT, parse_point
+    from .payload import FACILITY_FIELDS, PART_SEPARATOR, REQUIRED_VALUE_FIELDS, is_converted, read_payload
 
     read = read_payload(payload)
     warnings = list(read["problems"])
@@ -801,10 +874,17 @@ def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
             continue
         if not normalize_scalar(source.get("url")):
             warnings.append(f"sources[{index}] has no clickable source URL.")
-        kinds = [part.strip().lower() for part in normalize_scalar(source.get("stated_location_kind")).split(PART_SEPARATOR)]
-        unknown = [kind for kind in kinds if kind and kind not in LOCATION_KINDS]
-        if unknown:
-            warnings.append(f"sources[{index}] has unrecognised stated_location_kind {', '.join(unknown)!r}.")
+        for field in FACILITY_FIELDS:
+            if isinstance(source.get(field), (dict, list, tuple)):
+                warnings.append(f"sources[{index}] {field} must be text.")
+        unread = [
+            part for part in (part.strip() for part in normalize_scalar(source.get("stated_coordinates")).split(PART_SEPARATOR))
+            if part and part.lower() not in NO_LOCATION_TEXT and parse_point(part, iso3) is None
+        ]
+        if unread:
+            warnings.append(
+                f"sources[{index}] stated_coordinates {' | '.join(unread)!r} is not coordinates or a grid reference."
+            )
         for value_index, value in enumerate(source["values"], start=1):
             for field in REQUIRED_VALUE_FIELDS:
                 if field not in value:
@@ -812,6 +892,6 @@ def validate_foundry_payload(payload: dict[str, Any]) -> list[str]:
             # Same canonicalisation as extract_evidence, so a pre-rename cached response is not
             # reported as unsupported by one and accepted by the other.
             name = canonical_attribute(normalize_scalar(value.get("attribute_name")))
-            if name and name not in VALUE_ATTRIBUTES:
+            if name and name not in VALUE_ATTRIBUTES and name not in IDENTITY_VALUES:
                 warnings.append(f"sources[{index}].values[{value_index}] has unsupported attribute_name {name!r}.")
     return list(dict.fromkeys(warnings))

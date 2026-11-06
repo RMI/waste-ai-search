@@ -61,6 +61,8 @@ def test_the_retired_name_maps_to_its_replacement():
 
 
 def test_a_cached_response_using_the_old_name_still_arbitrates():
+    """The name is read as the name its source gives the facility. Since step 2 of the approve-sources
+    plan a source's name only checks the match, so it is no value, and dropping it is no warning."""
     payload = {
         "site_id": "1",
         "attributes": [{
@@ -71,10 +73,10 @@ def test_a_cached_response_using_the_old_name_still_arbitrates():
             "sources": [REGULATOR],
         }],
     }
-    by_attr, evidence, _sources, warnings = extract_evidence(site(), payload, "run", "v", date(2026, 1, 1))
+    by_attr, evidence, (source,), warnings = extract_evidence(site(), payload, "run", "v", date(2026, 1, 1))
 
-    assert "found_facility_name" in by_attr
-    assert evidence[0]["attribute_name"] == "found_facility_name"
+    assert (by_attr, evidence) == ({}, [])
+    assert source["facility_name_in_source"] == "Olushosun Landfill"
     assert not any("Unsupported attribute_name" in w for w in warnings)
 
 

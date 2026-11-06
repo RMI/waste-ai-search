@@ -17,14 +17,16 @@ from typing import Any
 
 from .costs import RUN_LOG_FILE, TOKEN_COLUMNS, Usage, describe_run_cost, run_cost
 from .credibility import dropped_source_site
-from .geocoder import enrich_sites_from_cache
+from .geocoder import enrich_sites_from_cache, look_up_places, save_site_places, with_other_sites, with_places
 from .input_loader import resolve_sites, run_seed_path, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, check_urls
 from .page_text import PAGE_TEXT_DIR
 from .locate import (
     MATCHING_BASES,
     SOURCE_LOCATIONS_FILE,
+    STATE_NAMES_FILE,
     GeocoderError,
+    canonical_state,
     Located,
     describe_bases,
     load_locations,
@@ -35,8 +37,10 @@ from .locate import (
 )
 from .payload import found_attributes, merge_payloads, read_payload
 from .pilot_selector import select_mixed_pilot
-from .prompt_builder import build_site_prompt, coordinates_only, requested_attributes
+from .prompt_builder import build_site_prompt, requested_attributes
 from .run_context import (
+    FOLLOW_UP_PASS,
+    PASS_SEPARATOR,
     SEARCH_TOOL_RETRY_DELAY_SECONDS,
     PipelineConfig,
     get_client,
@@ -62,6 +66,15 @@ from .searchable_names import (
     record_skips,
     skip_unsearchable_names,
 )
+
+
+# Where a saved response keeps what the agent's web search tool did: each search with its queries, and
+# each page it opened or searched in (foundry_client.web_search_actions).
+SEARCH_ACTIONS = "_search_actions"
+
+
+class NothingToSearch(ValueError):
+    """A search whose selection leaves no site to search: an instruction to the user, not a bug."""
 
 
 def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[dict[str, Any]]:
@@ -114,7 +127,8 @@ def choose_sites(
                 "pass --include-excluded-countries to search them)."
             )
     # A site with no requestable attributes has nothing to ask; querying it would spend a
-    # request and a prompt to receive nothing. Country scope can empty a site entirely.
+    # request and a prompt to receive nothing. Country scope empties a site entirely: Brazil,
+    # scoped to coordinates alone, has nothing to ask now that a location is not asked for.
     before = len(selected)
     selected = [site for site in selected if requested_attributes(site)]
     nothing_to_ask = before - len(selected)
@@ -139,6 +153,12 @@ def choose_sites(
         # than the ~9,600 USA and Brazil sites it is about to drop.
         countries = sorted({normalize_scalar(site.get("country_iso3")).upper() for site in selected})
         print(f"Batch {config.batch}: {len(selected):,} site(s) in {len(countries)} country(ies).")
+    if config.min_tonnes > 0:
+        # After the rules above, like --limit, so a second pass on a batch's largest sites takes the
+        # sites its first pass searched. Listed, so which sites it took can be checked.
+        selected = [site for site in selected if (incoming_tonnes(site) or 0) >= config.min_tonnes]
+        ids = " ".join(normalize_scalar(site.get("site_id")) for site in selected)
+        print(f"Taking {config.min_tonnes:,.0f} t a year or more: {len(selected):,} site(s){': ' + ids if ids else '.'}")
 
     if config.pilot_size > 0:
         return select_mixed_pilot(selected, size=config.pilot_size), skipped
@@ -147,12 +167,29 @@ def choose_sites(
     return selected, skipped
 
 
+def incoming_tonnes(site: dict[str, Any]) -> float | None:
+    """The waste a year our seed says a site takes, in tonnes, or None where it says nothing."""
+    try:
+        return float(normalize_scalar(site.get("annual_incoming_waste_metric_tonnes")).replace(",", ""))
+    except ValueError:
+        return None
+
+
 def add_searches(total: int | None, client: Any) -> int | None:
     """Add the Bing queries of the client's last call to a site's running total."""
     count = getattr(client, "web_searches", None)
     if count is None:
         return total
     return (total or 0) + count
+
+
+def add_tool_calls(total: int | None, client: Any) -> int | None:
+    """Add the web search tool calls of the client's last call to a site's running total: its
+    searches, and the pages it opened or searched in, each of which counts toward the cap."""
+    actions = getattr(client, "search_actions", None)
+    if not isinstance(actions, list):
+        return total
+    return (total or 0) + len(actions)
 
 
 def add_usage(total: Usage | None, client: Any) -> Usage | None:
@@ -167,13 +204,16 @@ def add_usage(total: Usage | None, client: Any) -> Usage | None:
 
 
 # --- phase 1: search --------------------------------------------------------------------------
-def check_run_links(run_dir: Path, keep_text: bool = True) -> dict:
+def check_run_links(run_dir: Path, keep_text: bool = True, retry_unverified: bool = False) -> dict:
     """Fetch every source URL in a run's cached responses once, and record the verdicts. With
-    keep_text, the text of each page that loads is kept in page_text/ too."""
+    keep_text, the text of each page that loads is kept in page_text/ too. With retry_unverified, a
+    URL left Unverified for a reason that may pass is fetched again (link_check.retryable)."""
     from .arbitrate import cached_source_urls
 
     text_dir = run_dir / PAGE_TEXT_DIR if keep_text else None
-    results = check_urls(cached_source_urls(run_dir), cache_path=run_dir / LINK_CHECK_FILE, text_dir=text_dir)
+    results = check_urls(
+        cached_source_urls(run_dir), cache_path=run_dir / LINK_CHECK_FILE, text_dir=text_dir, retry_unverified=retry_unverified
+    )
     broken = sum(1 for r in results.values() if r.verdict == BROKEN)
     repaired = sum(1 for r in results.values() if r.resolved_url != r.url)
     kept = f"; text kept for {sum(1 for r in results.values() if r.text_file)} page(s) -> {PAGE_TEXT_DIR}/" if keep_text else ""
@@ -198,6 +238,15 @@ class _CountingGeocoder:
         self.calls += 1
         return self.geocoder.geocode(address, iso2)
 
+    def __getattr__(self, name: str) -> Any:
+        # Only a geocoder that can look states up (Nominatim) has `state`.
+        if name == "state" and hasattr(self.geocoder, "state"):
+            def state(text: str, iso2: str) -> str:
+                self.calls += 1
+                return self.geocoder.state(text, iso2)
+            return state
+        raise AttributeError(name)
+
 
 # locate_run's default: the geocoder the run's configuration names.
 _CONFIGURED = object()
@@ -215,12 +264,14 @@ def locate_run(
     """
     if sites is None:
         sites, _headers = resolve_sites(config, allow_database=False)
-    sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
+    sites_by_id = {normalize_scalar(site.get("site_id")): site for site in with_places(sites, config.run_dir)}
     if geocoder is _CONFIGURED:
         geocoder = make_geocoder(config.geocoder)
     geocoder = _CountingGeocoder(geocoder) if geocoder is not None else None
     path = config.run_dir / SOURCE_LOCATIONS_FILE
     cache = load_locations(path)
+    states_path = config.run_dir / STATE_NAMES_FILE
+    states = load_locations(states_path)
     by_site: dict[str, list[Path]] = {}
     for response in sorted(raw_dir(config.run_dir).glob("site_*.json")):
         by_site.setdefault(site_id_from_path(response), []).append(response)
@@ -239,11 +290,18 @@ def locate_run(
                     payloads.append(load_json(response))
                 except (OSError, json.JSONDecodeError):
                     continue
-            for source in merge_payloads(payloads)["sources"] if payloads else []:
+            sources = merge_payloads(payloads)["sources"] if payloads else []
+            # Our site's state and each source's, as the geocoder names them, to compare.
+            try:
+                for written in [site.get("admin1"), *(source.get("stated_state") for source in sources)]:
+                    canonical_state(written, site.get("country_iso3"), states, geocoder, live=True)
+            except GeocoderError as exc:
+                failures.append(str(exc))
+            for source in sources:
                 if dropped_source_site(source.get("url")) or not states_location(source):
                     continue
                 try:
-                    located.append(locate_source(source, site, cache, geocoder, live=True))
+                    located.append(locate_source(source, site, cache, geocoder, live=True, states=states))
                 except GeocoderError as exc:
                     failures.append(str(exc))
                     continue
@@ -252,6 +310,7 @@ def locate_run(
                     saved_at = geocoder.calls
     finally:
         save_locations(path, cache)
+        save_locations(states_path, states)
 
     used = [item for item in located if item.basis in MATCHING_BASES]
     name = geocoder.name if geocoder is not None else "none configured"
@@ -285,44 +344,60 @@ def run_search(
         print(f"{verb}: {run_seed_path(config)} ({len(sites)} facilities)")
 
     selected, skipped = choose_sites(sites, config)
+    # The run's list of sites skipped by name, for review and for Run_Config. Each search adds its
+    # skips to the list and takes off the sites it selects or the run has already searched, so a
+    # narrower search under the same run id doesn't shrink it and a site searched after all isn't
+    # also counted as skipped. A search of listed ids (a retry, or the gas follow-up) only takes
+    # its sites off a list that exists. Recorded before the check below, so a search whose every
+    # site was skipped by name (one country of a batch, say) still lists them.
+    if (selected or skipped) and (not config.site_ids or (config.run_dir / SKIPPED_SITES_FILE).exists()):
+        searched = {site_id_from_path(path) for path in raw_dir(config.run_dir).glob("site_*.json")}
+        searched |= {normalize_scalar(site.get("site_id")) for site in selected}
+        record_skips(config.run_dir, skipped, searched)
     if not selected:
         hint = (
             f" This run is pinned to {run_seed_path(config)}; use a new --run-id to seed afresh."
             if reusing
             else ""
         )
-        raise ValueError(f"No sites matched the selection filters.{hint}")
-    # The run's list of sites skipped by name, for review and for Run_Config. Each search adds its
-    # skips to the list and takes off the sites it selects or the run has already searched, so a
-    # narrower search under the same run id doesn't shrink it and a site searched after all isn't
-    # also counted as skipped. A search of listed ids (a retry, or the gas follow-up) only takes
-    # its sites off a list that exists.
-    if not config.site_ids or (config.run_dir / SKIPPED_SITES_FILE).exists():
-        searched = {site_id_from_path(path) for path in raw_dir(config.run_dir).glob("site_*.json")}
-        searched |= {normalize_scalar(site.get("site_id")) for site in selected}
-        record_skips(config.run_dir, skipped, searched)
+        asked = {value.strip().upper() for value in config.iso3 or ()}
+        if asked and asked <= COORDINATES_ONLY_ISO3:
+            # Its sites match, but a coordinates-only country is asked only for coordinates, and a
+            # source's coordinates never replace ours (the approve-sources plan), so nothing is left.
+            raise NothingToSearch(
+                f"Nothing to search in {', '.join(sorted(asked))}: it is scoped to coordinates alone, and a "
+                "search no longer asks for a site's location, since a source's never replaces ours."
+            )
+        raise NothingToSearch(
+            "No sites to search: none matched the selection filters, or every one that did has nothing "
+            f"left to ask (counted above).{hint}"
+        )
+
+    raw_dir(config.run_dir).mkdir(parents=True, exist_ok=True)
+    # Built before any search is paid for, so a geocoder configured wrongly stops the run here,
+    # not after it.
+    geocoder = make_geocoder(config.geocoder) if config.locate else None
 
     # The prompt asks the agent to search using municipality and admin names, so those fields
-    # have to be populated or that instruction is asking for context we never supplied.
+    # have to be populated or that instruction is asking for context we never supplied. A site
+    # whose seed has neither is looked up from our coordinates, once, into the cache; the run keeps
+    # what each prompt named, which arbitration compares with where each source puts the facility.
+    if config.use_geocode_cache:
+        selected = look_up_places(selected, config.geocode_cache, geocoder)
     selected = enrich_sites_from_cache(
         selected, cache_path=config.geocode_cache, enabled=config.use_geocode_cache
     )
     if config.use_geocode_cache:
         hits = sum(1 for site in selected if site.get("geocode_status") == "cache_hit")
         print(f"Geocode cache: {hits}/{len(selected)} sites enriched with admin context")
-
-    raw_dir(config.run_dir).mkdir(parents=True, exist_ok=True)
-    # Built before any search is paid for, so a geocoder configured wrongly stops the run here,
-    # not after it.
-    geocoder = make_geocoder(config.geocoder) if config.locate else None
-    agent = agent_identity(get_client(config))
-
-    coordinate_only_sites = sum(1 for site in selected if coordinates_only(site))
-    if coordinate_only_sites:
-        print(
-            f"Coordinates-only scope for {coordinate_only_sites:,} site(s) in "
-            f"{', '.join(sorted(COORDINATES_ONLY_ISO3))}."
-        )
+    # Each prompt names our other sites near it, so the agent can tell them apart. Their places are
+    # looked up like our sites', and without the cache only their distance counts.
+    selected = with_other_sites(
+        selected, sites, config.geocode_cache if config.use_geocode_cache else None, geocoder
+    )
+    save_site_places(config.run_dir, selected)
+    client = get_client(config)
+    agent = agent_identity(client)
 
     work: list[tuple[dict[str, Any], list[str]]] = []
     for site in selected:
@@ -376,10 +451,19 @@ def run_search(
             if f.done() and not f.cancelled() and f.exception() is None and id(f.result()) not in logged
         ])
 
-    failures = [row for row in run_log if str(row["status"]).startswith("Search tool failed")]
+    # A search that raised (a timeout at the site limit, a 429) is a failure too: it saved nothing,
+    # and only the first pass is searched again by `run`, so a second pass's would go unnoticed.
+    failures = [row for row in run_log if str(row["status"]).startswith(("Search tool failed", "Failed"))]
     print(f"\nSearched {len(work)} sites. Run log: {log_path}")
-    if any(row["web_searches"] != "" for row in run_log):
-        for line in describe_run_cost(run_cost(run_log)):
+    # The whole run log's cost, every pass and retry included, as Run_Config gives it: a resumed
+    # pass's own rows would leave out what the passes before it spent.
+    whole_log: list[dict[str, Any]] = []
+    if log_path.exists():
+        with log_path.open(newline="", encoding="utf-8-sig") as handle:
+            whole_log = list(csv.DictReader(handle))
+    if any(row.get("web_searches") for row in whole_log):
+        print("The run so far, every pass and retry included:")
+        for line in describe_run_cost(run_cost(whole_log)):
             print(line)
 
     # WP-533: verify cited URLs now, so arbitration can apply the verdicts offline. Every URL in
@@ -394,8 +478,23 @@ def run_search(
     if failures:
         ids = " ".join(row["site_id"] for row in failures)
         print(f"\n!! {len(failures)} site(s) still failing after retries. Try again later:")
-        print(f"   uv run waste-ai-search search --run-id {config.run_id} --force --site-ids {ids}")
+        if pass_label == FOLLOW_UP_PASS:
+            # `search` would ask the first pass's attributes of the pinned seed, and its answer would
+            # stop `run` ever following these sites up.
+            print(f"   delete their site_<id>{PASS_SEPARATOR}{pass_label}.json if present ({ids}), then run the batch's `run` command again")
+        else:
+            # Retried as the same pass: without its label, --force would replace the first pass's responses.
+            label = f" --pass-label {pass_label}" if pass_label else ""
+            print(f"   {agent_setting(client)}uv run waste-ai-search search --run-id {config.run_id}{label} --force --site-ids {ids}")
     return config.run_dir
+
+
+def agent_setting(client: Any) -> str:
+    """The agent a client asks, as the setting to put before a command that searches again, or ""
+    where it has none (a fake). The agent may have been named in the shell rather than in .env, and
+    a retry asking another would add that model's answer, and its tokens, to this pass's."""
+    name = normalize_scalar(getattr(getattr(client, "config", None), "agent_name", ""))
+    return f"AZURE_AI_AGENT_NAME={name} " if name else ""
 
 
 def search_one_site(
@@ -418,6 +517,7 @@ def search_one_site(
     tool_retries = 0
     # None when the client cannot count (a fake in tests); blank in the log, never a false 0.
     web_searches: int | None = None
+    tool_calls: int | None = None
     usage: Usage | None = None
 
     payload: dict[str, Any] | None = None
@@ -435,12 +535,19 @@ def search_one_site(
                 payload = client.search_site(site, prompt)
             except Exception as exc:  # noqa: BLE001 - one bad site must not end a multi-day run
                 web_searches = add_searches(web_searches, client)
+                tool_calls = add_tool_calls(tool_calls, client)
                 usage = add_usage(usage, client)
                 status, error = "Failed", f"{type(exc).__name__}: {exc}"
                 print(f"    {site_id}: {error}", flush=True)
                 break
             web_searches = add_searches(web_searches, client)
+            tool_calls = add_tool_calls(tool_calls, client)
             usage = add_usage(usage, client)
+            actions = getattr(client, "search_actions", None)
+            if isinstance(actions, list):
+                # What the agent searched for and opened, kept with what it answered, to study recall
+                # and the search cap with. Nothing reads it back (payload.read_payload ignores it).
+                payload[SEARCH_ACTIONS] = list(actions)
 
             if not search_tool_failed(payload):
                 save_json(path, payload)
@@ -474,6 +581,7 @@ def search_one_site(
     return {
         "run_id": config.run_id,
         "site_id": site_id,
+        "pass_label": pass_label,
         "site_name": site_name,
         "country_iso3": normalize_scalar(site.get("country_iso3")),
         "requested_attributes": "; ".join(attributes),
@@ -487,6 +595,7 @@ def search_one_site(
         "error_message": error,
         "retry_count": tool_retries,
         "web_searches": "" if web_searches is None else web_searches,
+        "tool_calls": "" if tool_calls is None else tool_calls,
         "model": normalize_scalar(getattr(client, "model", "")) if usage is not None else "",
         **(usage.as_row() if usage is not None else {column: "" for column in TOKEN_COLUMNS}),
     }
@@ -504,32 +613,40 @@ def _usable_response(path: Path) -> dict[str, Any] | None:
 
 
 def merge_run_log(path: Path, new_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep history across resumed and retried searches; the newest row for a site wins.
+    """Keep history across resumed and retried searches: one row per site and pass, the newest
+    winning.
 
     A retried search only covers the sites it touched, so replacing the file would erase every
-    other site from the log - which matters a great deal for a multi-day resumable run.
+    other site from the log - which matters a great deal for a multi-day resumable run. Each pass
+    has its own row (pass_label), so a second pass with another model is priced at that model, and
+    retrying a pass replaces only its row. A log from before rows had a pass reads as the first's.
 
-    `web_searches` and the token counts are the exception: every pass is billed, so a site's count
-    adds to its earlier one. A skipped site logs a blank count, which keeps the earlier one rather than
-    erasing it, and its model.
+    `web_searches`, `tool_calls` and the token counts are the exception: they count every attempt,
+    each of which is billed, so a row's count adds to its earlier one. A skipped site logs a blank
+    count, which keeps the earlier one rather than erasing it, and its model.
     """
-    merged: dict[str, dict[str, Any]] = {}
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
     if path.exists():
         with path.open(newline="", encoding="utf-8-sig") as handle:
             for row in csv.DictReader(handle):
-                merged[normalize_scalar(row.get("site_id"))] = dict(row)
+                merged[_run_log_key(row)] = dict(row)
     for row in new_rows:
-        site_id = normalize_scalar(row.get("site_id"))
-        before = merged.get(site_id) or {}
+        key = _run_log_key(row)
+        before = merged.get(key) or {}
         row = dict(row)
-        for column in ("web_searches", *TOKEN_COLUMNS):
+        for column in ("web_searches", "tool_calls", *TOKEN_COLUMNS):
             earlier = str(before.get(column) or "")
             if earlier.isdigit():
                 row[column] = int(earlier) + int(row.get(column) or 0)
         if not row.get("model") and before.get("model"):
             row["model"] = before["model"]
-        merged[site_id] = row
+        merged[key] = row
     return sorted(
         merged.values(),
-        key=lambda row: int(row["site_id"]) if str(row.get("site_id", "")).isdigit() else 0,
+        key=lambda row: (int(row["site_id"]) if str(row.get("site_id", "")).isdigit() else 0, _run_log_key(row)[1]),
     )
+
+
+def _run_log_key(row: dict[str, Any]) -> tuple[str, str]:
+    """A run-log row's site and pass: blank for the first pass, as in a log from before passes."""
+    return normalize_scalar(row.get("site_id")), normalize_scalar(row.get("pass_label"))

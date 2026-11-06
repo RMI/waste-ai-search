@@ -26,6 +26,7 @@ from .credibility import (
     NEWER_SOURCE_YEARS,
     RECENCY_OVERRIDE_ATTRIBUTES,
 )
+from .facility_names import same_operator
 from .schema import (
     AI_SEARCH_DATA_SOURCE,
     ARRAY_TARGET_ATTRIBUTES,
@@ -36,6 +37,7 @@ from .schema import (
     NOTHING_TO_REVIEW,
     TIME_VARYING_ATTRIBUTES,
     is_blank,
+    list_items,
     normalize_for_compare,
     normalize_scalar,
 )
@@ -73,8 +75,7 @@ def comparable(value: Any, attribute_name: str = "") -> str:
     Generation"), are the same value, not a conflict for a human to settle.
     """
     if attribute_name in ARRAY_TARGET_ATTRIBUTES | NUMERIC_ARRAY_TARGET_ATTRIBUTES:
-        items = value if isinstance(value, (list, tuple)) else re.split(r"[;,]", normalize_scalar(value))
-        keys = {comparable(item) for item in items if normalize_scalar(item)}
+        keys = {comparable(item) for item in list_items(value) if normalize_scalar(item)}
         return "; ".join(sorted(keys))
     if attribute_name == LOCATION_ATTRIBUTE:
         # Each coordinate to six significant digits, as each was compared when they were separate.
@@ -85,6 +86,15 @@ def comparable(value: Any, attribute_name: str = "") -> str:
         return f"{float(text):.6g}"
     except (TypeError, ValueError):
         return text
+
+
+def same_value(a: Any, b: Any, attribute_name: str = "") -> bool:
+    """Whether two values agree: as comparable() reads them, or, for an operator, as two spellings
+    of one body's name (facility_names.same_operator). "PRO-FAJ Hidro Limpieza, SA de CV" and
+    "PRO-FAJ Hidro Limpieza S.A. de C.V." are one operator, not two sources disagreeing."""
+    if attribute_name == "operator":
+        return same_operator(normalize_scalar(a), normalize_scalar(b))
+    return comparable(a, attribute_name) == comparable(b, attribute_name)
 
 
 def date_key(value: Any) -> tuple[int, int, int]:
@@ -108,6 +118,19 @@ def value_year(value_date: Any, run_year: int) -> int:
     if match is not None and EARLIEST_VALUE_YEAR <= int(match.group(1)) <= run_year:
         return int(match.group(1))
     return run_year
+
+
+def is_year_exact(value_date: Any, year: Any) -> bool:
+    """Whether a value's year is the one its source dates it to, rather than the run's year assumed
+    for an undated value (`value_year`): the spec's is_year_exact, which ingestion loads."""
+    match = re.match(r"\s*(\d{4})", normalize_scalar(value_date))
+    return match is not None and match.group(1) == normalize_scalar(year)
+
+
+def decision_key(site_id: str, attribute: str, year: Any) -> tuple[str, str, Any]:
+    """(site, attribute, year): what one value is loaded for, the year only for a yearly attribute,
+    as ingestion keys it."""
+    return site_id, attribute, year if attribute in TIME_VARYING_ATTRIBUTES else ""
 
 
 def site_for_year(site: dict[str, Any], attribute_name: str, year: int) -> tuple[dict[str, Any], str]:
@@ -166,10 +189,12 @@ def resolve(
 ) -> dict[str, Any]:
     """Arbitrate one (facility, attribute) pair.
 
-    Nothing is accepted automatically. A found value for an empty field needs review whatever its
-    tier, and so does one that disagrees with ours from a source at the floor or above and at least
-    as credible as ours; a weaker disagreement goes to leads. A confirmation of ours, or nothing
-    found, leaves our database as it is, so there is nothing to review.
+    Since step 2 of the approve-sources plan, a value's status is decided for its site-source pair
+    (found_values.py), and only fills of empty fields load, so arbitration no longer calls this. The
+    one value to load among those approved is picked by found_values.pick_values, by tier first;
+    this function's status recency override could put a lower tier first. Its comparisons with a
+    value we hold - confirmed, overridden, a conflict, or a weaker disagreement for leads - are kept
+    for the tests that pin them.
     """
     site_id = normalize_scalar(site.get("site_id"))
     baseline = baseline_for(site, attribute_name)
@@ -349,7 +374,7 @@ def resolve(
     matches_baseline = not baseline_empty and comparable(baseline, attribute_name) == win_key
 
     if matches_baseline:
-        # Kept in evidence.csv, but neither queued nor loaded, so the search doesn't become the
+        # Listed in found_values.csv, but not loaded, so the search doesn't become the
         # credited source for a value nobody reviewed.
         row["resolution"] = "Confirmed baseline"
         row["resolution_rule"] = f"{tier_label(win_tier)} source agrees with {tier_label(base_tier)} baseline."

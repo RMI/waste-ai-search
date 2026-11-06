@@ -109,6 +109,28 @@ def test_the_definitions_say_what_does_not_distinguish_the_types():
     assert "What decides it is engineered containment" in text
 
 
+def test_with_no_word_on_containment_neither_engineered_type_is_chosen():
+    """In the 31 October Mexico tests Sol gave Controlled Dumpsite 7 times from a fence, compaction or
+    criticism, and 6 were wrong. Dumpsite from a 'tiradero a cielo abierto' page must stay possible,
+    so only the two types containment decides between are named."""
+    text = guidance(corroborated_site(country_iso3="MEX"))
+    assert (
+        "What decides it is engineered containment: a liner, leachate collection and groundwater monitoring. "
+        "If no source says whether it has them, choose neither Controlled Dumpsite nor Sanitary Landfill: leave "
+        "facility_type out."
+    ) in text
+    assert "If no source says whether it has them" in guidance(unconfirmed_site())
+
+
+def test_the_directive_prior_holds_where_no_source_describes_the_engineering():
+    """Otherwise an EU landfill no source describes would be left out rather than typed by the prior."""
+    text = guidance(corroborated_site())  # ESP
+    assert (
+        "a Sanitary Landfill unless a source says it lacks that engineering, even where no source describes its "
+        "engineering;"
+    ) in text
+
+
 def test_an_eu_site_gets_the_landfill_directive_prior():
     text = guidance(corroborated_site())  # ESP
     assert "EU Landfill Directive (1999/31/EC)" in text
@@ -151,7 +173,23 @@ def test_the_prompt_prefers_newer_sources_especially_for_status():
     """A 2010 permit saying Active must not outweigh a 2023 closure notice."""
     from waste_ai_search.prompt_builder import ATTRIBUTE_GUIDANCE, build_site_prompt, requested_attributes
 
-    assert "base it on the most recent evidence you can find" in ATTRIBUTE_GUIDANCE["facility_status"]
+    assert "base it on the most recent source that shows whether the site still takes waste" in ATTRIBUTE_GUIDANCE["facility_status"]
     site = corroborated_site()
     prompt = build_site_prompt(site, requested_attributes(site))
     assert "- Prefer the most recent source." in prompt
+
+
+def test_status_comes_from_a_source_that_shows_whether_waste_still_arrives():
+    """In the 31 October Mexico tests, 12 statuses came from pages that never show it: fire reports,
+    a gas-chimney inauguration, a 2026 law's date line, a rehabilitation plan. At Martínez de la
+    Torre a 2025 fire would have loaded Active for a dump closed for good in 2020."""
+    from waste_ai_search.prompt_builder import ATTRIBUTE_GUIDANCE
+
+    text = ATTRIBUTE_GUIDANCE["facility_status"]
+    assert (
+        "base it on the most recent source that shows whether the site still takes waste - a closure notice, "
+        "council resolution, current opening hours or fees page, or news - not an older permit, inventory or "
+        "directory listing. A fire there does not show it: closed dumps burn too. Give that source's date in "
+        "value_date."
+    ) in text
+    assert "most recent evidence you can find" not in text

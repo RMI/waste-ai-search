@@ -87,8 +87,14 @@ def test_a_page_with_no_location_finds_none():
 
 
 # --- measuring a run ----------------------------------------------------------------------------
-def build_run(tmp_path, pages):
-    """A run whose link check kept the text of `pages`: [(url, text, stated location, basis, site)]."""
+# coordinates_from, as found_values.csv says it, for a location's basis.
+FROM = {"": "", "coordinates": "stated", "street": "address (street)"}
+
+
+def build_run(tmp_path, pages, stated_column="source_address"):
+    """A run whose link check kept the text of `pages`: [(url, text, stated location, basis, site)].
+    `stated_column` is the found_values.csv column the location is in: source_address or
+    stated_coordinates."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     write_csv_records(run_dir / "seed.csv", [
@@ -98,14 +104,13 @@ def build_run(tmp_path, pages):
     evidence, sources, checked = [], [], {}
     for url, text, stated, basis, site in pages:
         source_id = source_id_for(url, "")
-        evidence.append({"source_id": source_id, "site_id": site, "searched_site_id": site,
-                         "stated_location": stated, "location_basis": basis})
+        evidence.append({"source_id": source_id, "site_id": site, stated_column: stated, "coordinates_from": FROM[basis]})
         sources.append({"source_id": source_id, "url": url, "source_type": "Municipal document"})
         checked[url] = {"url": url, "verdict": "OK", "status": "200", "resolved_url": url}
         if text:
             save_page_text(run_dir / PAGE_TEXT_DIR, url, text)
             checked[url].update(text_file=text_file_name(url), text_kind="html")
-    write_csv_records(run_dir / "evidence.csv", evidence, ["source_id", "site_id", "searched_site_id", "stated_location", "location_basis"])
+    write_csv_records(run_dir / "found_values.csv", evidence, ["source_id", "site_id", stated_column, "coordinates_from"])
     write_csv_records(run_dir / "sources.csv", sources, ["source_id", "url", "source_type"])
     (run_dir / LINK_CHECK_FILE).write_text(json.dumps(checked))
     return run_dir
@@ -127,13 +132,27 @@ def test_a_run_counts_the_pages_whose_location_the_agent_left_out(tmp_path):
     assert not by_url["https://b.example/address"].missed  # the agent stated it
     assert by_url["https://b.example/address"].agent_usable
     text = summary(measurement)
-    assert "Pages measured (text kept, cited in evidence.csv): 4" in text
+    assert "Pages measured (text kept, cited in found_values.csv): 4" in text
     assert "no location: 2 (50%)" in text
 
     out = tmp_path / "missed.csv"
     assert write_missed(out, measurement) == 2
     rows = list(csv.DictReader(out.open(encoding="utf-8")))
     assert {row["found_kind"] for row in rows} == {COORDINATES, GRID_REFERENCE}
+
+
+@pytest.mark.parametrize("column", ["stated_coordinates", "source_address"])
+def test_stated_coordinates_or_an_address_count_as_stated(tmp_path, column):
+    run_dir = build_run(tmp_path, [("https://a.example/coords", "Location: -40.88365, 175.02770.", "-40.88365, 175.0277", "coordinates", "901")], column)
+    [report] = measure_run(run_dir).reports
+    assert report.agent_stated and report.agent_usable and not report.missed
+
+
+def test_a_run_arbitrated_before_found_values_says_to_arbitrate_again(tmp_path):
+    run_dir = build_run(tmp_path, [("https://a.example/coords", "Location: -40.88365, 175.02770.", "", "", "901")])
+    (run_dir / "found_values.csv").rename(run_dir / "evidence.csv")
+    with pytest.raises(SystemExit, match="arbitrate the run again"):
+        measure_run(run_dir)
 
 
 def test_a_run_with_no_page_text_says_how_to_get_it(tmp_path):
