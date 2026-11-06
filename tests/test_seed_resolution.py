@@ -25,14 +25,17 @@ from waste_ai_search.run_context import PipelineConfig
 
 @pytest.fixture(autouse=True)
 def no_snapshot(monkeypatch):
-    """Seeding from the database also copies the consolidation tables (F32); stub that too."""
+    """Seeding from the database picks one consolidation run and copies its tables (F32); stub both."""
+    import waste_ai_search.consolidation_run as consolidation_run
     import waste_ai_search.snapshot as snapshot
 
-    taken = []
-    monkeypatch.setattr(
-        snapshot, "take_snapshot", lambda run_dir: taken.append(run_dir) or {"consolidation_run_ids": ["c1"]}
+    run = consolidation_run.ConsolidationRun(
+        "c1", "legacy_replica_v1", "legacy_replica_v1", "l1", "", 10, "test"
     )
-    monkeypatch.setattr(snapshot, "current_consolidation_run_ids", lambda: ["c1"])
+    taken = []
+    monkeypatch.setattr(consolidation_run, "resolve_run", lambda config=None: run)
+    monkeypatch.setattr(consolidation_run, "row_count", lambda run_id, config=None: run.rows)
+    monkeypatch.setattr(snapshot, "take_snapshot", lambda run_dir, run: taken.append(run_dir) or {})
     return taken
 
 

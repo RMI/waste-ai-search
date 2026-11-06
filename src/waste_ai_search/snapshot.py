@@ -10,13 +10,15 @@ So a run that seeds from the database first saves, inside its run directory:
 - `consolidated_facility` - the baseline the search filled gaps in;
 - `value_resolution_ledger` - which source, and which record in it (`data_source_facility_id`),
   supplied each baseline value;
-- every `entity_linkage.crosswalk_*` table - all source records linked to each facility, including
-  those that supplied no winning value. `data_source` + `facility_id` is the key that survives a
-  rebuild, so this is what maps a run's `site_id` onto a later consolidation.
+- `entity_linkage.crosswalk` - all source records linked to each facility, including those that
+  supplied no winning value. `data_source` + `facility_id` is the key that survives a rebuild, so
+  this is what maps a run's `site_id` onto a later consolidation.
 
-All tables are read whole - every country, not just the ones searched - in one read-only
-REPEATABLE READ transaction, so they describe the same consolidation state. Each is a gzipped CSV
-in Postgres' own COPY format, with a manifest of row counts and checksums.
+Each table holds every run side by side, so only the run the seed reads is copied: that
+consolidation run of the first two, and the crosswalk run it consumed. Every country is copied, not
+just the ones searched, in one read-only REPEATABLE READ transaction. Each table is a gzipped CSV in
+Postgres' own COPY format, and the manifest records the run with each table's row count and
+checksum.
 """
 from __future__ import annotations
 
@@ -32,14 +34,18 @@ from typing import Any
 SNAPSHOT_DIR_NAME = "consolidation_snapshot"
 MANIFEST_NAME = "manifest.json"
 
-# Table -> ORDER BY, so the same database state always produces the same bytes and checksum.
+# Table -> ORDER BY, so the same database state always produces the same bytes and checksum. Each
+# is filtered to one consolidation run (CONSOLIDATION_RUN_COLUMN).
 CONSOLIDATION_TABLES = {
     "consolidation.consolidated_facility": "wastemap_id, year",
     "consolidation.value_resolution_ledger": (
         "wastemap_id, year NULLS FIRST, column_name, data_source, data_source_facility_id"
     ),
 }
-CROSSWALK_SCHEMA = "entity_linkage"
+CONSOLIDATION_RUN_COLUMN = "consolidation_run_id"
+# Every entity-linkage run is appended to one table; the one wanted is the run consolidation consumed.
+CROSSWALK_TABLE = "entity_linkage.crosswalk"
+CROSSWALK_RUN_COLUMN = "entity_linkage_run_id"
 CROSSWALK_ORDER = "wastemap_id, data_source, facility_id"
 
 
@@ -47,36 +53,24 @@ def snapshot_dir(run_dir: Path) -> Path:
     return Path(run_dir) / SNAPSHOT_DIR_NAME
 
 
-def crosswalk_tables(cursor: Any) -> list[str]:
-    """Every entity-linkage crosswalk, whichever strategy consolidation used this time."""
-    cursor.execute(
-        "SELECT table_name FROM information_schema.tables "
-        "WHERE table_schema = %s AND table_name LIKE 'crosswalk\\_%%' ORDER BY table_name",
-        (CROSSWALK_SCHEMA,),
-    )
-    return [f"{CROSSWALK_SCHEMA}.{row[0]}" for row in cursor.fetchall()]
-
-
-def consolidation_run_ids(cursor: Any) -> list[str]:
-    cursor.execute(
-        "SELECT DISTINCT consolidation_run_id FROM consolidation.consolidated_facility ORDER BY 1"
-    )
-    return [str(row[0]) for row in cursor.fetchall()]
-
-
-def copy_table(cursor: Any, table: str, order_by: str, path: Path) -> dict[str, Any]:
-    """Stream one table to a gzipped CSV. Returns its row count and the checksum of the CSV.
+def copy_table(
+    cursor: Any, table: str, run_column: str, run_id: str, order_by: str, path: Path
+) -> dict[str, Any]:
+    """Stream one run of one table to a gzipped CSV. Returns its row count and the CSV's checksum.
 
     Rows are counted by the database in the same transaction: values can hold line breaks, so
     counting lines in the CSV overcounts.
     """
-    cursor.execute(f"SELECT count(*) FROM {table}")
+    cursor.execute(f"SELECT count(*) FROM {table} WHERE {run_column} = %s", (run_id,))
     rows = int(cursor.fetchall()[0][0])
     digest = hashlib.sha256()
     # mtime=0 keeps the gzip header free of the time, so equal data gives equal files.
     with path.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as handle:
-        sql = f"COPY (SELECT * FROM {table} ORDER BY {order_by}) TO STDOUT WITH (FORMAT csv, HEADER true)"
-        with cursor.copy(sql) as copy:
+        sql = (
+            f"COPY (SELECT * FROM {table} WHERE {run_column} = %s ORDER BY {order_by}) "
+            "TO STDOUT WITH (FORMAT csv, HEADER true)"
+        )
+        with cursor.copy(sql, (run_id,)) as copy:
             for chunk in copy:
                 data = bytes(chunk)
                 handle.write(data)
@@ -84,15 +78,26 @@ def copy_table(cursor: Any, table: str, order_by: str, path: Path) -> dict[str, 
     return {"file": path.name, "rows": rows, "csv_sha256": digest.hexdigest()}
 
 
-def take_snapshot(run_dir: Path, config: Any = None) -> dict[str, Any]:
-    """Save the consolidation tables into the run directory and return the manifest.
+def take_snapshot(run_dir: Path, run: Any, config: Any = None) -> dict[str, Any]:
+    """Save one consolidation run's tables into the run directory and return the manifest.
 
-    Written to a temporary directory and renamed into place, so a half-taken snapshot is never
-    mistaken for a whole one.
+    `run` is the consolidation_run.ConsolidationRun the seed reads. Written to a temporary
+    directory and renamed into place, so a half-taken snapshot is never mistaken for a whole one.
     """
     import psycopg  # type: ignore
 
     from .db import DatabaseConfig, connect
+
+    if not run.entity_linkage_run_id:
+        raise RuntimeError(
+            f"Consolidation run {run.run_id} records no entity_linkage_run_id, so the crosswalk it "
+            "consumed cannot be identified. Pin another run with CONSOLIDATION_RUN_ID."
+        )
+    tables = {
+        table: (CONSOLIDATION_RUN_COLUMN, run.run_id, order_by)
+        for table, order_by in CONSOLIDATION_TABLES.items()
+    }
+    tables[CROSSWALK_TABLE] = (CROSSWALK_RUN_COLUMN, run.entity_linkage_run_id, CROSSWALK_ORDER)
 
     config = config or DatabaseConfig.from_env()
     target = snapshot_dir(run_dir)
@@ -105,16 +110,15 @@ def take_snapshot(run_dir: Path, config: Any = None) -> dict[str, Any]:
             conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
             conn.read_only = True
             with conn.cursor() as cursor:
-                run_ids = consolidation_run_ids(cursor)
-                tables = dict(CONSOLIDATION_TABLES)
-                tables.update({name: CROSSWALK_ORDER for name in crosswalk_tables(cursor)})
                 manifest = {
                     "taken_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                     "database": f"{config.host}/{config.dbname}",
-                    "consolidation_run_ids": run_ids,
+                    "consolidation_run": run.as_dict(),
                     "tables": {
-                        table: copy_table(cursor, table, order_by, staging / f"{table}.csv.gz")
-                        for table, order_by in tables.items()
+                        table: copy_table(
+                            cursor, table, column, value, order_by, staging / f"{table}.csv.gz"
+                        )
+                        for table, (column, value, order_by) in tables.items()
                     },
                 }
         (staging / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -144,8 +148,28 @@ def missing_snapshot_files(run_dir: Path) -> list[str] | None:
     return [info["file"] for info in manifest["tables"].values() if not (folder / info["file"]).exists()]
 
 
-def current_consolidation_run_ids(config: Any = None) -> list[str]:
-    from .db import connect
+def recorded_run(run_dir: Path) -> str:
+    """Which consolidation run a run's seed read, as its snapshot manifest records it.
 
-    with connect(config, autocommit=True) as conn, conn.cursor() as cursor:
-        return consolidation_run_ids(cursor)
+    Manifests written before a seed read one run list every run in the table instead, under
+    `consolidation_run_ids`; more than one there means that seed blended them.
+    """
+    path = snapshot_dir(run_dir) / MANIFEST_NAME
+    manifest = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    return describe_manifest_run(manifest)
+
+
+def describe_manifest_run(manifest: dict[str, Any] | None) -> str:
+    """recorded_run for a manifest already read, e.g. from blob."""
+    if not manifest:
+        return "not recorded: seeded from a file, or before snapshots were kept"
+    run = manifest.get("consolidation_run")
+    if run:
+        return (
+            f"{run['run_id']} ({run['consolidation_strategy']}/{run['entity_linkage_strategy']}, "
+            f"{run['chosen_by']})"
+        )
+    run_ids = manifest.get("consolidation_run_ids") or []
+    if len(run_ids) == 1:
+        return f"{run_ids[0]} (the only run in the table)"
+    return f"a blend of {len(run_ids)} runs: {', '.join(run_ids)}"

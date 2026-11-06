@@ -172,15 +172,21 @@ def resolve_sites(config: Any, allow_database: bool = True) -> tuple[list[dict[s
             "search used."
         )
 
+    from . import consolidation_run
     from .seed_source import load_seed_sites, seed_headers
 
-    # F32: keep the consolidation tables this run searches against, because every rebuild
-    # reassigns internal_facility_id - the run's site_id. Taken before seeding and checked after,
-    # so the seed and the copy describe the same consolidation run.
-    manifest = consolidation.take_snapshot(config.run_dir)
-    sites = load_seed_sites(iso3=config.iso3 or None)
-    if consolidation.current_consolidation_run_ids() != manifest["consolidation_run_ids"]:
-        raise RuntimeError("Consolidation was rebuilt while this run was seeding; run it again.")
+    # The consolidation tables hold every run side by side, so the seed reads exactly one: the run
+    # the Climate TRACE pipeline would read too. F32: keep that run's tables, so the run's results
+    # can be traced to their source records after the database moves on. Counted again after
+    # seeding: runs are appended whole and never edited, so a change means a rebuild mid-seed.
+    run = consolidation_run.resolve_run()
+    consolidation.take_snapshot(config.run_dir, run)
+    sites = load_seed_sites(iso3=config.iso3 or None, consolidation_run_id=run.run_id)
+    if consolidation_run.row_count(run.run_id) != run.rows:
+        raise RuntimeError(
+            f"Consolidation run {run.run_id} changed while this run was seeding (the tables were "
+            "rebuilt); run it again."
+        )
     headers = seed_headers()
     write_snapshot_atomically(snapshot, sites, headers)
     return sites, headers
