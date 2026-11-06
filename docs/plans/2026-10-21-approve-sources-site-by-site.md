@@ -3,7 +3,10 @@
 **Status:** built, 21 October 2026: build steps 1–4 and 7, on stacked local branches, not yet
 merged. Steps 5 (batch 1 conversion) and 6 (ingestion #261 rework) are not built. See
 [As built](#as-built). This replaces the matching and review parts of
-[2026-10-20-match-sources-by-location.md](2026-10-20-match-sources-by-location.md) (PR #27).
+[2026-10-20-match-sources-by-location.md](2026-10-20-match-sources-by-location.md) (PR #27). Its
+approval rules were replaced on 26 October by
+[2026-10-26-smes-check-key-values.md](2026-10-26-smes-check-key-values.md): nothing is approved
+automatically.
 **Date:** 21 October 2026
 
 ## Why
