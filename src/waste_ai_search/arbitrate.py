@@ -19,6 +19,7 @@ from .input_loader import describe_seed, resolve_sites, write_csv_records
 from .link_check import BROKEN, LINK_CHECK_FILE, LinkResult, load_results
 from .prompt_builder import needs_contradiction_check, requested_attributes
 from .run_context import PipelineConfig, load_json, raw_dir, search_tool_failed, site_id_from_path
+from .searchable_names import SKIPPED_NAME_CLASSES, describe_counts, recorded_skips, site_name_class
 from .snapshot import recorded_run
 from .schema import (
     canonical_attribute,
@@ -913,6 +914,14 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
     contradiction_checks = sum(
         1 for sid in by_site if sid in sites_by_id and needs_contradiction_check(sites_by_id[sid])
     )
+    # Sites searched although their name gives a search nothing to look for: listed by id, or
+    # searched with --include-unsearchable-names. Beside the count skipped, it shows which way the
+    # name rule ran.
+    unsearchable_searched = describe_counts([
+        cls
+        for sid in by_site
+        if sid in sites_by_id and (cls := site_name_class(sites_by_id[sid])) in SKIPPED_NAME_CLASSES
+    ])
 
     standard_records, standard_notes = build_standard_table(sites_by_id, resolved_rows)
     for note_site_id, note in standard_notes:
@@ -965,6 +974,8 @@ def run_arbitration(config: PipelineConfig) -> dict[str, Path]:
             },
             {"setting": "consolidation_run", "value": recorded_run(config.run_dir)},
             {"setting": "sites_arbitrated", "value": len(cached)},
+            {"setting": "unsearchable_names_skipped", "value": recorded_skips(config.run_dir, set(by_site))},
+            {"setting": "unsearchable_names_searched", "value": unsearchable_searched},
             {"setting": "arbitrated_at", "value": datetime.now().replace(microsecond=0).isoformat()},
             {"setting": "review_queue_rows", "value": len(review_queue)},
             {"setting": "links_checked", "value": len(link_results)},

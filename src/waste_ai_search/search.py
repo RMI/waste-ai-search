@@ -29,6 +29,7 @@ from .run_context import (
     raw_response_path,
     save_json,
     search_tool_failed,
+    site_id_from_path,
     agent_identity,
 )
 from .schema import (
@@ -39,6 +40,12 @@ from .schema import (
     in_batch,
     normalize_scalar,
 )
+from .searchable_names import (
+    SKIPPED_SITES_FILE,
+    class_breakdown,
+    record_skips,
+    skip_unsearchable_names,
+)
 
 
 def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[dict[str, Any]]:
@@ -46,12 +53,22 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
 
     `--limit` takes the first N in seed order, which is facility-id order and therefore clusters
     by country and data source. `--pilot-size` instead draws a deterministic spread across
-    priority countries, high-volume countries and deliberately hard generic-named sites.
+    priority countries, high-volume countries and, with --include-unsearchable-names,
+    deliberately hard generic-named sites.
 
     Countries in DEFAULT_EXCLUDED_ISO3 are dropped unless the caller asked for them explicitly -
     by naming the country in --iso3, by listing site ids, or with
-    --include-excluded-countries. An explicit request beats a default.
+    --include-excluded-countries. Sites whose name gives a search nothing to look for
+    (searchable_names.py) are dropped unless their ids are listed or
+    --include-unsearchable-names is passed. An explicit request beats a default.
     """
+    return choose_sites(sites, config)[0]
+
+
+def choose_sites(
+    sites: list[dict[str, Any]], config: PipelineConfig
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """select_sites, plus a skipped_sites.csv row for each site the name rule dropped."""
     selected = sites
     explicit = bool(config.site_ids)
     if config.site_ids:
@@ -87,6 +104,20 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
     nothing_to_ask = before - len(selected)
     if nothing_to_ask:
         print(f"Skipped {nothing_to_ask:,} site(s) with no attributes left to search.")
+    # Names that give a search nothing to look for. After the check above, so it counts only sites
+    # with something to ask, and before --limit and --pilot-size, so those take searchable sites.
+    # The count is therefore of the whole selection, including sites a limit or sample would not
+    # have searched. Listing site ids names each site, so it wins; naming a country with --iso3
+    # does not name its unnamed sites, so it doesn't.
+    skipped: list[dict[str, Any]] = []
+    if not config.site_ids and not config.include_unsearchable_names:
+        selected, skipped = skip_unsearchable_names(selected)
+        if skipped:
+            print(
+                f"Skipped {len(skipped):,} site(s) whose name gives a search nothing to look for "
+                f"({class_breakdown([row['name_class'] for row in skipped])}; "
+                "pass --include-unsearchable-names to search them)."
+            )
     if config.batch:
         # Counted after the default exclusions, so batch 6 reports what it will search rather
         # than the ~9,600 USA and Brazil sites it is about to drop.
@@ -94,10 +125,10 @@ def select_sites(sites: list[dict[str, Any]], config: PipelineConfig) -> list[di
         print(f"Batch {config.batch}: {len(selected):,} site(s) in {len(countries)} country(ies).")
 
     if config.pilot_size > 0:
-        return select_mixed_pilot(selected, size=config.pilot_size)
+        return select_mixed_pilot(selected, size=config.pilot_size), skipped
     if config.limit > 0:
         selected = selected[: config.limit]
-    return selected
+    return selected, skipped
 
 
 def add_searches(total: int | None, client: Any) -> int | None:
@@ -140,7 +171,7 @@ def run_search(
         verb = "Reusing this run's seed snapshot" if reusing else "Seeded from the database, snapshot"
         print(f"{verb}: {run_seed_path(config)} ({len(sites)} facilities)")
 
-    selected = select_sites(sites, config)
+    selected, skipped = choose_sites(sites, config)
     if not selected:
         hint = (
             f" This run is pinned to {run_seed_path(config)}; use a new --run-id to seed afresh."
@@ -148,6 +179,15 @@ def run_search(
             else ""
         )
         raise ValueError(f"No sites matched the selection filters.{hint}")
+    # The run's list of sites skipped by name, for review and for Run_Config. Each search adds its
+    # skips to the list and takes off the sites it selects or the run has already searched, so a
+    # narrower search under the same run id doesn't shrink it and a site searched after all isn't
+    # also counted as skipped. A search of listed ids (a retry, or the gas follow-up) only takes
+    # its sites off a list that exists.
+    if not config.site_ids or (config.run_dir / SKIPPED_SITES_FILE).exists():
+        searched = {site_id_from_path(path) for path in raw_dir(config.run_dir).glob("site_*.json")}
+        searched |= {normalize_scalar(site.get("site_id")) for site in selected}
+        record_skips(config.run_dir, skipped, searched)
 
     # The prompt asks the agent to search using municipality and admin names, so those fields
     # have to be populated or that instruction is asking for context we never supplied.

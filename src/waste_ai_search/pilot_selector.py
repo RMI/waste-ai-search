@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -34,6 +35,16 @@ GENERIC_TOKENS = {
     "tip",
 }
 
+# Two-letter words that say nothing about which site it is: articles and prepositions (English,
+# Spanish, Portuguese, French, Italian), "no" and "nr" before a number, and "lf" for landfill.
+FILLER_SHORT_TOKENS = {
+    "no", "nr", "lf",
+    "of", "in", "at", "on", "to", "by", "or", "an", "as", "is", "it",
+    "de", "do", "da", "di", "du", "el", "la", "le", "lo", "en", "et", "es", "na", "al", "os", "ao",
+}
+# "Landfill II" numbers a cell or phase; it doesn't name a site.
+ROMAN_NUMERAL = re.compile(r"^x{0,3}(ix|iv|v?i{0,3})$")
+
 
 def stable_int(*parts: Any) -> int:
     text = "|".join(normalize_scalar(part) for part in parts)
@@ -46,6 +57,30 @@ def sort_key(row: dict[str, Any], salt: str = "default") -> tuple[int, str]:
     )
 
 
+def informative_tokens(text: str) -> list[str]:
+    """The words of a lowercased name that could say which site it is.
+
+    A word of three or more characters counts unless it is generic. A shorter one counts when it
+    looks like initials or a route code: two letters other than filler and roman numerals
+    ("GB Landfill", "SR 85 Landfill"), or single letters joined by "&" ("K & W Landfill"). Short
+    numbers ("Dump 1"), lone letters ("Landfill A") and roman numerals ("Landfill II") don't.
+    """
+    words = [word.strip(".,;:()[]{}") for word in text.split()]
+    informative = []
+    for index, word in enumerate(words):
+        if not word or word in GENERIC_TOKENS:
+            continue
+        if len(word) > 2:
+            informative.append(word)
+        elif not word.isalpha() or ROMAN_NUMERAL.match(word):
+            continue
+        elif len(word) == 2 and word not in FILLER_SHORT_TOKENS:
+            informative.append(word)
+        elif "&" in words[max(0, index - 1) : index + 2]:
+            informative.append(word)
+    return informative
+
+
 def is_generic_site_name(name: Any) -> bool:
     text = normalize_scalar(name).lower().strip()
     if not text:
@@ -53,8 +88,7 @@ def is_generic_site_name(name: Any) -> bool:
     if text in GENERIC_EXACT_NAMES:
         return True
     tokens = {token.strip(".,;:()[]{}") for token in text.split()}
-    informative = [token for token in tokens if token not in GENERIC_TOKENS and len(token) > 2]
-    return bool(tokens & GENERIC_TOKENS) and len(informative) == 0
+    return bool(tokens & GENERIC_TOKENS) and not informative_tokens(text)
 
 
 def add_unique(

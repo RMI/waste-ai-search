@@ -327,14 +327,17 @@ FORECAST_HEADERS = ["batch", "name_class", "sites", "est_bing_queries", "est_cos
 
 
 def batch_selections(sites: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
-    """The sites each batch would search, selected exactly as a batch run selects them
-    (`select_sites`): the default exclusions and sites with nothing left to ask are already out."""
+    """The sites each batch would search without the name rule, selected as a batch run selects
+    them (`select_sites`): the default exclusions and sites with nothing left to ask are already
+    out, and the classes the rule skips are kept in, since they are what this measures."""
     from .run_context import PipelineConfig
     from .search import select_sites
 
     selections = {}
     for batch in range(1, LAST_BATCH + 1):
-        config = PipelineConfig(input_csv=None, run_dir=Path("."), run_id="forecast", batch=batch)
+        config = PipelineConfig(
+            input_csv=None, run_dir=Path("."), run_id="forecast", batch=batch, include_unsearchable_names=True
+        )
         with redirect_stdout(io.StringIO()):  # select_sites narrates; the caller summarizes
             selections[batch] = select_sites(sites, config)
     return selections
@@ -347,8 +350,7 @@ SKIP_HEADERS = [
 
 
 def skip_candidates(selections: dict[int, list[dict[str, Any]]]) -> list[dict[str, Any]]:
-    """Every site a batch would search whose name is in a class that could be skipped, with the
-    rule that put it there and a link to look at it."""
+    """Every site a batch skips by name, with the rule that put it there and a link to look at it."""
     rows = []
     for batch, selected in selections.items():
         for site in selected:
@@ -395,10 +397,11 @@ def forecast(
     fallback: float,
     cost_per_1000_queries: float = DEFAULT_COST_PER_1000_QUERIES,
 ) -> list[dict[str, Any]]:
-    """What each batch would search, by class of name, and what that would cost.
+    """What each batch would search without the name rule, by class of name, and what that would
+    cost: the classes the rule skips show what it saves.
 
-    Sites are selected exactly as a batch run selects them (`select_sites`), so the default
-    exclusions and sites with nothing left to ask are already out.
+    Sites are selected as a batch run selects them (`select_sites`), so the default exclusions and
+    sites with nothing left to ask are already out.
     """
     rows = []
     for batch, selected in batch_selections(sites).items():
