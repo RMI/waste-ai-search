@@ -45,7 +45,7 @@ from waste_ai_search.searchable_names import GENERIC, MINING, NAMED, NO_NAME, NO
         ("Bladensburg Landfill", NAMED),  # a whole word only
     ],
 )
-def test_names_fall_into_four_classes(name, expected):
+def test_each_name_falls_in_its_class(name, expected):
     assert name_class(name) == expected
 
 

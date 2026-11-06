@@ -176,8 +176,8 @@ that is already on disk can be passed with `--run-dir` instead.
 **What gets built:**
 
 - `scripts/measure_name_yield.py`.
-- `src/waste_ai_search/searchable_names.py`, which holds the four-class test. The measurement and
-  the rule then classify names the same way.
+- `src/waste_ai_search/searchable_names.py`, which sorts names into the five classes above. The
+  measurement and the rule then classify names the same way.
 - Tests that use a small fake run folder and no network.
 
 ## Step 2: decide, with the bar set before the numbers come in
