@@ -104,6 +104,11 @@ def test_an_english_ton_stays_ambiguous_but_a_spanish_one_is_the_metric_tonne():
         ("waste_in_place_metric_tonnes", "1.2", "milhões de toneladas", "1200000"),
         ("waste_in_place_metric_tonnes", "3", "Millionen Tonnen", "3000000"),
         ("area_square_meters", "1.5", "millones de metros cuadrados", "1500000"),
+        # A decimal comma, as Spanish sources outside Mexico write it; a three-digit group still groups.
+        ("waste_in_place_metric_tonnes", "1,4 millones", "toneladas", "1400000"),
+        ("waste_in_place_metric_tonnes", "2,75", "millones de toneladas", "2750000"),
+        ("waste_in_place_metric_tonnes", "1,235,000", "toneladas", "1235000"),
+        ("waste_in_place_metric_tonnes", "1,235", "toneladas", "1235"),
         # Not a magnitude: millimetres and miles only start with "mil".
         ("waste_in_place_metric_tonnes", "5000", "toneladas", "5000"),
     ],

@@ -479,7 +479,9 @@ def parse_numbers(value: str, unit: str = "") -> tuple[list[float], float]:
     asks for digits in value and the source's unit in unit. Only whole words are read from the
     unit: an abbreviation there is a unit in its own right ("mm" is millimetres).
     """
-    text = _plain(value.lower()).replace(",", "")
+    # A comma followed by one or two digits is a decimal comma ("1,4 millones"), since a thousands
+    # group always has three; any other comma groups thousands ("1,235,000") and is dropped.
+    text = re.sub(r"(?<=\d),(?=\d{1,2}(?!\d))", ".", _plain(value.lower())).replace(",", "")
     # A hyphen BETWEEN two digits is a range separator, not a sign: sources write "3-8 metres"
     # far more often than they write a negative quantity. Left as-is, "3-8" parses to [3, -8],
     # which then reads as a negative measurement and the whole value is discarded. A leading
