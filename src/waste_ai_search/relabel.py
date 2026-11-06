@@ -30,6 +30,7 @@ from __future__ import annotations
 import csv
 import gzip
 import os
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date
@@ -169,12 +170,29 @@ def read_snapshot_crosswalk(path: Path) -> dict[str, set[Record]]:
         reader = csv.DictReader(handle)
         _require_columns(reader.fieldnames, ("internal_facility_id", "data_source", "facility_id"), path)
         for row in reader:
-            records[_id_text(row["internal_facility_id"])].add(_record(row))
+            data_source, facility_id = _record(row)
+            records[_id_text(row["internal_facility_id"])].add((data_source, generated_facility_id(data_source, facility_id)))
     return dict(records)
 
 
 def _record(row: Mapping[str, Any]) -> Record:
     return normalize_scalar(row["data_source"]), normalize_scalar(row["facility_id"])
+
+
+# Waste Atlas gives no IDs of its own. Batch 1's snapshot holds the ones made before
+# RMI/waste_data_ingestion_pipeline#191 ("waste_atlas_<NAME>_<lat>_<lon>"); every record has since
+# been given ingestion's generate_facility_id form, so the old ones are translated to it.
+OLD_WASTE_ATLAS_ID = re.compile(r"waste_atlas_(?P<name>.+)_(?P<lat>-?[\d.]+)_(?P<lon>-?[\d.]+)")
+
+
+def generated_facility_id(data_source: str, facility_id: str) -> str:
+    """A pre-#191 Waste Atlas facility_id as ingestion's generate_facility_id now writes it
+    (gen_<data_source>_<snake-case name>_<lat>_<lon>); any other ID unchanged."""
+    old = OLD_WASTE_ATLAS_ID.fullmatch(facility_id) if data_source.startswith("waste_atlas") else None
+    if not old:
+        return facility_id
+    name = re.sub(r"[\W_]+", "_", old["name"].lower()).strip("_")
+    return f"gen_{data_source}_{name}_{float(old['lat'])}_{float(old['lon'])}"
 
 
 def _crosswalk(rows: Iterable[Mapping[str, Any]], description: str) -> Crosswalk:

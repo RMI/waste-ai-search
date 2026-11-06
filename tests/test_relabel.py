@@ -23,6 +23,7 @@ from waste_ai_search.relabel import (
     Crosswalk,
     RelabelError,
     choose_consolidation_run,
+    generated_facility_id,
     map_old_ids,
     read_crosswalk_csv,
     read_crosswalk_db,
@@ -493,3 +494,23 @@ def test_the_database_crosswalk_is_the_run_the_consolidation_consumed(monkeypatc
     assert calls[1][1] == ("el-2",)
     assert loaded.wastemap_ids == {("osm_2022", "A"): {"101"}}
     assert "consolidation run c-2" in loaded.description
+
+
+@pytest.mark.parametrize(
+    ("data_source", "old_id", "expected"),
+    [
+        # Batch 1's IDs and the ones dev's crosswalk holds for them (6 November 2026).
+        ("waste_atlas_landfills_2013", "waste_atlas_AWABA LANDFILL_-33.02402916_151.5525395",
+         "gen_waste_atlas_landfills_2013_awaba_landfill_-33.02402916_151.5525395"),
+        ("waste_atlas_landfills_2013", "waste_atlas_PEOPLE'S LANDFILL, Inc._43.17498397_-83.83604805",
+         "gen_waste_atlas_landfills_2013_people_s_landfill_inc_43.17498397_-83.83604805"),
+        ("waste_atlas_landfills_2013", "waste_atlas_KENT COUNTY- SOUTH KENT LANDFILL_42.7736996_-85.6760692",
+         "gen_waste_atlas_landfills_2013_kent_county_south_kent_landfill_42.7736996_-85.6760692"),
+        # Already in the new form, or another source's own ID: unchanged.
+        ("waste_atlas_landfills_2013", "gen_waste_atlas_landfills_2013_awaba_landfill_-33.02402916_151.5525395",
+         "gen_waste_atlas_landfills_2013_awaba_landfill_-33.02402916_151.5525395"),
+        ("osm_2022", "waste_atlas_X_1.0_2.0", "waste_atlas_X_1.0_2.0"),
+    ],
+)
+def test_a_pre_191_waste_atlas_id_is_read_in_ingestions_generated_form(data_source, old_id, expected):
+    assert generated_facility_id(data_source, old_id) == expected
