@@ -1,9 +1,9 @@
 """Keep a copy of the consolidation tables a run searched against (F32).
 
-The database is rebuilt by consolidation, and `internal_facility_id` - which every output of a
-run uses as `site_id` - is reassigned each time. Without a copy, a finished run's results cannot
-be tied back to their facilities once the tables move on, and there is no way to tell which
-facilities changed and need searching again.
+The database is rebuilt by consolidation. Since RMI/waste_data_ingestion_pipeline#196 a facility
+keeps its `wastemap_id` across rebuilds, and that is what every output of a run uses as `site_id`.
+Runs from before then used `internal_facility_id`, which was reassigned each time. Either way,
+without a copy there is no way to tell which facilities changed and need searching again.
 
 So a run that seeds from the database first saves, inside its run directory:
 
@@ -34,13 +34,13 @@ MANIFEST_NAME = "manifest.json"
 
 # Table -> ORDER BY, so the same database state always produces the same bytes and checksum.
 CONSOLIDATION_TABLES = {
-    "consolidation.consolidated_facility": "internal_facility_id, year",
+    "consolidation.consolidated_facility": "wastemap_id, year",
     "consolidation.value_resolution_ledger": (
-        "internal_facility_id, year NULLS FIRST, column_name, data_source, data_source_facility_id"
+        "wastemap_id, year NULLS FIRST, column_name, data_source, data_source_facility_id"
     ),
 }
 CROSSWALK_SCHEMA = "entity_linkage"
-CROSSWALK_ORDER = "internal_facility_id, data_source, facility_id"
+CROSSWALK_ORDER = "wastemap_id, data_source, facility_id"
 
 
 def snapshot_dir(run_dir: Path) -> Path:

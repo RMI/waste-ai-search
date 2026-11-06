@@ -1,8 +1,8 @@
 """Seed the metadata search from consolidation.consolidated_facility.
 
-The table holds one row per (internal_facility_id, year): 44k rows describing 15.5k
+The table holds one row per (wastemap_id, year): 44k rows describing 15.5k
 physical facilities. Identity columns (name, country, coordinates, area_square_meters) are constant
-within a facility, so collapsing to one row per internal_facility_id is lossless for
+within a facility, so collapsing to one row per facility is lossless for
 identity. The time-varying measurements are not constant, so the fold keeps the latest
 year as the reference row and backfills only the still-empty baseline fields from the
 most recent year that has a value, recording where each came from.
@@ -17,6 +17,12 @@ from .schema import ATTRIBUTE_TO_STANDARD_COLUMN, REQUESTABLE_ATTRIBUTES, normal
 SOURCE_SCHEMA = "consolidation"
 SOURCE_TABLE = "consolidated_facility"
 LEDGER_TABLE = "value_resolution_ledger"
+# The database's key for a facility. Since RMI/waste_data_ingestion_pipeline#196 every
+# consolidation table keys a facility by its WasteMAP ID, which keeps its value across rebuilds.
+# It replaced internal_facility_id, which changed on every rebuild.
+DB_FACILITY_KEY = "wastemap_id"
+# The name this code and every run file give that key. It is unchanged, so runs written before
+# the switch still read; since the switch its value is the facility's wastemap_id.
 FACILITY_KEY = "internal_facility_id"
 
 # Which ledger column holds the provenance for each attribute we search. The three identity
@@ -89,16 +95,18 @@ PROVENANCE_FIELDS = [
     "attribute_sources",
 ]
 
-SELECT_FIELDS = [FACILITY_KEY, "year", *IDENTITY_FIELDS, *TIME_VARYING_FIELDS]
+SELECT_FIELDS = [DB_FACILITY_KEY, "year", *IDENTITY_FIELDS, *TIME_VARYING_FIELDS]
 
 def select_sql(where: str = "") -> str:
-    columns = ", ".join(SELECT_FIELDS)
+    columns = ", ".join(
+        f"{field} AS {FACILITY_KEY}" if field == DB_FACILITY_KEY else field for field in SELECT_FIELDS
+    )
     clause = f"WHERE {where}\n" if where else ""
     return (
         f"SELECT {columns}\n"
         f"FROM {SOURCE_SCHEMA}.{SOURCE_TABLE}\n"
         f"{clause}"
-        f"ORDER BY {FACILITY_KEY}, year DESC NULLS LAST"
+        f"ORDER BY {DB_FACILITY_KEY}, year DESC NULLS LAST"
     )
 
 
@@ -246,7 +254,7 @@ def load_seed_sites(
 
 def ledger_sql() -> str:
     return (
-        "SELECT internal_facility_id, year, column_name, data_source, resolution_granularity\n"
+        f"SELECT {DB_FACILITY_KEY} AS {FACILITY_KEY}, year, column_name, data_source, resolution_granularity\n"
         f"FROM {SOURCE_SCHEMA}.{LEDGER_TABLE}\n"
         "WHERE column_name = ANY(%s)"
     )

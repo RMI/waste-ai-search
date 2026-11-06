@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .schema import normalize_scalar
+from .seed_source import DB_FACILITY_KEY, FACILITY_KEY
 
 
 LEDGER_NAME_COLUMN = "facility_name"
@@ -99,7 +100,7 @@ def source_name_sql(spec: RawNameSource) -> str:
     when none matches is the same on every run.
     """
     return (
-        "SELECT DISTINCT l.internal_facility_id,\n"
+        f"SELECT DISTINCT l.{DB_FACILITY_KEY} AS {FACILITY_KEY},\n"
         "       l.winning_value AS winning,\n"
         f"       r.{spec.original_column} AS original,\n"
         f"       r.{spec.translated_column} AS translated,\n"
@@ -107,7 +108,7 @@ def source_name_sql(spec: RawNameSource) -> str:
         "FROM consolidation.value_resolution_ledger l\n"
         f"JOIN raw_data.{spec.table} r ON {spec.key_expression} = l.data_source_facility_id\n"
         "WHERE l.column_name = %s AND l.data_source = %s\n"
-        "ORDER BY l.internal_facility_id, original"
+        f"ORDER BY l.{DB_FACILITY_KEY}, original"
     )
 
 
@@ -179,7 +180,7 @@ def attach_name_provenance(
 # it. Without it the agent sees a generic name ("Lixão") and a city-centre point, and has to guess
 # the town - on the WP-543 test it guessed wrong and returned dumps 140 and 237 km away.
 SINIR_MUNICIPALITY_SQL = (
-    "SELECT DISTINCT l.internal_facility_id, c.city_name, c.state_name\n"
+    f"SELECT DISTINCT l.{DB_FACILITY_KEY} AS {FACILITY_KEY}, c.city_name, c.state_name\n"
     "FROM consolidation.value_resolution_ledger l\n"
     "JOIN raw_data.raw_sinir_cities_served_by_landfills_translated r\n"
     "  ON r.facility_code::text = l.data_source_facility_id\n"

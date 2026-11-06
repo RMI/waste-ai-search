@@ -1,7 +1,11 @@
+from waste_ai_search import snapshot, source_names
 from waste_ai_search.seed_source import (
+    SELECT_FIELDS,
     dedupe_facility_rows,
     fold_facility_rows,
     is_empty,
+    ledger_sql,
+    select_sql,
     to_seed_record,
 )
 
@@ -177,3 +181,23 @@ def test_attach_only_stamps_attributes_that_have_a_value():
     attach_attribute_sources(records, static, {})
 
     assert records[0]["attribute_sources"] == "found_facility_name@osm_2022"
+
+
+def test_the_database_is_read_by_wastemap_id():
+    # Since RMI/waste_data_ingestion_pipeline#196 the consolidation tables key a facility by
+    # wastemap_id; internal_facility_id is gone from them. Every query reads wastemap_id, and
+    # names it internal_facility_id, the key the rest of this code and every run file use.
+    assert SELECT_FIELDS[0] == "wastemap_id"  # what scripts/check_db_schema.py checks
+    assert select_sql().startswith("SELECT wastemap_id AS internal_facility_id, year,")
+    assert "ORDER BY wastemap_id, year DESC NULLS LAST" in select_sql()
+    assert ledger_sql().startswith("SELECT wastemap_id AS internal_facility_id, year,")
+    assert source_names.SINIR_MUNICIPALITY_SQL.startswith("SELECT DISTINCT l.wastemap_id AS internal_facility_id,")
+    name_sql = source_names.source_name_sql(source_names.RAW_NAME_SOURCES["osm_2022"])
+    assert name_sql.startswith("SELECT DISTINCT l.wastemap_id AS internal_facility_id,")
+    assert name_sql.endswith("ORDER BY l.wastemap_id, original")
+    assert snapshot.CONSOLIDATION_TABLES["consolidation.consolidated_facility"] == "wastemap_id, year"
+    assert snapshot.CROSSWALK_ORDER.startswith("wastemap_id,")
+    every_sql = [select_sql(), ledger_sql(), name_sql, source_names.SINIR_MUNICIPALITY_SQL,
+                 snapshot.CROSSWALK_ORDER, *snapshot.CONSOLIDATION_TABLES.values()]
+    for sql in every_sql:
+        assert "internal_facility_id," not in sql.replace("AS internal_facility_id,", "")
