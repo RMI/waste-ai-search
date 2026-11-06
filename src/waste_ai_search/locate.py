@@ -21,7 +21,9 @@ an address stays unlocated.
 
 A facility name is never geocoded: geocoders find landfills by name from OpenStreetMap, which is
 where most of our sites came from, so it would hand us our own point back. Only text the agent
-labelled a street address is sent, with any leading facility name taken off.
+labelled a street address is sent, with any leading facility name taken off, and never text that
+has no civic number and a part ending in a word for a waste site ("Mapleward Road Landfill, Thunder
+Bay, ON"), which is a name too.
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+from .payload import is_converted
 from .schema import normalize_scalar
 
 
@@ -65,10 +68,15 @@ PART_SEPARATOR = "|"
 # can only ever be a hint.
 MIN_DECIMALS = 3
 # The prompt's coordinates are rounded to this many decimals: enough to search with, and nothing
-# worth copying.
+# worth copying. In batch 1, whose prompts carried our full point, the agent copied it to the metre
+# and credited it to a registry. A stated point equal to the prompt's rounded one is treated as
+# copied. One equal to our own point is not: the prompt no longer carries it, so a source stating
+# it agrees with us, as the regulator our seed came from does.
 PROMPT_DECIMALS = 2
-# In batch 1 the agent copied our own point, to the metre, and credited it to a registry. A stated
-# point this close to ours is treated as copied, as is one equal to the prompt's rounded point.
+# A response from before the rounding, attribute-first (payload.py converts it), came from a prompt
+# carrying our full point, so there a point this close to ours is the prompt's. Batch 1's six
+# copies were each within a few metres, some written with fewer digits. Left in, one search's copy
+# filed every search's citation of Ontario's registry entry for Thunder Bay under the copier's site.
 COPIED_WITHIN_METRES = 10.0
 # Coordinates win over an address in the same source, but an address this far from them makes
 # the pair doubtful. A landfill's address marks its gate, which can be well away from its middle.
@@ -954,16 +962,38 @@ def _host_is(url: Any, sites: tuple[str, ...]) -> bool:
     return any(host == site or host.endswith("." + site) for site in sites)
 
 
-def _copied(located: Located, site: dict[str, Any]) -> bool:
-    """Whether stated coordinates are the prompt's rounded point, or within 10 m of our seed point."""
+def _copied(located: Located, site: dict[str, Any], source: dict[str, Any]) -> bool:
+    """Whether stated coordinates are the prompt's: its rounded point, or for a response from before
+    the rounding, our own point to within COPIED_WITHIN_METRES."""
     point = located.point
     if point is None:
         return False
     rounded = prompt_point(site)
     if rounded is not None and all(abs(a - b) < 1e-9 for a, b in zip(point, rounded)):
         return True
-    seed = seed_point(site)
-    return seed is not None and haversine_km(*seed, *point) * 1000 <= COPIED_WITHIN_METRES
+    ours = seed_point(site)
+    return is_converted(source) and ours is not None and haversine_km(*ours, *point) * 1000 <= COPIED_WITHIN_METRES
+
+
+# Text the agent labelled a street address that is really a facility's name: no civic number, and
+# a part ending in a word for a waste site ("Mapleward Road Landfill", "Highway 16 Transfer
+# Station", or "Mapleward Road Landfill, Thunder Bay, ON", as sources usually write it). A geocoder
+# would find it by name in OpenStreetMap, or place it on the road it names.
+_CIVIC_NUMBER = re.compile(r"(?:^|[,;])\s*\d+[A-Za-z]?(?:-\d+)?\s+[^\W\d_]")
+_ENDS_IN_FACILITY_WORD = re.compile(
+    r"(?:\b(?:landfills?|dump|dumpsite|tip|eco-?centre)|"
+    r"\b(?:waste|refuse|resource|recovery|recycling|disposal|management|transfer|landfill|dump|nuisance)\s+"
+    r"(?:facility|centre|center|site|depot|park|grounds?|station))\W*$",
+    re.IGNORECASE,
+)
+
+
+def names_a_facility(text: str) -> bool:
+    """Whether address text is a facility's name: no civic number, and a waste-site word ending one
+    of its comma-separated parts."""
+    text = normalize_scalar(text)
+    parts = re.split(r"[,;]", text)
+    return any(_ENDS_IN_FACILITY_WORD.search(part) for part in parts) and not _CIVIC_NUMBER.search(text)
 
 
 def _parts(text: str, kind: str) -> list[tuple[str, str]]:
@@ -1035,7 +1065,7 @@ def locate_source(
         sent = address_to_send(rest, names)
         if boxed and not STREET_OR_NUMBER.search(rest):
             tried = Located(reason="a PO box is not where the site is")
-        elif not sent:
+        elif not sent or names_a_facility(sent):
             tried = Located(reason="the stated location is the facility's name, which is never geocoded")
         else:
             tried = geocode_address(sent, iso3, cache, geocoder, live)
@@ -1046,7 +1076,7 @@ def locate_source(
     if point is not None and point.point is not None:
         if point.basis in {COORDINATES, GRID_REFERENCE, HINT} and _host_is(source.get("url"), POSTCODE_CENTROID_SITES):
             point = Located(reason="wastebook.co.uk's coordinates are postcode centroids")
-        elif point.basis in {COORDINATES, HINT} and _copied(point, site):
+        elif point.basis in {COORDINATES, HINT} and _copied(point, site, source):
             point = Located(reason="copied from the prompt")
     located_address = address is not None and address.basis in MATCHING_BASES
     if point is not None and point.point is not None:

@@ -34,6 +34,7 @@ from .schema import (
     NUMERIC_ARRAY_TARGET_ATTRIBUTES,
     LEAD_ROUTED_RESOLUTIONS,
     NOTHING_TO_REVIEW,
+    TIME_VARYING_ATTRIBUTES,
     is_blank,
     normalize_for_compare,
     normalize_scalar,
@@ -92,6 +93,51 @@ def date_key(value: Any) -> tuple[int, int, int]:
     if not match:
         return (0, 0, 0)
     return tuple(int(part) if part else 0 for part in match.groups())
+
+
+# The spec's earliest year. A value_date before it, or after the year arbitration ran, is not the
+# year a value applies to - the agent sometimes records an opening year there - so the value counts
+# as undated. Ingestion #261 reads the year the same way (value_year in transform_ai_search.py), so
+# a review row's year is the year its value is loaded into.
+EARLIEST_VALUE_YEAR = 1950
+
+
+def value_year(value_date: Any, run_year: int) -> int:
+    """The year a value applies to: the year its value_date starts with, else the run's year."""
+    match = re.match(r"\s*(\d{4})", normalize_scalar(value_date))
+    if match is not None and EARLIEST_VALUE_YEAR <= int(match.group(1)) <= run_year:
+        return int(match.group(1))
+    return run_year
+
+
+def site_for_year(site: dict[str, Any], attribute_name: str, year: int) -> tuple[dict[str, Any], str]:
+    """The site as its baseline stands for one year of a yearly attribute, and a note saying so.
+
+    The seed holds one row per facility: its latest year (reference_year), with a yearly field
+    that year left empty backfilled from the newest earlier year that has one (backfilled_fields).
+    So the seed's value is ours for the year it describes, and is compared as it stands, with no
+    staleness penalty for a value of that same year. For the latest year, where that value was
+    backfilled, we hold nothing, and a found value fills an empty field. For any other year the
+    seed has no row, and our latest value stands in, which the note says.
+    """
+    if attribute_name not in TIME_VARYING_ATTRIBUTES or is_blank(site.get(attribute_name)):
+        return site, ""
+    latest = parse_year(site.get("reference_year") or site.get("year"))
+    backfills = backfilled_years(site.get("backfilled_fields"))
+    ours = backfills.get(attribute_name, latest)
+    if ours is None:
+        return site, ""
+    if year == ours:
+        # A backfilled value is stale only against a later year.
+        return ({**site, "reference_year": str(ours)} if ours != latest else site), ""
+    if year == latest:
+        others = [item for item in normalize_scalar(site.get("backfilled_fields")).split(";") if item.strip()]
+        kept = "; ".join(item.strip() for item in others if item.split("@")[0].strip() != attribute_name)
+        return {**site, attribute_name: "", "backfilled_fields": kept}, (
+            f"We hold no {attribute_name} for {year}; our value, {normalize_scalar(site.get(attribute_name))}, "
+            f"is from {ours}."
+        )
+    return site, f"Our value is for {ours}; the seed holds only our latest, so this {year} value is compared with it."
 
 
 def source_key(item: dict[str, Any], index: int) -> str:

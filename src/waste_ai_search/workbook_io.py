@@ -146,7 +146,12 @@ REVIEW_INSTRUCTIONS = [
             "least 3 years newer). Nothing is accepted without review. A weaker disagreement, a "
             "source whose link is dead and a unit that could not be converted are on the Leads tab "
             "instead. A source that only confirms the database's value is not shown, and nothing "
-            "from it is loaded. Ingestion reads your decisions from this tab."
+            "from it is loaded. Each value is filed under the site of ours its source is about, "
+            "which may not be the site searched: every site column describes that site, "
+            "searched_site_id is the search that found it, and match says why it is filed there. "
+            "There is one row per site and attribute, and for a yearly attribute (status, waste "
+            "received, waste in place, depth, cover types, gas figures) one per year, with every "
+            "source filed under the site pooled into it. Ingestion reads your decisions from this tab."
         ),
         "sme_action": (
             "Work top to bottom. To see where the database puts the site, paste "
@@ -154,12 +159,24 @@ REVIEW_INSTRUCTIONS = [
             "spelling - and note any translation problem in translation_note. Open "
             "winning_source_url and check the source says this, about THIS facility. A found_location row is one point, "
             "lat, lon, read from where its source says the site is (coordinates, a grid reference, or an address "
-            "placed on its building): paste it into Google Maps beside baseline_coordinates, and accept or reject the pair. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields; for a location, lat, lon) - never edit resolved_value. If your corrected value is for a different date than value_date, a current figure replacing an outdated one say, put that date in corrected_value_date (YYYY, YYYY-MM or YYYY-MM-DD). Put your name in "
+            "placed on its building; location_basis says which): paste it into Google Maps beside baseline_coordinates, and accept or reject the pair. "
+            "Read match first: it says where the source places the facility and why the value is filed under this site. "
+            "The match cell is coloured orange where the value is filed under a site other than the one searched, blue "
+            "where its source gives no location (it stays with the site searched, so check the source is about this "
+            "facility), and yellow where several of our sites tied. facility_name_in_source and stated_location are "
+            "the facility as the source writes it. If the value is right but belongs to another of our sites, put that "
+            "site's id in corrected_site_id (a dropdown where there were several candidates; any site id may be typed) "
+            "and validate it, but first filter site_id to that site: if it already has a row for the same attribute "
+            "(and, for a yearly attribute, the same year), reject one of the two, since ingestion takes one value per "
+            "site, attribute and year. If it is about another of our sites and you can't tell which, reject it with 'Wrong "
+            "facility - another site in our database'; if it is about a landfill we don't hold, with 'New facility - "
+            "not in our database', which collect-new-facilities lists for ingestion. Set validation_status to Validated or Rejected; for a rejection, pick rejection_reason, and if you know the right value put it in corrected_value (a dropdown of allowed values for categorical fields; for a location, lat, lon) - never edit resolved_value. Each row of a yearly attribute is that year's value: the year of value_date, or this run's year where value_date is blank. So an older year's value is not Outdated: validate it if it was right for its year, and put a current figure on the newest year's row instead. If your corrected value is for a different date than value_date, put that date in corrected_value_date (YYYY, YYYY-MM or YYYY-MM-DD), but never a year that has its own row for the site and attribute. Put your name in "
             "reviewer and the date in reviewed_date, and say why in researcher_notes. An empty "
             "queue means nothing needs you."
         ),
         "editable": (
-            "validation_status, rejection_reason, corrected_value, corrected_value_date, reviewer, reviewed_date, "
+            "validation_status, rejection_reason, corrected_value, corrected_value_date, corrected_site_id, "
+            "reviewer, reviewed_date, "
             "researcher_notes, "
             "translation_note - "
             "nothing else"
@@ -177,11 +194,50 @@ REVIEW_INSTRUCTIONS = [
         "editable": "nothing",
     },
     {
+        "tab_name": "(file) new_facility_candidates.csv",
+        "purpose": (
+            "Landfills none of our sites is: sources that place a facility more than 2 km from every site "
+            "of ours, grouped where they lie within 2 km of each other, plus the values SMEs rejected as "
+            "'New facility - not in our database' (added by collect-new-facilities). For ingestion."
+        ),
+        "sme_action": "Read only. Nothing from it is in Review_Queue.",
+        "editable": "nothing",
+    },
+    {
+        "tab_name": "(file) possible_duplicates.csv",
+        "purpose": (
+            "Pairs of our sites that may be one facility recorded twice: a source placed within 2 km of "
+            "both that its name couldn't settle, or one page cited by both sites' searches. For ingestion."
+        ),
+        "sme_action": "Read only.",
+        "editable": "nothing",
+    },
+    {
+        "tab_name": "(file) datasets_found.csv",
+        "purpose": (
+            "Pages that look like datasets, such as a regulator's list of its landfills: naming or placing "
+            "2 or more facilities, or from a publisher of datasets and found by 3 or more searches. A search "
+            "reads only the entry it used, so ingestion can load the rest of the page once, as a source of its own."
+        ),
+        "sme_action": "Read only.",
+        "editable": "nothing",
+    },
+    {
+        "tab_name": "(file) outside_run_matches.csv",
+        "purpose": (
+            "Sources this run filed under a site outside its selection: another batch's country, or an "
+            "excluded country it did not search. Their values are not in Review_Queue."
+        ),
+        "sme_action": "Read only.",
+        "editable": "nothing",
+    },
+    {
         "tab_name": "Leads",
         "purpose": (
             "Findings that lost: a disagreement with the database's value from a source below the "
             "credibility floor (Tier 4-5) or weaker than the database's, a source whose link is "
-            "dead, a unit that could not be converted; plus the agent's own unverified leads."
+            "dead, a unit that could not be converted, a 'Not a Waste Facility' verdict about a site it "
+            "was not offered for; plus the agent's own unverified leads."
         ),
         "sme_action": "Read only. Promote something by hand if you judge the source good enough.",
         "editable": "nothing",
@@ -296,13 +352,70 @@ def _runs(rows: list[int]) -> list[tuple[int, int]]:
     return runs
 
 
-def add_conditionals(ws) -> None:
-    """Shade each row by its resolution so the queue reads at a glance."""
+def add_site_choices(ws, rows: list[dict[str, Any]]) -> None:
+    """Offer each row's candidate sites in corrected_site_id, where there is more than one.
+
+    The candidates are the site the value is filed under, the site searched, and the other sites
+    its source fitted: our sites within 2 km of where it says the facility is, or namesakes of
+    its name. For a source with no location they also include every other site whose search cited
+    the same page. A typed site id is still accepted, so the list suggests rather than restricts.
+    """
     headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
+    if "corrected_site_id" not in headers:
+        return
+    target = get_column_letter(headers["corrected_site_id"])
+    rows_by_choices: dict[tuple[str, ...], list[int]] = {}
+    for offset, record in enumerate(rows):
+        choices = tuple(str(choice) for choice in record.get("_site_choices") or ())
+        if len(choices) > 1:
+            rows_by_choices.setdefault(choices, []).append(offset + 2)
+    for choices, row_numbers in rows_by_choices.items():
+        # A list written into the rule itself may hold at most 255 characters.
+        listed = ",".join(choices)
+        while len(listed) > 253 and "," in listed:
+            listed = listed.rsplit(",", 1)[0]
+        validation = DataValidation(
+            type="list", formula1=f'"{listed}"', allow_blank=True, showDropDown=False, showErrorMessage=False,
+        )
+        ws.add_data_validation(validation)
+        for start, end in _runs(row_numbers):
+            validation.add(f"{target}{start}" if start == end else f"{target}{start}:{target}{end}")
+
+
+# The match column is coloured where a value needs a second look at which site it belongs to: it
+# is filed under a site other than the one searched, its source gives no location, or several of
+# our sites tied for it.
+MATCH_FILLS = {
+    "another site": "F4B183",
+    "no location": "BDD7EE",
+    "tie": "FFD966",
+}
+
+
+def add_conditionals(ws) -> None:
+    """Shade each row by its resolution so the queue reads at a glance, and the match column by
+    why the value is filed where it is."""
+    headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
+    last = max(ws.max_row, 2)
+    if {"match", "site_id", "searched_site_id"} <= set(headers):
+        # Added first, so on the match column they win over the row's resolution colour.
+        match = get_column_letter(headers["match"])
+        site = get_column_letter(headers["site_id"])
+        searched = get_column_letter(headers["searched_site_id"])
+        cells = f"{match}2:{match}{last}"
+        formulas = {
+            "another site": f'AND(${searched}2<>"",${site}2<>${searched}2)',
+            "no location": f'LEFT(${match}2,11)="No location"',
+            "tie": f'LEFT(${match}2,3)="Tie"',
+        }
+        for name, formula in formulas.items():
+            ws.conditional_formatting.add(
+                cells, FormulaRule(formula=[formula], fill=PatternFill("solid", fgColor=MATCH_FILLS[name]))
+            )
     if "resolution" not in headers:
         return
     letter = get_column_letter(headers["resolution"])
-    span = f"A2:{get_column_letter(ws.max_column)}{max(ws.max_row, 2)}"
+    span = f"A2:{get_column_letter(ws.max_column)}{last}"
     for value, color in RESOLUTION_FILLS.items():
         ws.conditional_formatting.add(
             span,
@@ -346,6 +459,7 @@ def write_review_workbook(
     add_definitions(ws_defs)
 
     add_validations(wb, ws_queue)
+    add_site_choices(ws_queue, review_queue)
     add_conditionals(ws_queue)
 
     path.parent.mkdir(parents=True, exist_ok=True)

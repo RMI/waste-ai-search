@@ -1,8 +1,9 @@
 # AI search: file each source under the site it is about, and review everything
 
-**Status:** agreed 20 October 2026, with the decisions listed below. Steps 1-4 of the build order
+**Status:** agreed 20 October 2026, with the decisions listed below. Steps 1-5 of the build order
 are built on branches (drop-map-mirrors, skip-unsearchable-names, review-everything,
-source-first-output), not yet merged. The step 4 live test has not run. To be built before batch 2.
+source-first-output, match-sources-to-sites), not yet merged. The step 4 live test has not run.
+The matching #261 changes are ingestion's, still to make. To be built before batch 2.
 **Date:** 20 October 2026
 
 ## The problem
@@ -146,13 +147,13 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 
   Sources with no location are never grouped. With nothing to go on, each stays on its own.
 - **Names are fuzzy-matched, and they are a check, not the main test.** Name alone merges distant
-  sites: "Eastview Landfill" is both a Brandon and a Guelph site, 1,716 km apart. The scoring is
-  CJ's from #225 (`facility_names.py`):
+  sites: "Eastview Landfill" is both a Brandon and a Guelph site, 1,716 km apart. The scoring
+  started as a copy of entity linkage's (#225, `facility_names.py`), and is this repo's own:
+  matching is independent of entity linkage, so the two needn't agree.
   1. Case, accents and punctuation are ignored.
   2. Generic words ("landfill", "sanitary", "waste management"), company suffixes and permit codes
-     are dropped. More generic words would be added: tip, refuse, depot, grounds, nuisance, lieu,
-     enfouissement, technique, LET. That needs agreeing with CJ, so both repos mean the same by
-     "same name".
+     are dropped. More generic words are added: tip, refuse, depot, grounds, nuisance, lieu,
+     enfouissement, technique, LET, and words for a site's state, such as closed and former.
   3. The score, from 0 to 1, is the higher of two things: the share of the shorter name's words
      found in the longer one, and how alike the two read as strings. So "Seaton Meadows Landfil"
      still matches "Seaton Meadows".
@@ -231,12 +232,17 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 - **The AI search ranks below every regulator and above Waste Atlas, GPW and OSM** (#264). A
   permit's coordinates 0.3 km from OSM's are therefore a value like any other, and win once
   validated.
-- **Two lists go to the ingestion team,** since ingestion has no path for them:
+- **Three lists go to the ingestion team,** since ingestion has no path for them:
   - `new_facility_candidates.csv`: sources that matched none of our sites, plus rows an SME marked
     "New facility". Each has the URL, name, stated location and derived coordinates, our nearest site
     and its distance, and the search that found it.
   - `possible_duplicates.csv`: pairs of our sites that one source fits equally well, or that two
-    searches both cited for one page. It goes to CJ, whose #225 tackles E-PRTR re-registrations.
+    searches both cited for one page. Entity linkage's #225 tackles E-PRTR re-registrations.
+  - `datasets_found.csv`: pages that look like datasets, such as a regulator's list of its
+    landfills: naming or placing 2 or more facilities, or from a publisher of datasets and found
+    by 3 or more searches. A search
+    reads only the entry it used, so the rest of such a page goes unread, and every site on it
+    pays its own search to find it. Loaded once through ingestion, it would cover them all.
 
 ## Changes to Hugh's open PRs
 
@@ -245,7 +251,7 @@ entity-linkage PR (RMI/waste_data_ingestion_pipeline#225) does.
 | waste-ai-search#24 | Fold in: keep the single `found_location` row and `corrected_value_date`; drop the 0.5 km rule |
 | waste-ai-search#23 | `name_yield` counts rejection reasons by prefix ("Wrong facility…") and credits findings to `searched_site_id` |
 | waste-ai-search#26 | Treat the new Review_Queue columns as optional; re-key `searched_site_id`, `corrected_site_id` and the two lists |
-| ingestion #261 | Add the new Review_Queue columns as optional, in the loader and in `create_raw_tables.sql`. Add the two rejection reasons. Read `corrected_site_id` and `location_basis`. Note that confirmations no longer load. Leave `CONFIRMING_KM` as it is: it only affects batch 1's two-row layout, and batch 1 is out of scope. |
+| ingestion #261 | Add the new Review_Queue columns as optional, in the loader and in `create_raw_tables.sql`. Add the two rejection reasons. Read `corrected_site_id` and `location_basis`. Note that confirmations no longer load. Leave `CONFIRMING_KM` as it is: it only affects batch 1's two-row layout, and batch 1 is out of scope. A corrected value with no `corrected_value_date` lands in the run's year, and one re-filed with `corrected_site_id` lands on another site: check both against the (facility, attribute, year) rows already there, and name the rows that collide, since an SME can make either collide with a row of its own. |
 | ingestion #262, #264 | None |
 
 ## Decisions (Hugh, 20 October 2026)

@@ -200,6 +200,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Let a source with a dead link stay promotable instead of routing it to leads.",
     )
 
+    collect = subparsers.add_parser(
+        "collect-new-facilities",
+        help="Add the values SMEs rejected as 'New facility - not in our database' to the run's "
+        "new_facility_candidates.csv (no agent calls).",
+    )
+    add_common(collect)
+    collect.add_argument(
+        "--workbook",
+        default="",
+        help="The reviewed workbook. Default: <run_id>/<run_id>_review.xlsx in WASTE_AI_SEARCH_REVIEW_DIR, "
+        "else the run folder's copy.",
+    )
+
     refresh = subparsers.add_parser(
         "refresh-seed",
         help="Merge a run's promoted values into the seed so a second pass sees them.",
@@ -222,6 +235,9 @@ def read_arbitrated_rows(run_dir: Path) -> list[dict[str, str]]:
     found is in the queue, awaiting review. A refresh merges those too, so a gas collection system
     found in pass 1 still unlocks the pass-2 follow-up. resolved.csv is still read for runs
     arbitrated before (batch 1), which wrote the values they accepted there.
+
+    Rows are keyed by the site a value is filed under, which may not be the site searched. A yearly
+    attribute has a row per year, newest first, so the newest is the one kept.
     """
     import csv
 
@@ -243,6 +259,7 @@ def read_arbitrated_rows(run_dir: Path) -> list[dict[str, str]]:
 def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: bool) -> int:
 
     from .input_loader import resolve_sites
+    from .match import run_selection
     from .prompt_builder import has_gas_collection, requested_attributes
     from .schema import normalize_scalar
     from .seed_refresh import refresh_sites, write_refreshed_seed
@@ -270,10 +287,13 @@ def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: b
     # The refreshed seed holds the whole seeded corpus, not just the sites this run searched, so
     # a search on it without --site-ids would search everything again.
     had_gas = {normalize_scalar(site.get("site_id")) for site in sites if has_gas_collection(site)}
+    selection = run_selection(sites, searched_site_ids(config.run_dir))
     unlocked = [
         site_id
         for site in refreshed
-        if has_gas_collection(site) and (site_id := normalize_scalar(site.get("site_id"))) not in had_gas
+        if has_gas_collection(site)
+        and (site_id := normalize_scalar(site.get("site_id"))) not in had_gas
+        and site_id in selection
     ]
     if unlocked:
         print("\nGas collection was discovered at these sites; to search them again by hand:")
@@ -286,6 +306,13 @@ def run_refresh_seed(config: PipelineConfig, output_csv: Path, merge_identity: b
         "`run` does this follow-up for you, asking only gas-capture attributes."
     )
     return 0
+
+
+def searched_site_ids(run_dir: Path) -> set[str]:
+    """The sites a run has a cached response for: the ones it searched."""
+    from .run_context import raw_dir, site_id_from_path
+
+    return {site_id_from_path(path) for path in raw_dir(run_dir).glob("site_*.json")}
 
 
 def make_config(args: argparse.Namespace) -> PipelineConfig:
@@ -380,6 +407,7 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
 
     from .arbitrate import run_arbitration
     from .input_loader import resolve_sites
+    from .match import run_selection
     from .prompt_builder import has_gas_collection
     from .schema import GCCS_ATTRIBUTES, normalize_scalar
     from .search import run_search
@@ -404,10 +432,16 @@ def run_everything(config: PipelineConfig, followup: bool = True, after_search=N
     }
     refreshed, _stats = refresh_sites(sites, resolved_rows, config.run_id)
 
+    # A value is keyed by the site it is filed under, which may not be the site searched. Only a
+    # site in the run's selection is followed up: a value is never filed outside it, and an older
+    # run's resolved.csv must not send the follow-up into a country the run left out.
+    selection = run_selection(sites, searched_site_ids(config.run_dir))
     unlocked = [
         normalize_scalar(site.get("site_id"))
         for site in refreshed
-        if has_gas_collection(site) and not before.get(normalize_scalar(site.get("site_id")))
+        if has_gas_collection(site)
+        and not before.get(normalize_scalar(site.get("site_id")))
+        and normalize_scalar(site.get("site_id")) in selection
     ]
     if not unlocked:
         print("\n== no newly discovered gas collection; no follow-up needed ==")
@@ -490,6 +524,21 @@ def dispatch(args: argparse.Namespace, config: PipelineConfig) -> int:
         finally:
             sync.up()
         return code
+
+    if args.command == "collect-new-facilities":
+        from .new_facilities import collect_new_facilities, reviewed_workbook
+        from .publish import review_dir
+
+        sync = RunSync(config, local=args.local)
+        sync.down()  # the run's list as arbitration last left it
+        workbook = (
+            Path(args.workbook).expanduser()
+            if args.workbook
+            else reviewed_workbook(config.run_dir, config.run_id, review_dir())
+        )
+        collect_new_facilities(config.run_dir, workbook)
+        sync.up()
+        return 0
 
     if args.command == "refresh-seed":
         output = (

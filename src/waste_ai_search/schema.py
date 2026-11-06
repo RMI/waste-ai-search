@@ -72,6 +72,26 @@ GAP_FILL_ATTRIBUTES = [
     "gccs_collection_efficiency",
 ]
 
+# Attributes that hold a value for each year, as consolidation keeps them: its
+# TIME_VARYING_ATTRIBUTE_COLUMNS, in RMI/waste_data_ingestion_pipeline's
+# facility_etl/consolidation/consolidation_techniques.py, less the columns this repository never
+# reads (gccs_lfg_collected_cubic_meters, mcf, ch4_emissions_metric_tonnes). Keep the two aligned.
+# Each year a source reports one of these for is reviewed on its own row (build step 5 of the
+# source-matching plan); every other attribute has one row per site.
+TIME_VARYING_ATTRIBUTES = [
+    "facility_status",
+    "waste_depth",
+    "annual_incoming_waste_metric_tonnes",
+    "waste_in_place_metric_tonnes",
+    "cover_types",
+    "gccs_ch4_flared_metric_tonnes",
+    "gccs_ch4_generated_metric_tonnes",
+    "gccs_ch4_collected_metric_tonnes",
+    "gccs_energy_project_type",
+    "gccs_current_project_status",
+    "gccs_ch4_flow_to_project_metric_tonnes",
+]
+
 # Kept above so the seed, older cached responses and re-arbitrated runs still read them, but no
 # longer asked of the agent (F31).
 UNSEARCHED_ATTRIBUTES = {
@@ -517,6 +537,9 @@ EVIDENCE_HEADERS = [
     # (locate.py): every row of a source carries them. location_reason says why a stated location
     # is not a usable point.
     *SOURCE_FACILITY_COLUMNS,
+    # site_id is the site a source is filed under (match.py), blank for a likely new facility, and
+    # searched_site_id the site whose search found it; match says which rule filed it there.
+    "searched_site_id", "match",
 ]
 
 # resolved.csv is written with this header and no rows. Nothing is accepted automatically, so every
@@ -544,28 +567,36 @@ SOURCES_HEADERS = [
     "first_seen_run_id", "times_cited", "cited_site_count",
 ]
 
-# The filtered queue an SME actually works through (Q31).
+# The filtered queue an SME actually works through (Q31). One row per (site, attribute), and for
+# a yearly attribute (TIME_VARYING_ATTRIBUTES) per (site, attribute, year): ingestion's key.
 REVIEW_QUEUE_HEADERS = [
     # translation_note sits beside the names it is about: the SME compares the two spellings and
     # records a translation problem there, separately from researcher_notes.
     # baseline_coordinates is "lat, lon" as Google Maps accepts it pasted into its search box.
+    # Every site column describes the site the value is filed under (match.py). searched_site_id
+    # is the one column about the search that found it, and match says why it is filed here.
     "site_id", *SITE_NAME_COLUMNS, "translation_note", "country_iso3", "baseline_coordinates",
+    "searched_site_id", "match",
     "attribute_name", "resolution",
     "baseline_value", "baseline_source", "baseline_tier", "resolved_value", "resolved_unit",
-    "winning_source_tier", "winning_source_url", "winning_link_status", "value_date",
-    "agreeing_source_count",
+    "winning_source_tier", "winning_source_url", "winning_link_status",
+    # The facility the winning source describes, as it writes it. location_basis says how a
+    # found_location was read: coordinates, a grid reference or a rooftop address.
+    "facility_name_in_source", "stated_location", "location_basis",
+    "value_date", "agreeing_source_count",
     # corrected_value is the right value when the found one is wrong. resolved_value is never
     # edited, so the AI's own answer survives for measuring its error rate. corrected_value_date
     # is the date a correction applies to, where that isn't the source's value_date - a current
-    # figure replacing one rejected as outdated, say.
+    # figure replacing one rejected as outdated, say. corrected_site_id re-files the value under
+    # another of our sites.
     "evidence_summary", "validation_status", "rejection_reason", "corrected_value",
-    "corrected_value_date", "reviewer", "reviewed_date",
+    "corrected_value_date", "corrected_site_id", "reviewer", "reviewed_date",
     "researcher_notes",
 ]
 
 SUPPLEMENTARY_LEADS_HEADERS = [
-    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "attribute_name", "lead_value",
-    "source_tier", "lead_summary", "url", "exclusion_reason",
+    "run_id", "site_id", *SITE_NAME_COLUMNS, "country_iso3", "searched_site_id", "attribute_name",
+    "lead_value", "source_tier", "lead_summary", "url", "exclusion_reason",
 ]
 
 FOUNDRY_RUN_LOG_HEADERS = [
@@ -614,6 +645,9 @@ RESOLUTION_VALUES = [
 # Resolutions whose rows belong in the leads sheet and must NOT appear in the review queue.
 LEAD_ROUTED_RESOLUTIONS = {"Conflict - lower credibility"}
 
+WRONG_FACILITY_OURS = "Wrong facility - another site in our database"
+NEW_FACILITY_REASON = "New facility - not in our database"
+
 DEFINITION_VALUES = {
     "attribute_name": REQUESTABLE_ATTRIBUTES,
     "facility_status": FACILITY_STATUS_VALUES,
@@ -632,8 +666,14 @@ DEFINITION_VALUES = {
     # What a reviewer may choose. The other statuses are set by the pipeline, not by hand.
     "review_decision": ["Validated", "Rejected"],
     # Why a reviewer rejected a value. A fixed list, so rejections can be counted by cause to find
-    # where the AI goes wrong; detail goes in researcher_notes.
-    "rejection_reason": ["Wrong facility", "Not in source", "Wrong value", "Outdated", "Other"],
+    # where the AI goes wrong; detail goes in researcher_notes. The two kinds of wrong facility
+    # say whether the site is one of ours (re-file it with corrected_site_id) or new to us
+    # (collect-new-facilities lists it). Plain "Wrong facility" stays for batch 1's workbook, and
+    # the hyphens are plain ones, since ingestion matches the text as typed.
+    "rejection_reason": [
+        WRONG_FACILITY_OURS, NEW_FACILITY_REASON, "Wrong facility", "Not in source", "Wrong value",
+        "Outdated", "Other",
+    ],
     # Booleans as resolved_value shows them, so a correction reads like the value it replaces.
     "true_false": ["TRUE", "FALSE"],
 }
