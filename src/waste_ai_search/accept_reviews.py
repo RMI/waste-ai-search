@@ -23,6 +23,12 @@ only has no row for it: the pair's own Correct site or Different site is Correct
 or Wrong with its corrected_value where one is typed. A Tier 1-2 pair's other values are trusted as
 read.
 
+A value with no row of its own is corrected on its page's row (Yuchen, 6 November): there,
+corrected_value lists the page's wrong values as Site_Review's attributes column writes them,
+"attribute = value (year)", separated by semicolons. Each is Wrong, and the value typed loads instead;
+an attribute named with no value loads nothing. A corrected value may take another year than the
+page gave, wherever it is typed, and loads at that year.
+
 A pair's values are those that would load at the site searched. A Different site also weighs again,
 at the other site, the values set aside only because they confirm or would change one we hold at the
 site searched, since that says nothing of the other site: the SME has said the source is about it.
@@ -41,8 +47,9 @@ same files. The workbook is only read.
 from __future__ import annotations
 
 import csv
+import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, time
 from itertools import combinations
 from pathlib import Path
@@ -266,14 +273,61 @@ class ValueDecision:
     typed: str
     corrected: str
     row: int
+    # The year the SME typed with the corrected value, where it isn't the value's own: it loads there.
+    year: str = ""
 
     @property
     def key(self) -> tuple[str, str]:
         return self.review_id, self.check
 
 
-# The years a typed closing_year may be.
+# The years a typed closing_year, or a corrected value's year, may be.
 YEARS = range(1800, 2101)
+
+# A corrected value as Site_Review's attributes column writes one, "attribute = value (year)": the
+# attribute and year are optional on a value's own row, and on a page row the attribute names which
+# value it corrects. One with no value, "attribute" or "attribute (year)", removes it.
+CORRECTION = re.compile(r"(?P<name>[A-Za-z_]+)\s*(?:=\s*(?P<value>.*?))?\s*(?:\((?P<year>\d{4})\))?", re.DOTALL)
+NAMED = re.compile(r"\s*(?P<name>[A-Za-z_]+)\s*=\s*(?P<value>.*)", re.DOTALL)
+YEAR_AFTER = re.compile(r"(?P<value>.*?)\s*\((?P<year>\d{4})\)", re.DOTALL)
+# Corrections on a page row are separated by semicolons or line breaks, but a list value, such as
+# "Electricity Generation; Direct Use", is written with semicolons too: a break comes before an
+# attribute's name only.
+BETWEEN_CORRECTIONS = re.compile(
+    r"\s*[;\n]\s*(?=(?:" + "|".join(sorted(GAP_FILL_ATTRIBUTES, key=len, reverse=True)) + r")\b)", re.IGNORECASE
+)
+
+
+def corrected_as_held(attribute: str, typed: str) -> tuple[str, str]:
+    """A typed value as our database holds it, converted, mapped and range-checked as the search's own
+    values are (normalize_values.py), and what is wrong with it, if anything."""
+    normal = normalize_value(attribute, typed, "")
+    problem = "; ".join(normal.warnings) if not normal.usable else ""
+    if normal.usable and any("dropped" in warning for warning in normal.warnings):
+        problem = "; ".join(normal.warnings)
+    if normal.usable and attribute == "closing_year" and not (str(normal.value).isdigit() and int(normal.value) in YEARS):
+        problem = f"closing_year {typed!r} is not a year"
+    return ("", problem) if problem else (normalize_scalar(normal.value), "")
+
+
+def one_correction(attribute: str, typed: str) -> tuple[str, str, str]:
+    """A value row's corrected_value: the value, the year typed after it, if any, and what is wrong with
+    it. It may begin "attribute =", as the attributes column writes it, naming the row's own value;
+    the attribute's name alone, as on a page row giving several values, gives no value."""
+    alone = CORRECTION.fullmatch(typed.strip())
+    if alone and alone["value"] is None and alone["name"].casefold() == attribute:
+        return "", "", ""
+    named = NAMED.fullmatch(typed)
+    if named and named["name"].casefold() in GAP_FILL_ATTRIBUTES:
+        if named["name"].casefold() != attribute:
+            return "", "", f"it names {named['name']}, but this row checks {attribute}"
+        typed = named["value"]
+    year = ""
+    dated = YEAR_AFTER.fullmatch(typed.strip())
+    if dated and int(dated["year"]) in YEARS:
+        typed, year = dated["value"], dated["year"]
+    value, problem = corrected_as_held(attribute, typed)
+    return value, year, problem
 
 
 def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]:
@@ -283,6 +337,9 @@ def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]
     is wrong. A source row that checks its pair's one value (site_review.ON_PAGE_ROW) decides it too:
     Correct site or Different site is Correct, or Wrong with the corrected_value typed; any other
     decision, or none, decides nothing of the value.
+
+    A corrected_value may be written as the attributes column writes the value, "attribute = value
+    (year)" (one_correction); a year typed after it is the year it loads at.
 
     Raises ReviewError, naming every row at fault, where a decision isn't Correct or Wrong, or a
     corrected_value isn't a value the attribute can take - converted, mapped and range-checked as the
@@ -311,25 +368,126 @@ def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]
         if not decision:
             problems.append(f"{where}: {typed!r} is not a decision for a value. Pick {' or '.join(VALUE_DECISIONS)}.")
             continue
-        value = ""
+        value = year = ""
         if corrected:
-            normal = normalize_value(attribute, corrected, "")
-            problem = "; ".join(normal.warnings) if not normal.usable else ""
-            if normal.usable and any("dropped" in warning for warning in normal.warnings):
-                problem = "; ".join(normal.warnings)
-            if normal.usable and attribute == "closing_year" and not (str(normal.value).isdigit() and int(normal.value) in YEARS):
-                problem = f"closing_year {corrected!r} is not a year"
+            value, year, problem = one_correction(attribute, corrected)
             if problem:
                 problems.append(f"{where}: corrected_value {corrected!r} can't be used: {problem.rstrip('.')}.")
                 continue
-            value = normalize_scalar(normal.value)
-        decisions[(review, check)] = ValueDecision(review, check, attribute, decision, corrected, value, number)
+        decisions[(review, check)] = ValueDecision(review, check, attribute, decision, corrected, value, number, year)
     if problems:
         raise ReviewError(
             f"Some value decisions in {workbook} can't be read back. Correct these rows and run accept-reviews again:\n"
             + "\n".join(f"  {problem}" for problem in problems)
         )
     return decisions
+
+
+def read_page_corrections(workbook: Path) -> dict[str, list[ValueDecision]]:
+    """The corrections typed in corrected_value on the page rows that give several values, by
+    review_id: one Wrong each, its check what the SME typed for it. "attribute = value (year)" says the
+    page's value is wrong and gives the right one, "attribute" or "attribute (year)" only that it is
+    wrong. Which of the page's values each is about is worked out once found_values.csv is read
+    (resolve_page_corrections).
+
+    Raises ReviewError, naming every row at fault, where one doesn't begin with an attribute's name, or
+    its value isn't one the attribute can take (corrected_as_held).
+    """
+    corrections: dict[str, list[ValueDecision]] = {}
+    problems: list[str] = []
+    for number, record in read_site_review(workbook):
+        typed = record.get("corrected_value", "")
+        if record.get("check") or not typed:
+            continue
+        review = record.get("review_id", "")
+        if not review:
+            problems.append(f"{SITE_REVIEW_SHEET} row {number}: it is filled in but has no review_id, so it can't be matched to a source.")
+            continue
+        for text in BETWEEN_CORRECTIONS.split(typed.strip().strip(";").strip()):
+            where = f"{SITE_REVIEW_SHEET} row {number} ({text})"
+            parts = CORRECTION.fullmatch(text)
+            attribute = parts["name"].casefold() if parts else ""
+            if attribute not in GAP_FILL_ATTRIBUTES:
+                problems.append(
+                    f"{where}: corrected_value on a page row names the value it corrects, as the attributes column "
+                    "writes it: attribute = value (year), or just the attribute to remove it."
+                )
+                continue
+            if parts["year"] and int(parts["year"]) not in YEARS:
+                problems.append(f"{where}: {parts['year']} is not a year.")
+                continue
+            value = ""
+            if parts["value"] is not None:
+                value, problem = corrected_as_held(attribute, parts["value"])
+                if problem:
+                    problems.append(f"{where}: corrected_value can't be used: {problem.rstrip('.')}.")
+                    continue
+            corrections.setdefault(review, []).append(
+                ValueDecision(review, text, attribute, WRONG, text, value, number, parts["year"] or "")
+            )
+    if problems:
+        raise ReviewError(
+            f"Some corrections in {workbook} can't be read back. Correct these rows and run accept-reviews again:\n"
+            + "\n".join(f"  {problem}" for problem in problems)
+        )
+    return corrections
+
+
+def resolve_page_corrections(
+    found: list[dict[str, Any]], corrections: dict[str, list[ValueDecision]]
+) -> dict[int, ValueDecision]:
+    """Which of found_values.csv's rows each page row correction is about, by the row's place in
+    `found`. A correction is about the page's values of its attribute: of the year it names, where the
+    page gives one for that year; otherwise all of them, where it removes them, or where the page gives
+    the attribute for one year only, as a corrected value with another year may. Its year is kept
+    only where it isn't the value's own, as the year the corrected value loads at.
+
+    Raises ReviewError, naming every row at fault, where a correction is about no value of the page's,
+    or about a key value it gives a row of its own, or can't say which of several years it corrects,
+    or two are about one value.
+    """
+    by_attribute: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = {}
+    for index, row in enumerate(found):
+        if row.get("review_id") in corrections and not is_blank(row.get("value")):
+            by_attribute.setdefault((row["review_id"], row["attribute_name"]), []).append((index, row))
+    resolved: dict[int, ValueDecision] = {}
+    problems: list[str] = []
+    for review, entries in corrections.items():
+        for entry in entries:
+            where = f"{SITE_REVIEW_SHEET} row {entry.row} ({entry.check})"
+            rows = by_attribute.get((review, entry.attribute), [])
+            years = sorted({row["year"] for _index, row in rows})
+            same_year = [(index, row) for index, row in rows if row["year"] == entry.year]
+            if not rows:
+                problems.append(f"{where}: the page gives no {entry.attribute}.")
+                continue
+            if any(checked_value(row) and row["status"] in LOADABLE for _index, row in rows):
+                problems.append(f"{where}: {entry.attribute} has its own ↳ row under the page. Decide it there.")
+                continue
+            if same_year:
+                targets, year = same_year, ""
+            elif entry.year and not entry.corrected:
+                problems.append(f"{where}: the page gives {entry.attribute} for {', '.join(years)}, not {entry.year}.")
+                continue
+            elif entry.corrected and len(years) > 1:
+                problems.append(
+                    f"{where}: the page gives {entry.attribute} for {', '.join(years)}. Say which year is wrong: "
+                    f"{entry.attribute} = value ({years[-1]})."
+                )
+                continue
+            else:
+                targets, year = rows, entry.year
+            for index, _row in targets:
+                if index in resolved:
+                    problems.append(f"{where}: {resolved[index].check} on the same row corrects the same value.")
+                    break
+                resolved[index] = replace(entry, year=year)
+    if problems:
+        raise ReviewError(
+            "Some corrections on page rows can't be applied. Correct these rows and run accept-reviews again:\n"
+            + "\n".join(f"  {problem}" for problem in problems)
+        )
+    return resolved
 
 
 def read_value_rows(workbook: Path) -> set[tuple[str, str]]:
@@ -374,6 +532,8 @@ class Acceptance:
     missing_value_rows: int = 0
     # Value decisions worth a second look (value_warnings).
     value_warnings: list[str] = field(default_factory=list)
+    # Values corrected or removed on their page's row.
+    page_corrected: int = 0
 
 
 def accept(
@@ -382,20 +542,26 @@ def accept(
     sites_by_id: dict[str, dict[str, Any]],
     value_decisions: dict[tuple[str, str], ValueDecision] | None = None,
     value_rows: set[tuple[str, str]] | None = None,
+    page_corrections: dict[int, ValueDecision] | None = None,
 ) -> Acceptance:
     """Apply the decisions to found_values.csv's rows, filling in each row's sme_decision,
     value_decision, corrected_value and loaded, and pick the one value to load for each site,
     attribute and year. `found` is changed in place. `value_rows` are the workbook's value rows
     (read_value_rows), to tell a checked value not decided yet from one with no row to decide it on.
+    `page_corrections` are the corrections typed on page rows, by the row of `found` each is about
+    (resolve_page_corrections).
 
     loaded is "yes" for the value written to accepted_values.csv, "no" for a value accepted to load
-    that lost to another, and blank for a value not accepted.
+    that lost to another, and blank for a value not accepted. A corrected value typed with another year
+    loads at that year, where it fills an empty field there.
     """
     value_decisions = value_decisions or {}
+    page_corrections = page_corrections or {}
     pairs: dict[str, list[dict[str, Any]]] = {}
     accepted: list[dict[str, Any]] = []
     matched: set[tuple[str, str]] = set()
     undecided_values = missing_value_rows = 0
+    moved: list[str] = []
     for index, row in enumerate(found):
         row["sme_decision"] = row["loaded"] = row["value_decision"] = row["corrected_value"] = ""
         review = row.get("review_id", "")
@@ -410,22 +576,34 @@ def accept(
         on_its_row = value_decisions.get((review, check_label(row))) if checked and row["status"] in LOADABLE else None
         if on_its_row is not None:
             matched.add(on_its_row.key)
+        # A value with no row of its own is corrected on its page's row, if anywhere.
+        on_its_row = on_its_row or page_corrections.get(index)
+        if on_its_row is not None:
             row["value_decision"], row["corrected_value"] = on_its_row.decision, on_its_row.typed
         loads_at = destination(row, decision, sites_by_id)
-        if loads_at and checked:
-            if on_its_row is None:
-                if row["status"] in LOADABLE:
-                    undecided_values += 1
-                    # A workbook made before the run was arbitrated again can lack the row.
-                    missing_value_rows += value_rows is not None and (review, check_label(row)) not in value_rows
-                loads_at = ""
-            elif on_its_row.decision == WRONG and not on_its_row.corrected:
-                loads_at = ""
+        if loads_at and checked and on_its_row is None:
+            if row["status"] in LOADABLE:
+                undecided_values += 1
+                # A workbook made before the run was arbitrated again can lack the row.
+                missing_value_rows += value_rows is not None and (review, check_label(row)) not in value_rows
+            loads_at = ""
+        elif loads_at and on_its_row is not None and on_its_row.decision == WRONG and not on_its_row.corrected:
+            loads_at = ""
+        wrong = on_its_row is not None and on_its_row.decision == WRONG
+        year = on_its_row.year if wrong and on_its_row.year else row["year"]
+        if loads_at and year != row["year"] and not fills_empty_field({**row, "year": year}, sites_by_id.get(loads_at, {})):
+            moved.append(
+                f"{SITE_REVIEW_SHEET} row {on_its_row.row} ({on_its_row.check}): site {loads_at} already has "
+                f"{row['attribute_name']} for {year}, so it loads nothing."
+            )
+            loads_at = ""
         if loads_at:
-            value = on_its_row.corrected if on_its_row is not None and on_its_row.decision == WRONG else row["value"]
+            value = on_its_row.corrected if wrong else row["value"]
+            # A year the SME gives is one they date the value to (is_year_exact).
+            dated = {"year": year, "value_date": year} if year != row["year"] else {}
             accepted.append({
                 **row, "site_id": loads_at, "value": value, "status": ACCEPTED, "_found": index,
-                "_decision": decision, "_value_decision": on_its_row,
+                "_decision": decision, "_value_decision": on_its_row, **dated,
             })
 
     picked = {id(row) for row in pick_values(accepted, statuses=(ACCEPTED,)).values()}
@@ -450,8 +628,26 @@ def accept(
         unmatched_values=[value for key, value in value_decisions.items() if key not in matched],
         undecided_values=undecided_values,
         missing_value_rows=missing_value_rows,
-        value_warnings=value_warnings(value_decisions, matched, decisions, accepted),
+        value_warnings=[
+            *value_warnings(value_decisions, matched, decisions, accepted),
+            *page_correction_warnings(page_corrections, decisions),
+            *moved,
+        ],
+        page_corrected=len(page_corrections),
     )
+
+
+def page_correction_warnings(page_corrections: dict[int, ValueDecision], decisions: dict[str, Decision]) -> list[str]:
+    """The corrections on page rows whose page isn't approved, so load nothing (yet)."""
+    warnings = []
+    for correction in sorted({(c.row, c.check): c for c in page_corrections.values()}.values(), key=lambda c: c.row):
+        where = f"{SITE_REVIEW_SHEET} row {correction.row} ({correction.check})"
+        pair = decisions.get(correction.review_id)
+        if pair is None:
+            warnings.append(f"{where}: its source has no decision yet, so it loads nothing until it has one.")
+        elif pair.decision in (NEW_SITE, JUNK):
+            warnings.append(f"{where}: its source is {pair.decision}, so it loads nothing.")
+    return warnings
 
 
 def value_warnings(
@@ -704,12 +900,16 @@ def accept_reviews(run_dir: Path, workbook: Path) -> Acceptance:
     sites_by_id = {normalize_scalar(site.get("site_id")): site for site in sites}
     decisions = read_decisions(workbook, set(sites_by_id))
     value_decisions = read_value_decisions(workbook)
+    page_corrections = read_page_corrections(workbook)
 
     with found_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         found = [dict(row) for row in reader]
         headers = list(reader.fieldnames or FOUND_VALUES_HEADERS)
-    acceptance = accept(found, decisions, sites_by_id, value_decisions, read_value_rows(workbook))
+    acceptance = accept(
+        found, decisions, sites_by_id, value_decisions, read_value_rows(workbook),
+        resolve_page_corrections(found, page_corrections),
+    )
     acceptance.warnings = other_site_warnings(decisions, found, sites_by_id, searched_sites(run_dir, found))
 
     write_csv_records(run_dir / ACCEPTED_VALUES_FILE, acceptance.values, ACCEPTED_VALUES_HEADERS)
@@ -752,6 +952,8 @@ def print_acceptance(
         f"Key values decided: {sum(checked.values())} (Correct {checked[CORRECT]}, Wrong {checked[WRONG]}, "
         f"{corrected} of them corrected); waiting under approved sources: {acceptance.undecided_values}"
     )
+    if acceptance.page_corrected:
+        print(f"Of those, corrected or removed on their page's row: {acceptance.page_corrected}")
     if acceptance.missing_value_rows:
         print(
             f"!! {acceptance.missing_value_rows} value(s) waiting under approved sources have no ↳ row in "

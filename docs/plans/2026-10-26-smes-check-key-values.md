@@ -103,6 +103,11 @@ put it in `notes`.
 A `corrected_value` typed with no decision is read as Wrong: typing a value says the found one is
 wrong.
 
+**Added 6 November (Yuchen's question):** a value with no ↳ row, such as a Tier 1-2 page's, is
+corrected on the page's own row: Correct site, and `corrected_value` lists the wrong values as
+`attributes` writes them, `attribute = value (year)`, or just `attribute` to remove one, separated
+by semicolons. A corrected value typed with another year, on any row, loads at that year.
+
 **What the SME fills in:** `decision`, and where it applies `other_site_id` or `corrected_value`;
 `reviewer`, `reviewed_date`, `notes`. Nothing else is read back.
 

@@ -205,6 +205,9 @@ CLOSURE = source("https://news.example/closure", "Springfield Landfill", values=
     ({"decision": CORRECT_SITE}, "2045", "Correct"),
     # Its page is ours, and the value is wrong: the SME's loads instead.
     ({"decision": CORRECT_SITE, "corrected_value": "2041"}, "2041", "Wrong"),
+    ({"decision": CORRECT_SITE, "corrected_value": "closing_year = 2041"}, "2041", "Wrong"),
+    # Its name alone, as on a page row giving several values: wrong, with nothing instead.
+    ({"decision": CORRECT_SITE, "corrected_value": "closing_year"}, None, "Wrong"),
     ({"decision": JUNK, "corrected_value": "2041"}, None, ""),
     ({"corrected_value": "2041"}, None, ""),
 ])
@@ -245,6 +248,118 @@ def test_a_corrected_value_on_a_pages_own_row_is_checked_as_on_a_value_row(tmp_p
     with pytest.raises(ReviewError) as stopped:
         accept_reviews(run_dir, run_dir / "run_review.xlsx")
     assert "(closing_year): corrected_value 'soon' can't be used" in str(stopped.value)
+
+
+# A Tier 1 page giving several values, none checked on a row of its own: a wrong one is corrected on
+# the page's row (Yuchen, 6 November).
+GAS = source("https://manitoba.example/gas", "Brady Road Landfill", source_type="Regulator", values=[
+    value("gccs_energy_project_type", "Electricity Generation", value_date="2015"),
+    value("gccs_current_project_status", "Operational", value_date="2015"),
+])
+
+
+def gas_loads(tmp_path, corrected):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [GAS]})
+    decide(run_dir, {GAS["url"]: {"decision": CORRECT_SITE, "corrected_value": corrected}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    return run_dir, {r["attribute_name"]: (r["value"], r["year"], r["is_year_exact"]) for r in accepted(run_dir)}
+
+
+@pytest.mark.parametrize("corrected, energy", [
+    # As the attributes column writes it, or in short.
+    ("gccs_energy_project_type = Renewable Natural Gas (2015)", ("Renewable Natural Gas", "2015", "TRUE")),
+    ("gccs_energy_project_type = RNG", ("Renewable Natural Gas", "2015", "TRUE")),
+    # Another year: the value loads at that one.
+    ("gccs_energy_project_type = Renewable Natural Gas (2020)", ("Renewable Natural Gas", "2020", "TRUE")),
+    # No value: the page's is wrong, and nothing loads instead.
+    ("gccs_energy_project_type", None),
+    ("gccs_energy_project_type (2015)", None),
+])
+def test_a_wrong_value_with_no_row_of_its_own_is_corrected_on_its_pages_row(tmp_path, corrected, energy):
+    run_dir, loads = gas_loads(tmp_path, corrected)
+    assert loads.get("gccs_energy_project_type") == energy
+    assert loads["gccs_current_project_status"] == ("Operational", "2015", "TRUE")
+    by_attribute = {r["attribute_name"]: (r["value_decision"], r["corrected_value"]) for r in found(run_dir)}
+    assert by_attribute == {"gccs_energy_project_type": ("Wrong", corrected), "gccs_current_project_status": ("", "")}
+
+
+def test_several_corrections_on_a_page_row_are_split_at_each_attributes_name(tmp_path):
+    """A list value is written with semicolons too, so only a semicolon or line break before an
+    attribute's name separates two corrections."""
+    corrected = "gccs_energy_project_type = Electricity Generation; Direct Use (2015);\ngccs_current_project_status"
+    _run_dir, loads = gas_loads(tmp_path, corrected)
+    assert loads == {"gccs_energy_project_type": ("Electricity Generation; Direct Use", "2015", "TRUE")}
+
+
+def test_a_value_rows_corrected_value_may_name_its_attribute_and_give_another_year(tmp_path):
+    news = source("https://news.example/landfill", "Springfield Landfill", values=[
+        value("closing_year", "2045"), value("annual_incoming_waste_metric_tonnes", "12000", value_date="2019"),
+    ])
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [news]})
+    decide(run_dir, {
+        news["url"]: {"decision": CORRECT_SITE},
+        (news["url"], "closing_year"): {"decision": "Wrong", "corrected_value": "closing_year = 2041"},
+        (news["url"], "annual_incoming_waste_metric_tonnes (2019)"): {"decision": "Wrong", "corrected_value": "15000 (2021)"},
+    })
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    loads = {r["attribute_name"]: (r["value"], r["year"]) for r in accepted(run_dir)}
+    assert loads["closing_year"][0] == "2041"
+    assert loads["annual_incoming_waste_metric_tonnes"] == ("15000", "2021")
+
+
+def test_a_corrected_year_where_we_hold_a_value_loads_nothing_and_is_said(tmp_path):
+    """Our latest year is 2015, and our energy type is 2010's, carried forward: the page's 2015 value
+    fills an empty field, but a correction to 2010 would change ours."""
+    site = {**BRADY, "year": "2015", "reference_year": "2015", "gccs_energy_project_type": "Direct Use",
+            "backfilled_fields": "gccs_energy_project_type@2010"}
+    run_dir = arbitrate(tmp_path, [site], {"13413": [GAS]})
+    decide(run_dir, {GAS["url"]: {"decision": CORRECT_SITE, "corrected_value": "gccs_energy_project_type = RNG (2010)"}})
+    result = accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert "gccs_energy_project_type" not in {r["attribute_name"] for r in accepted(run_dir)}
+    assert any("already has gccs_energy_project_type for 2010, so it loads nothing." in w for w in result.value_warnings)
+
+
+def test_a_correction_on_a_rejected_page_is_said_and_loads_nothing(tmp_path):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [GAS]})
+    decide(run_dir, {GAS["url"]: {"decision": JUNK, "corrected_value": "gccs_energy_project_type = RNG"}})
+    result = accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert accepted(run_dir) == []
+    assert any("(gccs_energy_project_type = RNG): its source is Junk, so it loads nothing." in w for w in result.value_warnings)
+
+
+@pytest.mark.parametrize("sources, corrected, says", [
+    ([GAS], "Renewable Natural Gas", "corrected_value on a page row names the value it corrects"),
+    ([GAS], "gas_use = RNG", "corrected_value on a page row names the value it corrects"),
+    ([GAS], "gccs_energy_project_type = Coal", "(gccs_energy_project_type = Coal): corrected_value can't be used"),
+    ([GAS], "operator = Someone", "(operator = Someone): the page gives no operator."),
+    ([GAS], "gccs_energy_project_type (2019)", "the page gives gccs_energy_project_type for 2015, not 2019."),
+    ([GAS], "gccs_energy_project_type; gccs_energy_project_type = RNG", "on the same row corrects the same value."),
+    # A key value from a Tier 3 page is decided on its own row.
+    ([NEWS], "closing_year = 2041", "closing_year has its own ↳ row under the page. Decide it there."),
+])
+def test_a_correction_on_a_page_row_that_cant_be_applied_stops_it_naming_the_row(tmp_path, sources, corrected, says):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": sources})
+    decide(run_dir, {sources[0]["url"]: {"decision": CORRECT_SITE, "corrected_value": corrected}})
+    with pytest.raises(ReviewError) as stopped:
+        accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert "row 2 (" in str(stopped.value) and says in str(stopped.value)
+    assert not (run_dir / ACCEPTED_VALUES_FILE).exists()
+
+
+def test_a_correction_for_one_of_several_years_names_the_year(tmp_path):
+    yearly = source("https://manitoba.example/tonnes", "Brady Road Landfill", source_type="Regulator", values=[
+        value("annual_incoming_waste_metric_tonnes", "12000", value_date="2018"),
+        value("annual_incoming_waste_metric_tonnes", "13000", value_date="2019"),
+        value("operator", "City of Winnipeg"),
+    ])
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [yearly]})
+    decide(run_dir, {yearly["url"]: {"decision": CORRECT_SITE, "corrected_value": "annual_incoming_waste_metric_tonnes = 14000"}})
+    with pytest.raises(ReviewError, match=r"for 2018, 2019\. Say which year is wrong"):
+        accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    decide(run_dir, {yearly["url"]: {"corrected_value": "annual_incoming_waste_metric_tonnes = 14000 (2019)"}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    loads = {(r["attribute_name"], r["year"]): r["value"] for r in accepted(run_dir) if r["attribute_name"] != "operator"}
+    assert loads == {("annual_incoming_waste_metric_tonnes", "2018"): "12000", ("annual_incoming_waste_metric_tonnes", "2019"): "14000"}
 
 
 @pytest.mark.parametrize("attribute, typed, says", [
