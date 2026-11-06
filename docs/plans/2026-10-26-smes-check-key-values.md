@@ -198,6 +198,9 @@ tried the sheet. 1,133 tests pass.
   the quote".
 - **Where the sheet differs from the plan:** a strong source with no warnings isn't specially
   marked; the flags column and the tier say enough.
+- **Only pairs that would load a value are listed.** A pair whose every value confirms ours, would
+  change ours, or isn't used for another reason isn't on Site_Review, since approving it would load
+  nothing; its values are in `found_values.csv`.
 
 ### The 10-site Mexico test (`outputs/runs/test10-mex`, gpt-5.4, 30 October)
 
