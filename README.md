@@ -1471,7 +1471,8 @@ Pick `decision` from its dropdown:
 - **Any other wrong value is corrected on the page's own row** (Yuchen, 6 November): pick Correct
   site, and in `corrected_value` write it as `attributes` does, with the right value:
   `gccs_energy_project_type = Renewable Natural Gas (2015)`. Just the name,
-  `gccs_energy_project_type`, removes it without a replacement. Separate several with semicolons.
+  `gccs_energy_project_type`, removes it without a replacement, for every year the page gives;
+  `gccs_energy_project_type (2015)` removes 2015's only. Separate several with semicolons.
   A value checked on its own ↳ row is decided there instead.
 - **A corrected value may have another year** than the page gave, wherever it is typed: on a ↳ row
   `15000 (2021)`, on a page row `... = Renewable Natural Gas (2020)`. It loads at that year, where

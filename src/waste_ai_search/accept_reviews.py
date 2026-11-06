@@ -313,18 +313,22 @@ def corrected_as_held(attribute: str, typed: str) -> tuple[str, str]:
 def one_correction(attribute: str, typed: str) -> tuple[str, str, str]:
     """A value row's corrected_value: the value, the year typed after it, if any, and what is wrong with
     it. It may begin "attribute =", as the attributes column writes it, naming the row's own value;
-    the attribute's name alone, as on a page row giving several values, gives no value."""
+    the attribute's name alone, as on a page row giving several values, gives no value. A name that
+    isn't the row's, or a bracketed year that isn't a year, is wrong, as on a page row: read as part
+    of the value, it would load as an operator's name."""
     alone = CORRECTION.fullmatch(typed.strip())
     if alone and alone["value"] is None and alone["name"].casefold() == attribute:
         return "", "", ""
     named = NAMED.fullmatch(typed)
-    if named and named["name"].casefold() in GAP_FILL_ATTRIBUTES:
+    if named:
         if named["name"].casefold() != attribute:
             return "", "", f"it names {named['name']}, but this row checks {attribute}"
         typed = named["value"]
     year = ""
     dated = YEAR_AFTER.fullmatch(typed.strip())
-    if dated and int(dated["year"]) in YEARS:
+    if dated:
+        if int(dated["year"]) not in YEARS:
+            return "", "", f"{dated['year']} is not a year"
         typed, year = dated["value"], dated["year"]
     value, problem = corrected_as_held(attribute, typed)
     return value, year, problem
@@ -336,7 +340,8 @@ def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]
     corrected_value with no decision is read as Wrong, since a value typed instead says the found one
     is wrong. A source row that checks its pair's one value (site_review.ON_PAGE_ROW) decides it too:
     Correct site or Different site is Correct, or Wrong with the corrected_value typed; any other
-    decision, or none, decides nothing of the value.
+    decision, or none, decides nothing of the value, but a corrected_value typed there is still Wrong,
+    so the run can say it loads nothing (value_warnings).
 
     A corrected_value may be written as the attributes column writes the value, "attribute = value
     (year)" (one_correction); a year typed after it is the year it loads at.
@@ -353,7 +358,7 @@ def read_value_decisions(workbook: Path) -> dict[tuple[str, str], ValueDecision]
         check = record.get("check", "")
         typed, corrected = record.get("decision", ""), record.get("corrected_value", "")
         if checked_on_page(check):
-            if DECISION_BY_TEXT.get(_folded(typed)) not in (CORRECT_SITE, DIFFERENT_SITE):
+            if DECISION_BY_TEXT.get(_folded(typed)) not in (CORRECT_SITE, DIFFERENT_SITE) and not corrected:
                 continue
             check, typed = checked_on_page(check), WRONG if corrected else CORRECT
         if not check or (not typed and not corrected):
@@ -580,22 +585,27 @@ def accept(
         on_its_row = on_its_row or page_corrections.get(index)
         if on_its_row is not None:
             row["value_decision"], row["corrected_value"] = on_its_row.decision, on_its_row.typed
+        wrong = on_its_row is not None and on_its_row.decision == WRONG
+        year = on_its_row.year if wrong and on_its_row.year else row["year"]
         loads_at = destination(row, decision, sites_by_id)
+        # Only fills of empty fields load. found_values.py checked the found year at the site searched;
+        # at another site, or another year an SME gives, it is checked here.
+        if loads_at and (loads_at != row["site_id"] or year != row["year"]) and not fills_empty_field(
+            {**row, "year": year}, sites_by_id.get(loads_at, {})
+        ):
+            if year != row["year"]:
+                moved.append(
+                    f"{SITE_REVIEW_SHEET} row {on_its_row.row} ({on_its_row.check}): site {loads_at} already has "
+                    f"{row['attribute_name']} for {year}, so it loads nothing."
+                )
+            loads_at = ""
         if loads_at and checked and on_its_row is None:
             if row["status"] in LOADABLE:
                 undecided_values += 1
                 # A workbook made before the run was arbitrated again can lack the row.
                 missing_value_rows += value_rows is not None and (review, check_label(row)) not in value_rows
             loads_at = ""
-        elif loads_at and on_its_row is not None and on_its_row.decision == WRONG and not on_its_row.corrected:
-            loads_at = ""
-        wrong = on_its_row is not None and on_its_row.decision == WRONG
-        year = on_its_row.year if wrong and on_its_row.year else row["year"]
-        if loads_at and year != row["year"] and not fills_empty_field({**row, "year": year}, sites_by_id.get(loads_at, {})):
-            moved.append(
-                f"{SITE_REVIEW_SHEET} row {on_its_row.row} ({on_its_row.check}): site {loads_at} already has "
-                f"{row['attribute_name']} for {year}, so it loads nothing."
-            )
+        elif loads_at and wrong and not on_its_row.corrected:
             loads_at = ""
         if loads_at:
             value = on_its_row.corrected if wrong else row["value"]
@@ -687,7 +697,8 @@ def value_warnings(
 
 
 def destination(row: dict[str, Any], decision: Decision | None, sites_by_id: dict[str, dict[str, Any]]) -> str:
-    """The site a found value loads at, or "" where it doesn't load."""
+    """The site a found value loads at, or "" where it doesn't load. At a Different site, it loads only
+    where it fills an empty field, which accept checks, at the year it loads at."""
     if is_blank(row.get("value")):
         return ""
     if decision is None:
@@ -696,8 +707,7 @@ def destination(row: dict[str, Any], decision: Decision | None, sites_by_id: dic
     if decision.decision == CORRECT_SITE:
         return row["site_id"] if row["status"] in LOADABLE else ""
     if decision.decision == DIFFERENT_SITE and (row["status"] in LOADABLE or judged_on_our_value(row)):
-        other = sites_by_id.get(decision.other_site_id, {})
-        return decision.other_site_id if fills_empty_field(row, other) else ""
+        return decision.other_site_id
     return ""
 
 

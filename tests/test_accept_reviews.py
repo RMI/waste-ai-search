@@ -208,8 +208,10 @@ CLOSURE = source("https://news.example/closure", "Springfield Landfill", values=
     ({"decision": CORRECT_SITE, "corrected_value": "closing_year = 2041"}, "2041", "Wrong"),
     # Its name alone, as on a page row giving several values: wrong, with nothing instead.
     ({"decision": CORRECT_SITE, "corrected_value": "closing_year"}, None, "Wrong"),
-    ({"decision": JUNK, "corrected_value": "2041"}, None, ""),
-    ({"corrected_value": "2041"}, None, ""),
+    # A value typed under any other decision, or none, says the value is wrong, but nothing loads.
+    ({"decision": JUNK, "corrected_value": "2041"}, None, "Wrong"),
+    ({"corrected_value": "2041"}, None, "Wrong"),
+    ({"decision": JUNK}, None, ""),
 ])
 def test_a_pages_one_key_value_is_decided_by_the_pages_own_decision(tmp_path, cells, loads, value_decision):
     run_dir = arbitrate(tmp_path, [BRADY], {"13413": [CLOSURE]})
@@ -319,12 +321,37 @@ def test_a_corrected_year_where_we_hold_a_value_loads_nothing_and_is_said(tmp_pa
     assert any("already has gccs_energy_project_type for 2010, so it loads nothing." in w for w in result.value_warnings)
 
 
-def test_a_correction_on_a_rejected_page_is_said_and_loads_nothing(tmp_path):
-    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [GAS]})
-    decide(run_dir, {GAS["url"]: {"decision": JUNK, "corrected_value": "gccs_energy_project_type = RNG"}})
+@pytest.mark.parametrize("page, corrected, check", [
+    (GAS, "gccs_energy_project_type = RNG", "gccs_energy_project_type = RNG"),
+    # A page giving one key value checks it on its own row.
+    (CLOSURE, "2041", "closing_year"),
+])
+@pytest.mark.parametrize("decision, says", [
+    (JUNK, "its source is Junk, so it loads nothing."),
+    (None, "its source has no decision yet, so it loads nothing until it has one."),
+])
+def test_a_correction_on_a_rejected_or_undecided_page_is_said_and_loads_nothing(tmp_path, page, corrected, check, decision, says):
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [page]})
+    decide(run_dir, {page["url"]: {"decision": decision, "corrected_value": corrected}})
     result = accept_reviews(run_dir, run_dir / "run_review.xlsx")
     assert accepted(run_dir) == []
-    assert any("(gccs_energy_project_type = RNG): its source is Junk, so it loads nothing." in w for w in result.value_warnings)
+    assert f"Site_Review row 2 ({check}): {says}" in result.value_warnings
+
+
+@pytest.mark.parametrize("corrected, loads", [
+    # Site 901's energy type is 2015's, carried forward to 2020, its latest year, which holds none.
+    ("gccs_energy_project_type = RNG (2020)", ("Renewable Natural Gas", "2020")),
+    ("gccs_energy_project_type = RNG", None),
+])
+def test_a_corrected_year_at_a_different_site_loads_where_that_years_field_is_empty(tmp_path, corrected, loads):
+    other = seed("901", "Springfield landfill", 49.9, -96.9, year="2020", reference_year="2020",
+                 gccs_energy_project_type="Direct Use", backfilled_fields="gccs_energy_project_type@2015")
+    run_dir = arbitrate(tmp_path, [BRADY, other], {"13413": [GAS]})
+    decide(run_dir, {GAS["url"]: {"decision": DIFFERENT_SITE, "other_site_id": "901", "corrected_value": corrected}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    loads_at = {r["attribute_name"]: (r["site_id"], r["value"], r["year"]) for r in accepted(run_dir)}
+    assert loads_at["gccs_current_project_status"] == ("901", "Operational", "2015")
+    assert loads_at.get("gccs_energy_project_type") == (loads and ("901", *loads))
 
 
 @pytest.mark.parametrize("sources, corrected, says", [
@@ -360,6 +387,10 @@ def test_a_correction_for_one_of_several_years_names_the_year(tmp_path):
     accept_reviews(run_dir, run_dir / "run_review.xlsx")
     loads = {(r["attribute_name"], r["year"]): r["value"] for r in accepted(run_dir) if r["attribute_name"] != "operator"}
     assert loads == {("annual_incoming_waste_metric_tonnes", "2018"): "12000", ("annual_incoming_waste_metric_tonnes", "2019"): "14000"}
+    # Removing needs no year: the name alone removes every year's.
+    decide(run_dir, {yearly["url"]: {"corrected_value": "annual_incoming_waste_metric_tonnes"}})
+    accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert [r["attribute_name"] for r in accepted(run_dir)] == ["operator"]
 
 
 @pytest.mark.parametrize("attribute, typed, says", [
@@ -448,6 +479,22 @@ def test_an_inferred_operator_loads_only_once_its_own_row_is_correct_whatever_th
     decide(run_dir, {(page["url"], "operator"): {"decision": "Correct"}})
     accept_reviews(run_dir, run_dir / "run_review.xlsx")
     assert {r["attribute_name"]: r["value"] for r in accepted(run_dir)} == {"facility_status": "Active", "operator": "RM of Springfield"}
+
+
+@pytest.mark.parametrize("typed, says", [
+    # Any operator name is a value, so these would load as one.
+    ("gas_use = Springfield Utilities", "it names gas_use, but this row checks operator"),
+    ("Springfield Utilities (1700)", "1700 is not a year"),
+])
+def test_an_operators_corrected_value_naming_another_attribute_or_a_bad_year_stops_it(tmp_path, typed, says):
+    page = source("https://town.example/landfill", "Springfield Landfill", values=[
+        {**value("operator", "RM of Springfield"), "value_basis": "Inferred"}, value("facility_status", "Active"),
+    ])
+    run_dir = arbitrate(tmp_path, [BRADY], {"13413": [page]})
+    decide(run_dir, {page["url"]: {"decision": CORRECT_SITE}, (page["url"], "operator"): {"corrected_value": typed}})
+    with pytest.raises(ReviewError) as stopped:
+        accept_reviews(run_dir, run_dir / "run_review.xlsx")
+    assert f"(operator): corrected_value {typed!r} can't be used: {says}." in str(stopped.value)
 
 
 def test_an_inferred_operator_weighed_again_at_a_different_site_has_no_row_so_doesnt_load():
