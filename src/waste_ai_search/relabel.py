@@ -192,16 +192,16 @@ def _crosswalk(rows: Iterable[Mapping[str, Any]], description: str) -> Crosswalk
 def read_crosswalk_csv(path: Path) -> Crosswalk:
     """Today's crosswalk from an export of entity_linkage.crosswalk (optionally gzipped).
 
-    It needs wastemap_id, data_source and facility_id. The table keeps every entity linkage run side
-    by side, so an export holding more than one run is refused: it would blend them.
+    It needs wastemap_id, data_source, facility_id and entity_linkage_run_id. The table keeps every
+    entity linkage run side by side, so an export holding more than one run is refused: it would
+    blend them. Without the run column that can't be checked, so it is required.
     """
     path = Path(path)
     with _open_csv(path) as handle:
         reader = csv.DictReader(handle)
-        _require_columns(reader.fieldnames, ("wastemap_id", "data_source", "facility_id"), path)
-        has_runs = "entity_linkage_run_id" in reader.fieldnames
+        _require_columns(reader.fieldnames, ("wastemap_id", "data_source", "facility_id", "entity_linkage_run_id"), path)
         rows = list(reader)
-    runs = sorted({row["entity_linkage_run_id"] for row in rows}) if has_runs else []
+    runs = sorted({row["entity_linkage_run_id"] for row in rows})
     if len(runs) > 1:
         raise RelabelError(
             f"{path} holds {len(runs)} entity linkage runs ({', '.join(runs[:5])}). Export only the run "
@@ -579,6 +579,13 @@ def relabel_run(
     run_id = settings.get("run_id", "")
     if not run_id:
         raise RelabelError(f"{workbook_path.name}'s Run_Config tab records no run_id.")
+    if run_id != run_dir.name:
+        # resolved.csv and the snapshot come from run_dir, so a workbook from another run would pair
+        # its SMEs' decisions with this run's results.
+        raise RelabelError(
+            f"{workbook_path.name} is from run {run_id!r}, but the run folder is {run_dir.name!r}. "
+            "Pass the review workbook of the run being re-keyed."
+        )
     if SITE_ID_KEY_SETTING in settings:
         raise RelabelError(
             f"{workbook_path.name} already records {SITE_ID_KEY_SETTING} = {settings[SITE_ID_KEY_SETTING]!r}: "

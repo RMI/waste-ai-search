@@ -7,7 +7,9 @@ import hashlib
 from datetime import date, datetime
 
 import pytest
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 import waste_ai_search.db as db
 from waste_ai_search.input_loader import write_csv_records
@@ -32,7 +34,6 @@ from waste_ai_search.schema import (
     REVIEW_QUEUE_HEADERS,
     SUPPLEMENTARY_LEADS_HEADERS,
 )
-from waste_ai_search.workbook_io import write_review_workbook
 
 RUN_ID = "batchX"
 # Old ID -> the source records the run's own crosswalk linked to it.
@@ -71,6 +72,32 @@ def resolved_rows(ids=("1", "2", "3")) -> list[dict]:
     ]
 
 
+def write_batch1_workbook(path, *, run_config, review_queue, leads, parse_warnings) -> None:
+    """A review workbook laid out as batch 1's was. Built here rather than by workbook_io, whose
+    workbook has since changed shape: relabelling only ever reads batch 1's."""
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    for name, headers, rows in (
+        ("ReadMe", ["tab_name", "purpose", "sme_action", "editable"], []),
+        ("Run_Config", ["setting", "value"], run_config),
+        ("Review_Queue", REVIEW_QUEUE_HEADERS, review_queue),
+        ("Leads", SUPPLEMENTARY_LEADS_HEADERS, leads),
+        ("Parse_Warnings", PARSE_WARNING_HEADERS, parse_warnings),
+    ):
+        sheet = workbook.create_sheet(name)
+        sheet.append(headers)
+        for row in rows:
+            sheet.append([row.get(header, "") for header in headers])
+    # The SMEs' dropdowns, which the copy must keep.
+    queue = workbook["Review_Queue"]
+    for header, choices in (("validation_status", "Validated,Rejected"), ("reviewer", "SME 1,SME 2")):
+        column = get_column_letter(REVIEW_QUEUE_HEADERS.index(header) + 1)
+        validation = DataValidation(type="list", formula1=f'"{choices}"', allow_blank=True)
+        validation.add(f"{column}2:{column}1000")
+        queue.add_data_validation(validation)
+    workbook.save(path)
+
+
 def make_run(tmp_path, *, ids=("1", "2", "3"), queue_ids=("1", "3"), extra_queue_column=None, numeric_ids=False):
     run_dir = tmp_path / RUN_ID
     run_dir.mkdir()
@@ -79,7 +106,7 @@ def make_run(tmp_path, *, ids=("1", "2", "3"), queue_ids=("1", "3"), extra_queue
     queue_headers = REVIEW_QUEUE_HEADERS + ([extra_queue_column] if extra_queue_column else [])
     blank = {header: "" for header in queue_headers}
     to_cell = int if numeric_ids else str
-    write_review_workbook(
+    write_batch1_workbook(
         run_dir / f"{RUN_ID}_review.xlsx",
         run_config=[{"setting": "run_id", "value": RUN_ID}, {"setting": "sites_arbitrated", "value": 3}],
         review_queue=[
@@ -266,6 +293,20 @@ def test_the_smes_downloaded_workbook_is_written_under_its_runs_name(tmp_path):
     assert [path.name for path in result.written] == ["resolved.csv", f"{RUN_ID}_review.xlsx"]
 
 
+def test_a_workbook_from_another_run_is_refused(tmp_path):
+    run_dir = make_run(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    other_workbook = other / "batchY_review.xlsx"
+    workbook = load_workbook(run_dir / f"{RUN_ID}_review.xlsx")
+    workbook["Run_Config"].cell(2, 2, "batchY")
+    workbook.save(other_workbook)
+
+    with pytest.raises(RelabelError, match="from run 'batchY'"):
+        relabel_run(run_dir, crosswalk(CLEAN), out_dir=tmp_path / "out", workbook_path=other_workbook)
+    assert not (tmp_path / "out").exists()
+
+
 def test_numeric_site_id_cells_stay_numeric(tmp_path):
     """Excel can turn a typed ID into a number; the copy keeps the cell's type."""
     run_dir = make_run(tmp_path, numeric_ids=True)
@@ -397,6 +438,17 @@ def test_a_crosswalk_export_holding_two_runs_is_refused(tmp_path):
     )
 
     with pytest.raises(RelabelError, match="2 entity linkage runs"):
+        read_crosswalk_csv(path)
+
+
+def test_a_crosswalk_export_without_its_run_column_is_refused(tmp_path):
+    """Without entity_linkage_run_id, an export of several runs couldn't be told from one."""
+    path = write_crosswalk_csv(
+        tmp_path / "crosswalk.csv",
+        [{"wastemap_id": "101", "data_source": "osm_2022", "facility_id": "A"}],
+    )
+
+    with pytest.raises(RelabelError, match="entity_linkage_run_id"):
         read_crosswalk_csv(path)
 
 
