@@ -344,6 +344,16 @@ def run_search(
         print(f"{verb}: {run_seed_path(config)} ({len(sites)} facilities)")
 
     selected, skipped = choose_sites(sites, config)
+    # The run's list of sites skipped by name, for review and for Run_Config. Each search adds its
+    # skips to the list and takes off the sites it selects or the run has already searched, so a
+    # narrower search under the same run id doesn't shrink it and a site searched after all isn't
+    # also counted as skipped. A search of listed ids (a retry, or the gas follow-up) only takes
+    # its sites off a list that exists. Recorded before the check below, so a search whose every
+    # site was skipped by name (one country of a batch, say) still lists them.
+    if (selected or skipped) and (not config.site_ids or (config.run_dir / SKIPPED_SITES_FILE).exists()):
+        searched = {site_id_from_path(path) for path in raw_dir(config.run_dir).glob("site_*.json")}
+        searched |= {normalize_scalar(site.get("site_id")) for site in selected}
+        record_skips(config.run_dir, skipped, searched)
     if not selected:
         hint = (
             f" This run is pinned to {run_seed_path(config)}; use a new --run-id to seed afresh."
@@ -362,15 +372,6 @@ def run_search(
             "No sites to search: none matched the selection filters, or every one that did has nothing "
             f"left to ask (counted above).{hint}"
         )
-    # The run's list of sites skipped by name, for review and for Run_Config. Each search adds its
-    # skips to the list and takes off the sites it selects or the run has already searched, so a
-    # narrower search under the same run id doesn't shrink it and a site searched after all isn't
-    # also counted as skipped. A search of listed ids (a retry, or the gas follow-up) only takes
-    # its sites off a list that exists.
-    if not config.site_ids or (config.run_dir / SKIPPED_SITES_FILE).exists():
-        searched = {site_id_from_path(path) for path in raw_dir(config.run_dir).glob("site_*.json")}
-        searched |= {normalize_scalar(site.get("site_id")) for site in selected}
-        record_skips(config.run_dir, skipped, searched)
 
     raw_dir(config.run_dir).mkdir(parents=True, exist_ok=True)
     # Built before any search is paid for, so a geocoder configured wrongly stops the run here,

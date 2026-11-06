@@ -373,12 +373,12 @@ TWO_COUNTRIES = [
 ]
 
 
-def two_country_config(tmp_path):
+def two_country_config(tmp_path, sites=TWO_COUNTRIES):
     path = tmp_path / "seed.csv"
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["site_id", "site_name", "country_iso3", "latitude", "longitude"])
-        for site_id, name, country in TWO_COUNTRIES:
+        for site_id, name, country in sites:
             writer.writerow([site_id, name, country, "1.0", "2.0"])
     return PipelineConfig(
         input_csv=path, run_dir=tmp_path / "run", run_id="run", site_delay_seconds=0, check_links=False
@@ -393,6 +393,18 @@ def test_a_narrower_search_under_the_same_run_id_adds_to_the_list(tmp_path, monk
 
     assert [row["site_id"] for row in skipped_rows(config.run_dir)] == ["2", "3", "5", "6"]
     assert run_config(config)["unsearchable_names_skipped"] == "4 (no name 2, generic label 2)"
+
+
+def test_a_search_whose_every_site_is_skipped_still_lists_them(tmp_path, monkeypatch):
+    """A country with no searchable name stops its search, but its skips stay on the run's record."""
+    from waste_ai_search.search import NothingToSearch
+
+    config = two_country_config(tmp_path, [*TWO_COUNTRIES, ("7", "Dump", "GHA")])
+    search(replace(config, iso3=["CAN"]), monkeypatch)
+    with pytest.raises(NothingToSearch):
+        search(replace(config, iso3=["GHA"]), monkeypatch)
+
+    assert [row["site_id"] for row in skipped_rows(config.run_dir)] == ["2", "3", "7"]
 
 
 def test_the_flag_on_one_country_leaves_the_others_skips_on_record(tmp_path, monkeypatch):
