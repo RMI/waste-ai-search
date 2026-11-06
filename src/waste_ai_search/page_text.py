@@ -24,6 +24,7 @@ import zipfile
 from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
+from itertools import islice
 from pathlib import Path
 
 from .payload import source_id_for
@@ -252,10 +253,11 @@ def _cell(value) -> str:  # noqa: ANN001 - any cell value
 
 
 def _cells_text(rows, budget: int) -> tuple[str, int]:  # noqa: ANN001 - rows of cell values
-    """A sheet's cells as lines, and how many of the workbook's cells it used."""
+    """A sheet's cells as lines, and how many of the workbook's cells it used: never more than
+    `budget`, so a wide row is read only as far as the budget goes."""
     lines, cells = [], 0
     for row in rows:
-        values = [_cell(value) for value in row]
+        values = [_cell(value) for value in islice(row, budget - cells)]
         cells += len(values)
         if any(values):
             lines.append("\t".join(values).rstrip("\t"))

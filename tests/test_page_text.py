@@ -160,6 +160,22 @@ def test_a_spreadsheets_cell_limit_is_across_its_sheets(monkeypatch):
     book.save(data)
     read = extract_text(data.getvalue(), "", "https://x.example/register.xlsx")
     assert "s0r0a" in read.text and "s2r0a" not in read.text
+    # Sheet 0 used 9 of the 10 cells, so sheet 1's first row is read only to its first cell.
+    assert "s1r0a" in read.text and "s1r0b" not in read.text
+    assert "first 10 cells read" in read.note
+
+
+def test_a_wide_row_is_read_only_as_far_as_the_cell_limit(monkeypatch):
+    import waste_ai_search.page_text as page_text
+
+    monkeypatch.setattr(page_text, "MAX_SHEET_CELLS", 10)
+    book = Workbook()
+    book.active.append([f"c{column}" for column in range(50)])
+    book.create_sheet().append(["next sheet"])
+    data = io.BytesIO()
+    book.save(data)
+    read = extract_text(data.getvalue(), "", "https://x.example/register.xlsx")
+    assert "c9" in read.text and "c10" not in read.text and "next sheet" not in read.text
     assert "first 10 cells read" in read.note
 
 
