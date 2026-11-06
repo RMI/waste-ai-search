@@ -19,7 +19,7 @@ Each found value must cite a source. The pipeline gives each source a credibilit
 | Why things are the way they are | `docs/metadata_search_redesign.md`. Decisions are numbered (Q1–Q34 settled up front, F1–F35 added later), each with its reason. |
 | Run outputs | `outputs/runs/<run_id>/` in the repo checkout. Not in git and not yet in blob storage (see Open work). Copy them across if you work on a different machine. |
 | A run's seed | `outputs/runs/<run_id>/seed.csv`: the whole corpus as read from the database when the run started. A resumed run reuses it, so the whole run searches the same seed. `refreshed_seed.csv` is the seed with pass 1's findings merged in, for the pass-2 gas follow-up. `consolidation_snapshot/` is a compressed copy of the database tables the seed was built from, with a manifest. |
-| SME review workbooks | SharePoint: ClimateTRACE › Solid Waste › Waste_AI_Search › `<run_id>/`. Point `WASTE_AI_SEARCH_REVIEW_DIR` at your OneDrive-synced copy of that folder and runs publish there. |
+| SME review workbooks | SharePoint: ClimateTRACE › Solid Waste › Waste_AI_Search › `<run_id>/`. Point `WASTE_AI_SEARCH_REVIEW_DIR` at your OneDrive-synced copy of the `Waste_AI_Search` folder itself, not a run's folder: publishing adds `<run_id>/`. |
 | Upstream schema | `RMI/waste_data_ingestion_pipeline` owns the database and `StandardizedFacilityTableSpecification.md`. This repo pins a copy under `schema/`. |
 
 ## Setup
@@ -37,8 +37,8 @@ Each found value must cite a source. The pipeline gives each source a credibilit
 # Search, check links, arbitrate, gas-collection follow-up, publish to SharePoint
 caffeinate -is uv run waste-ai-search run --run-id batch2 --batch 2 --workers 10
 
-# Re-arbitrate a finished run offline (no search cost)
-uv run waste-ai-search arbitrate --run-id batch2 --no-publish
+# Re-arbitrate a finished run offline (no search cost). --local skips blob storage, --no-publish SharePoint
+uv run waste-ai-search arbitrate --run-id batch2 --local --no-publish
 
 # Search specific sites only
 uv run waste-ai-search run --run-id test --site-ids 2529 16596 --no-publish
@@ -47,10 +47,10 @@ uv run waste-ai-search run --run-id test --site-ids 2529 16596 --no-publish
 What batch 1 taught us:
 
 - **Use 10 workers.** 10 ran with no rate limits. 20 and 50 hit the gpt-5.4-mini deployment's token-per-minute quota (HTTP 429). The README's example says 16; use 10 until the quota is raised.
-- **Rerunning resumes.** Sites with a saved response are skipped, so rerunning the same command retries only failed and unsearched sites. Rate-limited attempts cost no Bing queries.
+- **Rerunning resumes.** Sites with a saved response are skipped, so rerunning the same command retries sites that errored or were never reached. Rate-limited attempts cost no Bing queries. A site whose search tool kept failing is different: its failed response is saved, so a rerun skips it. Those sites are in `sites_to_retry.csv`; re-search them with `uv run waste-ai-search search --run-id <run_id> --force --site-ids <ids>`, then arbitrate.
 - **Keep the Mac awake and on power.** `caffeinate -i` did not stop a lid-close sleep overnight. Use `-is` on AC power with the lid open.
 - **Stop gracefully** with Ctrl-C (SIGINT). It finishes the sites in flight and writes the run log.
-- **Cost.** Batch 1 used 39,031 Bing queries for 1,931 sites, about $550 at the README's rate. Searches are capped at 6 per site (`--max-web-searches`). The run log's `web_searches` column records queries per site.
+- **Cost.** Batch 1 used 39,031 Bing queries for 1,931 sites, about $550 at the README's rate. Searches are capped at 6 per agent attempt (`--max-web-searches`), not per site: each retry and the gas follow-up get a fresh cap, and each search sends several Bing queries (README, "Bing cost"). The run log's `web_searches` column records queries per site.
 - **The gas pass is part of the batch.** Sites where pass 1 found gas collection get a second, gas-only search: 426 sites and about 6,000 queries in batch 1.
 
 ## Batch 1 status
