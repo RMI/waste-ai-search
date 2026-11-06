@@ -38,9 +38,12 @@ DEFAULT_ENTITY_LINKAGE_STRATEGY = "legacy_replica_v1"
 
 # Newest first, by the date consolidation stamps on every row of a run; the id is a uuid4 and says
 # nothing about time, so it only breaks ties. A run with no date sorts last rather than first.
+# A run consumes one crosswalk run and stamps its id on every row. The ids are text columns, so MAX
+# reads it; linkage_runs counts them, so a run that somehow stamped two stops the seed (_run).
 RUNS_SQL = (
     "SELECT consolidation_run_id, consolidation_strategy, entity_linkage_strategy,\n"
     "       MAX(entity_linkage_run_id) AS entity_linkage_run_id,\n"
+    "       count(DISTINCT entity_linkage_run_id) AS linkage_runs,\n"
     "       MAX(consolidation_created_date) AS created,\n"
     "       count(*) AS row_count\n"
     f"FROM {TABLE}\n"
@@ -73,9 +76,16 @@ class ConsolidationRun:
 
 
 def _run(row: Mapping[str, Any], chosen_by: str) -> ConsolidationRun:
+    run_id = normalize_scalar(row.get("consolidation_run_id"))
+    linkage_runs = int(row.get("linkage_runs", 1) or 0)
+    if linkage_runs > 1:
+        raise RuntimeError(
+            f"Consolidation run {run_id} stamps {linkage_runs} different entity_linkage_run_ids, so "
+            "which crosswalk it consumed is unclear. Pin another run with CONSOLIDATION_RUN_ID."
+        )
     created = row.get("created")
     return ConsolidationRun(
-        run_id=normalize_scalar(row.get("consolidation_run_id")),
+        run_id=run_id,
         consolidation_strategy=normalize_scalar(row.get("consolidation_strategy")),
         entity_linkage_strategy=normalize_scalar(row.get("entity_linkage_strategy")),
         entity_linkage_run_id=normalize_scalar(row.get("entity_linkage_run_id")),

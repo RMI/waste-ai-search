@@ -67,6 +67,14 @@ def test_an_empty_table_stops_the_run():
         choose_run([], environ={})
 
 
+def test_a_run_that_stamped_two_crosswalk_runs_stops_the_run():
+    """The snapshot copies the one crosswalk run a consolidation consumed; with two, which is unclear."""
+    blended = [{**RUNS[1], "linkage_runs": 2}, RUNS[2]]
+    with pytest.raises(RuntimeError, match="newest stamps 2 different entity_linkage_run_ids"):
+        choose_run(blended, environ={})
+    assert "count(DISTINCT entity_linkage_run_id) AS linkage_runs" in RUNS_SQL
+
+
 def test_runs_are_listed_newest_first_and_undated_runs_last():
     # The run id is a uuid4 and says nothing about time, so it only breaks ties.
     assert "ORDER BY created DESC NULLS LAST, consolidation_run_id DESC" in RUNS_SQL
