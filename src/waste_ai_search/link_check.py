@@ -227,17 +227,37 @@ def _pinned_adapter_class():
     return PinnedAdapter
 
 
+def _response_socket(raw: Any) -> Any:
+    """The socket a streamed response is read from, or None where it can't be found. urllib3 keeps
+    it on the connection, unless the server said it would close the connection after this response:
+    then only the response's own file holds it."""
+    sock = getattr(getattr(raw, "connection", None), "sock", None)
+    if sock is None:
+        sock = getattr(getattr(getattr(getattr(raw, "_fp", None), "fp", None), "raw", None), "_sock", None)
+    return sock if hasattr(sock, "settimeout") else None
+
+
 def _read_body(response: Any) -> tuple[bytes, str]:
     """A response's body, up to MAX_PAGE_BYTES and READ_SECONDS, and why it was cut short, if it was.
 
     Read a network read at a time, so the deadline is checked after each one: a server dripping a
-    byte at a time can't hold a worker past it, as waiting for whole chunks would.
+    byte at a time can't hold a worker past it, as waiting for whole chunks would. Nor can one that
+    stops sending: each read waits no longer than the time left, rather than the whole read timeout.
     """
     raw = response.raw
     read = getattr(raw, "read1", None) or raw.read
+    sock = _response_socket(raw)
+    read_timeout = sock.gettimeout() if sock is not None else None
     chunks, size, started = [], 0, time.monotonic()
+    deadline = started + READ_SECONDS
     try:
         while True:
+            if sock is not None:
+                left = max(deadline - time.monotonic(), 0.01)
+                try:
+                    sock.settimeout(left if read_timeout is None else min(read_timeout, left))
+                except OSError:
+                    sock = None  # closed once the whole body arrived, so no read waits on it
             chunk = read(64 * 1024, decode_content=True)
             if not chunk:
                 return b"".join(chunks), ""
@@ -248,8 +268,8 @@ def _read_body(response: Any) -> tuple[bytes, str]:
             if time.monotonic() - started > READ_SECONDS:
                 return b"".join(chunks), CUT_BY_TIME
     except Exception:  # noqa: BLE001 - the page loaded, so its verdict stands
-        # Whatever arrived before the break is kept.
-        return b"".join(chunks), CUT_BY_ERROR
+        # Whatever arrived before the break is kept. A read stopped by the deadline was cut by time.
+        return b"".join(chunks), CUT_BY_TIME if time.monotonic() >= deadline else CUT_BY_ERROR
 
 
 def _fetch(
