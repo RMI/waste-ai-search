@@ -62,6 +62,9 @@ GAP_FILL_ATTRIBUTES = [
     "has_cover",
     "cover_types",
     "has_biocover",
+    # Asked of every site from 10 November 2026, at Carbon Mapper's request: open burning changes a
+    # dump's emissions. Review layer only, like operator: no upstream column yet.
+    "has_open_burning",
     "gccs_ch4_flared_metric_tonnes",
     "has_flare",
     "flare_efficiency",
@@ -269,7 +272,9 @@ REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
 VALUE_ATTRIBUTES = list(GAP_FILL_ATTRIBUTES)
 IDENTITY_VALUES = {*IDENTITY_ATTRIBUTES, *COORDINATE_ATTRIBUTES}
 
-BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover", "has_flare"}
+BOOLEAN_TARGET_ATTRIBUTES = {
+    "has_landfill_gas_collection", "has_cover", "has_biocover", "has_open_burning", "has_flare",
+}
 ARRAY_TARGET_ATTRIBUTES = {"cover_types", "gccs_energy_project_type", "gccs_current_project_status"}
 # Stored as a numeric array in the spec, so multiple project rows can collapse into one record.
 NUMERIC_ARRAY_TARGET_ATTRIBUTES = {"gccs_ch4_flow_to_project_metric_tonnes"}

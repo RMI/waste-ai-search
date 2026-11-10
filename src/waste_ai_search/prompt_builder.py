@@ -183,6 +183,15 @@ ATTRIBUTE_GUIDANCE = {
         "cover is NOT a biocover; answer No for those. Do not infer one from the mere presence "
         "of cover material."
     ),
+    # Asked from 10 November 2026, at Carbon Mapper's request. A fire is the usual evidence, and the
+    # status rule already keeps one from saying whether a site is still open.
+    "has_open_burning": (
+        "Whether waste is burned in the open at the site: set alight on purpose, to shrink it or "
+        "recover metal, or burning or smouldering in a fire in the dumped waste. Yes where a source "
+        "reports burning there, even one fire, with the date of the burning, not the article's, in "
+        "value_date. No only where a source says waste is not burned there; a ban on burning is not "
+        "a No. Not an incinerator, a flare or a gas engine. Yes, No, or Unknown."
+    ),
     "gccs_ch4_flared_metric_tonnes": (
         "Methane sent to flares. Report the source's original unit. If the source gives a gas "
         "VOLUME, say whether it is methane or raw landfill gas - raw landfill gas cannot be "

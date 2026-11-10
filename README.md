@@ -1081,6 +1081,13 @@ regulating, inspecting or visiting the site, hauling waste to it, building, clea
 it, or giving a figure is not its operator: in the 31 October Mexico tests, 12 operators were such
 bodies, among them the police at a fire and a town lending machinery for a clean-up.
 
+**Open burning is waste burned in the open at the site** (`has_open_burning`, asked of every site
+from 10 November 2026, at Carbon Mapper's request): set alight on purpose, to shrink it or recover
+metal, or burning or smouldering in a fire in the dumped waste. One fire a source reports is a Yes,
+dated by the burning rather than the article. No needs a source saying waste isn't burned there, and
+a ban on burning isn't one. An incinerator, a flare or a gas engine is not open burning. A fire still
+says nothing of whether the site is open (`facility_status`, above).
+
 **Containment decides between a sanitary landfill and a controlled dumpsite.** Compaction, soil
 cover and restricted access occur at both, so where no source says whether a site has a liner,
 leachate collection or groundwater monitoring, the agent chooses neither and leaves `facility_type`
@@ -1110,8 +1117,9 @@ the tests, a new cell's 6,000 m² of geomembrane was given as a site's area.
 | `has_cover` | boolean | — | `has_cover` |
 | `cover_types` | enum array | — | `cover_types` |
 | `has_biocover` | boolean | — | `has_biocover` |
+| `has_open_burning` ‡ | boolean | — | *none yet — review layer only* |
 
-‡ **Review-layer only: `operator`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
+‡ **Review-layer only: `operator`, `has_open_burning`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
 
 **Incoming waste counts municipal waste only,** as the standardized spec's "Municipal waste only"
 rule asks of every source: household and similar waste, which decomposes and generates methane.
