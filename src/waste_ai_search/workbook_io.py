@@ -197,8 +197,8 @@ REVIEW_INSTRUCTIONS = [
             "YOUR WORKLIST. Each row is a web page the search found for one of our sites. Your main "
             "job is to say whether the page is really about that site. Indented rows (↳) are values to "
             "check too: from low-tier pages (Tier 3-5), site type, closure year, incoming waste, area, "
-            "gas collection and collection efficiency; from any page, an operator the search wasn't "
-            "sure of. We trust the other values of high-tier pages (Tier 1-2)."
+            "gas collection and collection efficiency; from any page, an operator or owner the search "
+            "doubted. We trust the other values of high-tier pages (Tier 1-2)."
         ),
         "sme_action": (
             "Work down the sheet. The - and + at the far left fold or unfold the ↳ rows.\n"
@@ -249,8 +249,8 @@ REVIEW_INSTRUCTIONS = [
             "Every value the search found, one row per site, year, source and attribute. Every source "
             "is filed under the site that was searched, and status says what becomes of each value. "
             "SME review: it fills a field that is empty in our database, and loads once its source is "
-            "approved on Site_Review - a key value from a Tier 3-5 source, or an operator the search "
-            "inferred or found sources disagreeing on (value_check required), only once it is marked "
+            "approved on Site_Review - a key value from a Tier 3-5 source, or an operator or owner the "
+            "search inferred or found sources disagreeing on (value_check required), only once it is marked "
             "Correct too. not used: it confirms or would change a value we hold, its link is dead, it "
             "could not be converted or mapped, or it is a planned closure year that has passed. "
             "status_reason says why. review_id names the site-source pair, as on Site_Review. Once "

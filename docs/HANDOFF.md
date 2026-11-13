@@ -4,7 +4,7 @@ The state of the WasteMAP AI facility search at handover, 16 October 2026: what 
 
 ## What this is
 
-This repo fills gaps in WasteMAP facility data. For each landfill or dumpsite in `consolidation.consolidated_facility`, an Azure AI Foundry agent with Bing grounding searches the web for missing attributes: status, type, opening and closing years, waste quantities, operator, cover, gas collection and coordinates.
+This repo fills gaps in WasteMAP facility data. For each landfill or dumpsite in `consolidation.consolidated_facility`, an Azure AI Foundry agent with Bing grounding searches the web for missing attributes: status, type, opening and closing years, waste quantities, operator, owner, cover, open burning, gas collection and coordinates.
 
 Each found value must cite a source. The pipeline gives each source a credibility tier, from Tier 1 (regulator, permit) down to Tier 5 (unclassifiable), and arbitrates it against the existing database value. Values it trusts are auto-validated. The rest go to a review workbook that subject-matter experts (SMEs) work through in SharePoint.
 
