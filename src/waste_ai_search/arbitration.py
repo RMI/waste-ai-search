@@ -89,10 +89,10 @@ def comparable(value: Any, attribute_name: str = "") -> str:
 
 
 def same_value(a: Any, b: Any, attribute_name: str = "") -> bool:
-    """Whether two values agree: as comparable() reads them, or, for an operator, as two spellings
-    of one body's name (facility_names.same_operator). "PRO-FAJ Hidro Limpieza, SA de CV" and
-    "PRO-FAJ Hidro Limpieza S.A. de C.V." are one operator, not two sources disagreeing."""
-    if attribute_name == "operator":
+    """Whether two values agree: as comparable() reads them, or, for an operator or owner, as two
+    spellings of one body's name (facility_names.same_operator). "PRO-FAJ Hidro Limpieza, SA de CV"
+    and "PRO-FAJ Hidro Limpieza S.A. de C.V." are one operator, not two sources disagreeing."""
+    if attribute_name in ("operator", "owner"):
         return same_operator(normalize_scalar(a), normalize_scalar(b))
     return comparable(a, attribute_name) == comparable(b, attribute_name)
 

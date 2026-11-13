@@ -1081,6 +1081,13 @@ regulating, inspecting or visiting the site, hauling waste to it, building, clea
 it, or giving a figure is not its operator: in the 31 October Mexico tests, 12 operators were such
 bodies, among them the police at a fire and a town lending machinery for a clean-up.
 
+**The owner is the body a source says owns the site** (`owner`, asked of every site from 13 November
+2026, at Carbon Mapper's request), often the municipality or state a company runs it for. It is
+written as the operator is, by its full name, and isn't the operator unless the source says that
+body owns the site too. An owner of the land beside it, or of a company that runs it, isn't its
+owner. Two spellings of one owner's name are one value, and an owner the agent worked out rather
+than read gets a ↳ row of its own, as an operator does.
+
 **Open burning is waste burned in the open at the site** (`has_open_burning`, asked of every site
 from 10 November 2026, at Carbon Mapper's request): set alight on purpose, to shrink it or recover
 metal, or burning or smouldering in a fire in the dumped waste. One fire a source reports is a Yes,
@@ -1107,6 +1114,7 @@ the tests, a new cell's 6,000 m² of geomembrane was given as a site's area.
 | `facility_status` | enum | — | `facility_status` |
 | `facility_type` | enum | — | `facility_type` |
 | `operator` ‡ | text | — | *none yet — review layer only* |
+| `owner` ‡ | text | — | *none yet — review layer only* |
 | `opening_year` | integer year | `year` | `opening_year` |
 | `closing_year` | integer year | `year` | `closing_year` |
 | `has_landfill_gas_collection` | boolean | — | `has_landfill_gas_collection` |
@@ -1119,7 +1127,7 @@ the tests, a new cell's 6,000 m² of geomembrane was given as a site's area.
 | `has_biocover` | boolean | — | `has_biocover` |
 | `has_open_burning` ‡ | boolean | — | *none yet — review layer only* |
 
-‡ **Review-layer only: `operator`, `has_open_burning`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
+‡ **Review-layer only: `operator`, `owner`, `has_open_burning`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
 
 **Incoming waste counts municipal waste only,** as the standardized spec's "Municipal waste only"
 rule asks of every source: household and similar waste, which decomposes and generates methane.
@@ -1411,8 +1419,8 @@ with flags come first, then the best tier. An empty tab means nothing needs you.
 
 **↳ rows.** Under a Tier 3–5 source, an indented ↳ row for each key value it would load: site type,
 closure year, incoming waste, area, gas collection and collection efficiency. Under a source of any
-tier, one for an operator the search worked out rather than read, or found sources disagreeing on
-(`value_basis` Inferred or Conflicting). Check each against the page and mark it Correct or Wrong: it
+tier, one for an operator or owner the search worked out rather than read, or found sources
+disagreeing on (`value_basis` Inferred or Conflicting). Check each against the page and mark it Correct or Wrong: it
 loads only once marked Correct, and only with its source. A source giving only one such value has no
 ↳ row: its own row checks the value too (see Decide).
 
@@ -1450,7 +1458,7 @@ approving it would do.
 | we also hold X in T: check the page is about this site | Another of our sites is in the same municipality. A page naming the site only by its town could be about either; the agent takes such a page for ours only where we hold no other site in the town. Look for the page's name, place or history. |
 | the source names no facility | The source gives no name for the facility it describes. Check that it is about one facility, and that it is ours. |
 | says Not a Waste Facility | Approving loads that verdict. Check the source says the site was never a waste site: a closed landfill still is one. Where the run also found the site closed, the flag says so. |
-| a Tier N source here gives `attribute = value`; if both are approved, that one loads (or this one loads) | Another source on this tab gives a different value for the same field and year. One value loads, the best tier first, so the flag says which would if you approve both. If you think the one that loses is right, say so in `notes`. Two spellings of one operator's name are not different values: names are compared without small words, legal forms such as "S.A. de C.V.", a council's "H." and its years, so "H. Ayuntamiento de Tixkokob 2024-2027" and "Ayuntamiento de Tixkokob" are one operator. So are two names where one's words are all in the other, and a name and its bracketed acronym. |
+| a Tier N source here gives `attribute = value`; if both are approved, that one loads (or this one loads) | Another source on this tab gives a different value for the same field and year. One value loads, the best tier first, so the flag says which would if you approve both. If you think the one that loses is right, say so in `notes`. Two spellings of one operator's or owner's name are not different values: names are compared without small words, legal forms such as "S.A. de C.V.", a council's "H." and its years, so "H. Ayuntamiento de Tixkokob 2024-2027" and "Ayuntamiento de Tixkokob" are one operator. So are two names where one's words are all in the other, and a name and its bracketed acronym. |
 
 **Source links.** `source_url` is clickable, and shows the URL exactly as the source gave it. The
 link behind it is made safe (spaces and accented characters encoded), so it opens even when the

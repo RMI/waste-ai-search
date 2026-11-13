@@ -7,7 +7,7 @@ each source is about our site, whatever its tier: the tab has one row per site-s
 (found_values.py) with values that would load, grouped by our site, with the pairs that carry a flag
 first. A Tier 1-2 source's values are trusted as read. Under a Tier 3-5 pair comes one row per key
 value (schema.VALUE_CHECKED_ATTRIBUTES) it would load, for the SME to check against the page, and
-under a pair of any tier one for an operator the agent marked Inferred or Conflicting
+under a pair of any tier one for an operator or owner the agent marked Inferred or Conflicting
 (found_values.needs_value_check).
 
 A source row shows our site, the source, what the source says of the facility it describes and
@@ -316,7 +316,7 @@ def rival_flag(row: dict[str, Any], loading: dict[tuple[str, str, Any], list[dic
     """Where another source on the tab gives a different value for what this one would fill. One
     value loads per site, attribute and year, picked by tier first, so the SME is told which loads if
     both sources are approved. Blank where no other source disagrees; two spellings of one operator's
-    name don't (arbitration.same_value).
+    or owner's name don't (arbitration.same_value).
 
     `loading` is every value that would load, by arbitration.decision_key.
     """

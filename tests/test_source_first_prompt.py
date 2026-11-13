@@ -340,10 +340,10 @@ def test_the_prompt_stays_compact():
     """About as long as the attribute-first prompt it replaced (16.5k characters for this site).
     Raised from 18,500 to 19,000 on 30 October 2026 for the rule on a town's other sites, and from
     19,000 to 20,600 on 1 November 2026 for the rules added before batch 3, and from 20,600 to
-    21,200 on 10 November 2026 for has_open_burning (21,024 now). Thunder Bay has none of our sites
-    near it: where a site has, the first named adds about 210 characters and each further one about
-    65, so ten add about 900."""
-    assert len(prompt_for(THUNDER_BAY)) < 21_200
+    21,700 on 13 November 2026 for has_open_burning and owner (21,505 now). Thunder Bay has none of
+    our sites near it: where a site has, the first named adds about 210 characters and each further
+    one about 65, so ten add about 900."""
+    assert len(prompt_for(THUNDER_BAY)) < 21_700
     assert not re.search(r"\n{4,}", prompt_for(THUNDER_BAY))
 
 

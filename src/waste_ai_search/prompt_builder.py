@@ -135,6 +135,15 @@ ATTRIBUTE_GUIDANCE = {
         "closing it, or giving a figure. Text only; if a concession changed hands, give the "
         "operator for the source's value_date."
     ),
+    # Asked from 13 November 2026, at Carbon Mapper's request. Often a municipality or state that a
+    # company runs the site for, so the operator is not taken for it.
+    "owner": (
+        "The organisation the source says owns the facility - often the municipality or state a "
+        "company runs it for - by its full name as the source writes it, never a description. Not "
+        "the operator unless the source says it owns the site too, and not a body named only for "
+        "owning the land beside it or a company that runs it. Text only; if ownership changed, "
+        "give the owner for the source's value_date."
+    ),
     "opening_year": (
         "Four-digit year the facility first accepted waste. Not the date of a permit or licence, "
         "or of a later stage, cell or extension opening."

@@ -344,7 +344,7 @@ def read_value_rows(workbook: Path) -> set[tuple[str, str]]:
 def checked_value(row: dict[str, Any]) -> bool:
     """Whether a found value is one an SME checks on its own row (found_values.needs_value_check), so
     loads only with an SME's Correct, or corrected value, there: a key value from a Tier 3-5 pair, or
-    an operator the agent marked Inferred or Conflicting. Worked out again from the row, rather than
+    an operator or owner the agent marked Inferred or Conflicting. Worked out again from the row, rather than
     read from its value_check, so a value weighed again under Different site needs one too."""
     tier = TIER_BY_LABEL.get(normalize_scalar(row.get("source_tier")), TIER_5)
     return needs_value_check(row.get("attribute_name"), tier, row.get("value_basis")) and row.get("status") != AUTO_APPROVED
