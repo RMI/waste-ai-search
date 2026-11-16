@@ -417,8 +417,86 @@ def test_the_listing_names_every_site_a_batch_would_skip():
         ("Northern dump", "Отвал Северный", MINING),  # the translation hid it; the original didn't
         ("Waste heap", "Відвал шахти 5", MINING),
         ("Northern dump", "Свалка Северная", NAMED),  # свалка is a household-waste dump: kept
-        ("Polygon TBO", "", NAMED),
+        ("Polygon TBO", "", GENERIC),  # полигон ТБО, "MSW landfill", transliterated
+        ("Halde 186", "", MINING),  # a German mining heap
+        ("Eduardschachthalde", "", MINING),
+        ("Kaliberg", "", MINING),  # a potash tip
+        ("Former rubbish dump/gravel pit", "ehem. Müllhalde/Kiesgrube", NAMED),  # a rubbish heap isn't mining
+        ("Pasha", "pasa", MINING),  # Turkish mine waste, machine-translated
     ],
 )
 def test_the_original_name_is_checked_for_mining_words(name, original, expected):
     assert name_class(name, original) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "original", "expected"),
+    [
+        # Batch 4: Russian names, as OSM's mappers wrote and machine translation rendered them.
+        ("MSW landfill", "Полигон ТКО", GENERIC),
+        ("Spontaneous dump", "Стихийная свалка", GENERIC),
+        ("Former landfill", "Бывшая свалка", GENERIC),
+        ("Landfill(inactive)", "Свалка(недейств.)", GENERIC),
+        ("MSW landfill (CLOSED)", "Полигон ТБО ( ЗАКРЫТ)", GENERIC),
+        ("Woodworking waste", "Отходы деревообработки", GENERIC),
+        ("Litter storage", "Пометохранилище", GENERIC),  # poultry manure
+        ("Unauthorized landfill", "Несанкционированная свалка", GENERIC),
+        ("Map 4", "4-я карта", NOT_A_NAME),
+        ("Section No1", "секция №1", NOT_A_NAME),
+        ("clarify what exactly it is", "", NOT_A_NAME),
+        ("And what is being recycled here, garbage into garbage?", "", NOT_A_NAME),
+        ("L", "л", NOT_A_NAME),
+        ("проспект Тракторостроителей", "", NOT_A_NAME),
+        ("Самарское шоссе", "", NOT_A_NAME),
+        ("Solid waste landfill \"Yadrovo\"", "Полигон ТБО \"Ядрово\"", NAMED),
+        ("Tula City Landfill", "Тульская городская свалка", NAMED),
+        ("Rostovsky village", "с/п Ростовский", NAMED),
+        ("Михайловка", "", NAMED),  # a village: a place to search by
+        ("Central landfill", "Центральная свалка", NAMED),  # says which one
+        # Turkish
+        ("Solid Waste Facility", "Katı Atık Tesisi", GENERIC),
+        ("Fill Area", "Dolgu Alanı", GENERIC),
+        ("Waste Storage Area", "Atık Depolama Alanı", GENERIC),
+        ("Sivas Garbage Collection Center", "Sivas Çöp Toplama Merkezi", NAMED),
+        # German, translated or not
+        ("Excavated landfill", "Erdaushubdeponie", GENERIC),
+        ("ehem. Deponie", "", GENERIC),
+        ("Erdmassendeponie", "", GENERIC),
+        ("Städt. Deponie", "", GENERIC),
+        ("Wertstoffhof", "", GENERIC),
+        ("Deponie Brandholz", "", NAMED),
+        ("Bauschuttdeponie Hemau", "", NAMED),
+        ("Landfill East", "Mülldeponie Ost", NAMED),
+    ],
+)
+def test_batch_4s_names_are_sorted_like_batch_3s(name, original, expected):
+    assert name_class(name, original) == expected
+
+
+def test_a_site_known_not_to_be_municipal_is_skipped_whatever_its_name():
+    """Ingestion #379's reviewers found mine dumps and sludge fields among OSM's landfills; our seed
+    may also type a site so. A municipal-waste model leaves them out, so searching them is wasted."""
+    from waste_ai_search.searchable_names import NOT_MUNICIPAL, skip_not_municipal
+
+    sites = [
+        {"site_id": "12123", "site_name": "Preobrazhenka", "country_iso3": "RUS"},
+        {"site_id": "2", "site_name": "Some Slag Heap Landfill", "country_iso3": "DEU", "facility_type": "Non-Municipal Waste Landfill"},
+        {"site_id": "3", "site_name": "Coal yard", "country_iso3": "CHN", "facility_type": "Not a Waste Facility"},
+        {"site_id": "4", "site_name": "Kirov landfill", "country_iso3": "RUS", "facility_type": "Dumpsite"},
+    ]
+    kept, skipped = skip_not_municipal(sites, reviewed={"12123": "Non-Municipal Waste Landfill"})
+    assert [site["site_id"] for site in kept] == ["4"]
+    assert [(row["site_id"], row["name_class"]) for row in skipped] == [
+        ("12123", NOT_MUNICIPAL), ("2", NOT_MUNICIPAL), ("3", NOT_MUNICIPAL),
+    ]
+    assert skipped[0]["reason"] == "reviewed as Non-Municipal Waste Landfill (data/not_municipal_sites.csv)"
+    assert skipped[1]["reason"] == "our seed types it Non-Municipal Waste Landfill"
+
+
+def test_the_reviewed_list_holds_ingestion_379s_non_municipal_sites():
+    from waste_ai_search.searchable_names import reviewed_not_municipal
+
+    reviewed = reviewed_not_municipal()
+    assert reviewed["12123"] == "Non-Municipal Waste Landfill"  # Samara's sewage sludge fields
+    assert reviewed["13128"] == "Not a Waste Facility"
+    assert set(reviewed.values()) == {"Non-Municipal Waste Landfill", "Not a Waste Facility"}

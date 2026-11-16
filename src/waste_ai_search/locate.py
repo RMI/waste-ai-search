@@ -845,26 +845,45 @@ class NominatimGeocoder:
                     self.sleep(delay)
             self._last = self.clock()
 
+    # A timed-out or refused (429) request is tried again after these pauses, in seconds. The public
+    # instance does both now and then; unretried, one stopped a 47-site batch 4 practice run while
+    # it looked up our other sites' towns, before anything was searched (16 November 2026).
+    RETRY_PAUSES = (5.0, 20.0, 60.0)
+
+    def _get(self, path: str, params: dict[str, Any]) -> Any:
+        """GET a Nominatim endpoint at one request a second, retrying a timeout, a dropped
+        connection or a 429 (RETRY_PAUSES). Any other failure is raised at once."""
+        import requests
+
+        for pause in (*self.RETRY_PAUSES, None):
+            self._wait()
+            try:
+                response = self.session.get(
+                    f"{self.url}/{path}", params=params, headers={"User-Agent": self.user_agent}, timeout=self.timeout
+                )
+                if getattr(response, "status_code", 200) == 429 and pause is not None:
+                    self.sleep(pause)
+                    continue
+                response.raise_for_status()
+                return response
+            except (requests.Timeout, requests.ConnectionError):
+                if pause is None:
+                    raise
+                self.sleep(pause)
+        raise AssertionError("unreachable")
+
     def geocode(self, address: str, iso2: str) -> GeocodeMatch | None:
         params: dict[str, Any] = {"q": address, "format": "jsonv2", "addressdetails": 1, "limit": 1}
         if iso2:
             params["countrycodes"] = iso2.lower()
-        self._wait()
-        response = self.session.get(
-            f"{self.url}/search", params=params, headers={"User-Agent": self.user_agent}, timeout=self.timeout
-        )
-        response.raise_for_status()
+        response = self._get("search", params)
         results = response.json() or []
         return nominatim_match(results[0]) if results else None
 
     def reverse(self, latitude: float, longitude: float) -> dict[str, str]:
         """The municipality and state a point is in (nominatim_place), or {} where it finds none."""
         params = {"lat": latitude, "lon": longitude, "format": "jsonv2", "zoom": 10, "addressdetails": 1}
-        self._wait()
-        response = self.session.get(
-            f"{self.url}/reverse", params=params, headers={"User-Agent": self.user_agent}, timeout=self.timeout
-        )
-        response.raise_for_status()
+        response = self._get("reverse", params)
         return nominatim_place((response.json() or {}).get("address") or {})
 
     def state(self, text: str, iso2: str) -> str:
@@ -873,11 +892,7 @@ class NominatimGeocoder:
         params: dict[str, Any] = {"q": text, "format": "jsonv2", "limit": 1, "featureType": "state"}
         if iso2:
             params["countrycodes"] = iso2.lower()
-        self._wait()
-        response = self.session.get(
-            f"{self.url}/search", params=params, headers={"User-Agent": self.user_agent}, timeout=self.timeout
-        )
-        response.raise_for_status()
+        response = self._get("search", params)
         results = response.json() or []
         return normalize_scalar(results[0].get("name")) if results else ""
 

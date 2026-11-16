@@ -1112,3 +1112,54 @@ def test_a_nominatim_match_keeps_the_state_it_is_in():
               "place_rank": 26, "address": {"road": "El Zarco", "county": "Ecatepec de Morelos", "state": "Estado de México"}}
     assert nominatim_match(result).state == "Estado de México"
     assert nominatim_match({**result, "address": {}}).state == ""
+
+
+def test_nominatim_tries_a_timed_out_or_refused_request_again():
+    """One timeout stopped a batch 4 practice run before it searched anything (16 November 2026)."""
+    import requests
+
+    from waste_ai_search.locate import NominatimGeocoder
+
+    class Response:
+        def __init__(self, status, body):
+            self.status_code, self.body = status, body
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError(str(self.status_code))
+
+        def json(self):
+            return self.body
+
+    answers = [requests.Timeout("slow"), Response(429, {}), Response(200, {"address": {"city": "Samara", "state": "Samara Oblast"}})]
+
+    class Session:
+        calls = 0
+
+        def get(self, *args, **kwargs):
+            Session.calls += 1
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    pauses = []
+    geocoder = NominatimGeocoder(session=Session(), sleep=pauses.append, min_interval=0)
+    assert geocoder.reverse(53.2, 50.1)["municipality"] == "Samara"
+    assert Session.calls == 3
+    assert pauses[:2] == [5.0, 20.0]
+
+
+def test_nominatim_gives_up_after_its_retries():
+    import pytest
+    import requests
+
+    from waste_ai_search.locate import NominatimGeocoder
+
+    class Session:
+        def get(self, *args, **kwargs):
+            raise requests.Timeout("slow")
+
+    geocoder = NominatimGeocoder(session=Session(), sleep=lambda _: None, min_interval=0)
+    with pytest.raises(requests.Timeout):
+        geocoder.reverse(53.2, 50.1)

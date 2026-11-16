@@ -64,6 +64,7 @@ from .searchable_names import (
     SKIPPED_SITES_FILE,
     class_breakdown,
     record_skips,
+    skip_not_municipal,
     skip_unsearchable_names,
 )
 
@@ -140,12 +141,24 @@ def choose_sites(
     # have searched. Listing site ids names each site, so it wins; naming a country with --iso3
     # does not name its unnamed sites, so it doesn't.
     skipped: list[dict[str, Any]] = []
-    if not config.site_ids and not config.include_unsearchable_names:
-        selected, skipped = skip_unsearchable_names(selected)
-        if skipped:
+    if not config.site_ids:
+        # Sites known not to be municipal waste sites. Listing their ids still searches them. After
+        # the check above, like the name rule, so it lists only sites that would have been searched.
+        selected, not_municipal = skip_not_municipal(selected)
+        skipped.extend(not_municipal)
+        if not_municipal:
             print(
-                f"Skipped {len(skipped):,} site(s) whose name gives a search nothing to look for "
-                f"({class_breakdown([row['name_class'] for row in skipped])}; "
+                f"Skipped {len(not_municipal):,} site(s) known not to be municipal waste sites "
+                "(typed Non-Municipal Waste Landfill or Not a Waste Facility, by our seed or "
+                "data/not_municipal_sites.csv)."
+            )
+    if not config.site_ids and not config.include_unsearchable_names:
+        selected, by_name = skip_unsearchable_names(selected)
+        skipped.extend(by_name)
+        if by_name:
+            print(
+                f"Skipped {len(by_name):,} site(s) whose name gives a search nothing to look for "
+                f"({class_breakdown([row['name_class'] for row in by_name])}; "
                 "pass --include-unsearchable-names to search them)."
             )
     if config.batch:
@@ -159,6 +172,13 @@ def choose_sites(
         selected = [site for site in selected if (incoming_tonnes(site) or 0) >= config.min_tonnes]
         ids = " ".join(normalize_scalar(site.get("site_id")) for site in selected)
         print(f"Taking {config.min_tonnes:,.0f} t a year or more: {len(selected):,} site(s){': ' + ids if ids else '.'}")
+    if config.min_area_ha > 0:
+        # As --min-tonnes, by footprint: batch 4 has almost no tonnages, and in its practice runs a
+        # site's area predicted its pages as tonnage did in Mexico's. A site with no area isn't
+        # known to be large.
+        selected = [site for site in selected if (area_hectares(site) or 0) >= config.min_area_ha]
+        ids = " ".join(normalize_scalar(site.get("site_id")) for site in selected)
+        print(f"Taking {config.min_area_ha:,.0f} ha or more: {len(selected):,} site(s){': ' + ids if ids else '.'}")
 
     if config.pilot_size > 0:
         return select_mixed_pilot(selected, size=config.pilot_size), skipped
@@ -171,6 +191,14 @@ def incoming_tonnes(site: dict[str, Any]) -> float | None:
     """The waste a year our seed says a site takes, in tonnes, or None where it says nothing."""
     try:
         return float(normalize_scalar(site.get("annual_incoming_waste_metric_tonnes")).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def area_hectares(site: dict[str, Any]) -> float | None:
+    """The footprint our seed gives a site, in hectares, or None where it gives none."""
+    try:
+        return float(normalize_scalar(site.get("area_square_meters")).replace(",", "")) / 10_000
     except ValueError:
         return None
 

@@ -29,7 +29,8 @@ from typing import Any
 
 from .input_loader import write_csv_records
 from .pilot_selector import GENERIC_EXACT_NAMES, is_generic_site_name
-from .schema import normalize_scalar
+from .run_context import tool_root
+from .schema import NON_MUNICIPAL_LANDFILL, NOT_A_WASTE_FACILITY, normalize_scalar
 
 
 NO_NAME = "no name"
@@ -38,7 +39,10 @@ GENERIC = "generic label"
 MINING = "mining feature"
 ADDRESS = "address only"
 NAMED = "named"
-NAME_CLASSES = [NO_NAME, NOT_A_NAME, GENERIC, MINING, ADDRESS, NAMED]
+# Not a name class: a site we already know isn't a municipal waste site, whatever it's called.
+# Skipped by skip_not_municipal and listed in skipped_sites.csv beside the name classes.
+NOT_MUNICIPAL = "not municipal"
+NAME_CLASSES = [NO_NAME, NOT_A_NAME, GENERIC, MINING, ADDRESS, NOT_MUNICIPAL, NAMED]
 # Not searched by default (Hugh, 20 October 2026; address only, 4 November 2026): none of them
 # gives a search anything to look for. --site-ids and --include-unsearchable-names search them anyway.
 SKIPPED_NAME_CLASSES = [NO_NAME, NOT_A_NAME, GENERIC, MINING, ADDRESS]
@@ -55,8 +59,18 @@ SKIPPED_SITES_HEADERS = ["site_id", "site_name", "original_site_name", "country_
 PLACEHOLDER_NAMES = {"openstreetmap landfill"}
 # A name that says the site has none, as 4 Mexican sites are named.
 NO_NAME_PHRASES = {"no name", "noname", "unnamed", "sin nombre"}
-# Text from OSM's fixme-style tags, e.g. "update the tag landuse after survey".
-SURVEY_NOTE_PHRASES = ("update the tag", "after survey", "fixme")
+# Text from OSM's fixme-style tags, e.g. "update the tag landuse after survey", and a mapper's notes
+# to themselves, as Russian OSM names hold ("clarify what exactly it is", "Not valid").
+SURVEY_NOTE_PHRASES = (
+    "update the tag", "after survey", "fixme",
+    "clarify", "looks like", "not valid", "incomprehensible", "no longer in use", "what is being",
+)
+# One letter ("L", from л).
+SINGLE_CHARACTER = re.compile(r"^\w$")
+# A numbered part of some site, never which site: "Map 4" (4-я карта), "Section No1" (секция №1).
+NUMBERED_PART = re.compile(r"^(?:map|section|cell|card)\s*(?:no\.?|№|#)?\s*\d+$", re.IGNORECASE)
+# A street, which says where a point is and names no site: "проспект Тракторостроителей".
+STREET_WORDS = re.compile(r"(проспект|шоссе|улица|переулок|\bул\.)", re.IGNORECASE)
 URL = re.compile(r"(https?://|www\.)", re.IGNORECASE)
 # Digits and separators only, e.g. "4000" or "12/3".
 NUMBER = re.compile(r"^[\d\s.,;:/#№-]+$")
@@ -69,7 +83,13 @@ MINING_WORDS = re.compile(
     r"\b(blades?|terrikons?|overburden|spoil|slag|gangue|waste rock|tailings (?:ponds?|dams?|storage))\b",
     re.IGNORECASE,
 )
-MINING_ORIGINAL_WORDS = re.compile(r"(отвал|террикон|терикон|відвал|хвостохранилищ|хвостосховищ)", re.IGNORECASE)
+# German Halde (a mining heap: "Halde 311", "Eduardschachthalde", but not a Müllhalde, a rubbish
+# heap) and its potash tips ("Kaliberg",
+# "Kalimandscharo"), and Turkish pasa (mine waste, which machine translation makes "Pasha").
+MINING_ORIGINAL_WORDS = re.compile(
+    r"(отвал|террикон|терикон|відвал|хвостохранилищ|хвостосховищ|(?<!müll)halde\b|^kaliberg$|^kalima[n]?d?scharo$|^pasa$|erzhalde)",
+    re.IGNORECASE,
+)
 
 
 def name_reason(name: Any, original_name: Any = "") -> tuple[str, str]:
@@ -79,8 +99,9 @@ def name_reason(name: Any, original_name: Any = "") -> tuple[str, str]:
     it differs. The mining check reads both. Where the English name is empty or filler, a source
     spelling that is itself named keeps the site named: the translation lost a name the source
     recorded, and the agent searches that spelling first. The generic check reads only the English
-    name: it knows only English and Spanish words, so it would pass a generic original such as
-    `Полигон ТБО` ("MSW landfill") as named.
+    name. It knows English and Spanish words, and the German and Russian ones a name that reached us
+    untranslated uses ("ehem. Deponie", "Бывшая свалка"); an original's own words, such as Turkish
+    ones, are left to its translation.
     """
     text = normalize_scalar(name)
     lowered = text.casefold()
@@ -99,12 +120,18 @@ def name_reason(name: Any, original_name: Any = "") -> tuple[str, str]:
         return NOT_A_NAME, "a URL"
     if NUMBER.match(text):
         return NOT_A_NAME, "a bare number"
-    if any(phrase in lowered for phrase in SURVEY_NOTE_PHRASES):
+    if any(phrase in lowered for phrase in SURVEY_NOTE_PHRASES) or "?" in text:
         return NOT_A_NAME, "a survey note"
+    if SINGLE_CHARACTER.match(text):
+        return NOT_A_NAME, "a single letter"
+    if NUMBERED_PART.match(text):
+        return NOT_A_NAME, "a numbered part of a site, such as Map 4"
+    if STREET_WORDS.search(text):
+        return NOT_A_NAME, "a street"
     if MINING_WORDS.search(text):
         return MINING, "a mining word (blade, terrikon, overburden, spoil, slag, tailings pond)"
-    if MINING_ORIGINAL_WORDS.search(normalize_scalar(original_name)):
-        return MINING, "a mining word in the original name (отвал, террикон, відвал)"
+    if MINING_ORIGINAL_WORDS.search(normalize_scalar(original_name)) or MINING_ORIGINAL_WORDS.search(text):
+        return MINING, "a mining word in the original name (отвал, террикон, відвал, Halde, pasa)"
     if is_generic_site_name(text):
         if text.lower().strip() in GENERIC_EXACT_NAMES:
             return GENERIC, "a listed generic phrase"
@@ -145,6 +172,53 @@ def skip_unsearchable_names(sites: list[dict[str, Any]]) -> tuple[list[dict[str,
                 for key in ("site_id", "site_name", "original_site_name", "country_iso3")
             },
             "name_class": cls,
+            "reason": reason,
+        })
+    return kept, skipped
+
+
+# Sites a person has checked and found aren't municipal waste sites (mine and slag dumps, sludge
+# fields, coal yards), by WasteMAP ID. Read from ingestion's manual entries
+# (manual_entry_facilities.csv on RMI/waste_data_ingestion_pipeline#379) before the database is
+# rebuilt with them; once it is, the seed's own facility_type says the same.
+NOT_MUNICIPAL_SITES_FILE = tool_root() / "data" / "not_municipal_sites.csv"
+NOT_MUNICIPAL_TYPES = {NON_MUNICIPAL_LANDFILL, NOT_A_WASTE_FACILITY}
+
+
+def reviewed_not_municipal(path: Path = NOT_MUNICIPAL_SITES_FILE) -> dict[str, str]:
+    """{WasteMAP ID: the type a reviewer gave it} for each site in the hand-reviewed list."""
+    if not path.exists():
+        return {}
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return {normalize_scalar(row["wastemap_id"]): normalize_scalar(row["facility_type"]) for row in csv.DictReader(handle)}
+
+
+def skip_not_municipal(
+    sites: list[dict[str, Any]], reviewed: dict[str, str] | None = None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(the sites to search, a skipped_sites.csv row for each site that isn't a municipal waste
+    site): our seed types it a Non-Municipal Waste Landfill or Not a Waste Facility, or a reviewer
+    did (data/not_municipal_sites.csv). A municipal-waste model leaves these sites out, so nothing
+    the search finds about them is used, and searching a mine dump can only load a municipal value
+    onto it."""
+    reviewed = reviewed_not_municipal() if reviewed is None else reviewed
+    kept, skipped = [], []
+    for site in sites:
+        site_id = normalize_scalar(site.get("site_id"))
+        ours = normalize_scalar(site.get("facility_type"))
+        if ours in NOT_MUNICIPAL_TYPES:
+            reason = f"our seed types it {ours}"
+        elif site_id in reviewed:
+            reason = f"reviewed as {reviewed[site_id]} (data/not_municipal_sites.csv)"
+        else:
+            kept.append(site)
+            continue
+        skipped.append({
+            **{
+                key: normalize_scalar(site.get(key))
+                for key in ("site_id", "site_name", "original_site_name", "country_iso3")
+            },
+            "name_class": NOT_MUNICIPAL,
             "reason": reason,
         })
     return kept, skipped

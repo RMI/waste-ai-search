@@ -248,7 +248,7 @@ def test_the_batch_summary_counts_after_default_exclusions(capsys):
     from waste_ai_search.run_context import PipelineConfig
     from waste_ai_search.search import select_sites
 
-    sites = [{"site_id": str(i), "site_name": "S", "country_iso3": iso3, "latitude": "1", "longitude": "1"}
+    sites = [{"site_id": str(i), "site_name": "Salta", "country_iso3": iso3, "latitude": "1", "longitude": "1"}
              for i, iso3 in enumerate(["USA", "USA", "ARG"])]
     select_sites(sites, PipelineConfig(input_csv=None, run_dir=Path("r"), run_id="t", batch=6))
     assert "Batch 6: 1 site(s) in 1 country(ies)." in capsys.readouterr().out

@@ -903,6 +903,36 @@ AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search run \
   never came across, not ones it ran out of searches for, and where no model found anything, each
   had confirmed the town and found no page about a dump there.
 
+**Batch 4 (Germany, Russia, Turkey) takes the large sites by area instead.** Its seed gives a
+tonnage for 3 of its 727 sites, so `--min-area-ha 20` takes the 169 whose footprint is 20 ha or
+more (128 in Germany, 33 in Russia, 8 in Turkey). In the 16 November 2026 practice runs on 47 of its
+sites, all with Terra and all with Sol, area predicted pages as tonnage did in Mexico: pages at 12
+of 14 sites over 20 ha for Terra, at 3 of 14 under 5 ha. On the sites over 20 ha, Sol added 30
+pages to Terra's 27, the two sharing 6; under 5 ha it added 5. Sol's pages were weaker on the
+automatic checks (its quotes found on the page 71% of the time against Terra's 86%; values it
+inferred 37% against 26%), and nobody has judged them blind yet. Terra cost $0.28 a site and Sol
+$0.41, so the batch is about $205 with Terra and $70 more with Sol on the large sites.
+
+```bash
+uv run python scripts/fill_place_cache.py --batch 4 --input-csv outputs/runs/batch4-seed/seed.csv
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search search \
+  --run-id batch4 --batch 4 --workers 3
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search \
+  --run-id batch4 --batch 4 --min-area-ha 20 --pass-label sol --workers 3
+uv run waste-ai-search check-links --run-id batch4 --retry-unverified
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search run \
+  --run-id batch4 --batch 4 --workers 3
+```
+
+- The first command fills `data/geocode_cache.jsonl` with the towns of the batch's sites and of
+  our other sites within 60 km of them, slowly (one request every 2 seconds, and pauses of up to
+  15 minutes when refused), before any search. The searches then need none. Each prompt names our
+  other sites nearby, and in Germany 47 sites have 578 of them. Two practice runs looking them up at
+  once had Nominatim refuse every request for over an hour. It resumes where it stopped.
+- Seed the run from the database, so its seed carries WasteMAP IDs and the run keeps a snapshot:
+  copy `outputs/runs/batch4-seed` to `outputs/runs/batch4` to use the 16 November seed the counts
+  here come from, or leave it out to seed afresh.
+
 ### What is actually searched — read this before a full run
 
 Four rules narrow the search. The first three mean a full run queries **12,392 of 15,537
@@ -986,9 +1016,9 @@ facility nearby. Five classes of name are skipped
 | Class | What it is | Examples |
 |---|---|---|
 | No name | An empty name, the filler ingestion gives an OSM polygon with no name, or a name saying there is none, unless the source's own spelling is a name | `OpenStreetMap Landfill`, `NO NAME` |
-| Not a name | A URL, a bare number or a survey note that ended up as the name | `update the tag landuse after survey`, `4000` |
-| Generic label | Only says what kind of site it is (`is_generic_site_name`), in English or Spanish. Initials and route codes count as a name: `K & W Landfill` and `SR 85 Landfill` are searched | `domestic landfill`, `Municipal Landfill`, `Landfill II`, `Basurero Municipal`, `Relleno Sanitario Tipo C` |
-| Mining feature | A spoil heap or similar, matched in the English name or the original (отвал, террикон, відвал) | `Overburden Blade`, `Terrikon` |
+| Not a name | A URL, a bare number, a survey or mapper's note, a single letter, a numbered part of a site, or a street that ended up as the name | `update the tag landuse after survey`, `4000`, `clarify what exactly it is`, `Map 4`, `проспект Тракторостроителей` |
+| Generic label | Only says what kind of site it is (`is_generic_site_name`), in English or Spanish, or in German or Russian where a name reached us untranslated. Words for a site's state or what it held count as kind, not name. Initials and route codes count as a name: `K & W Landfill` and `SR 85 Landfill` are searched | `domestic landfill`, `Municipal Landfill`, `Landfill II`, `Basurero Municipal`, `Relleno Sanitario Tipo C`, `MSW landfill`, `Former landfill`, `Woodworking waste`, `ehem. Deponie`, `Solid Waste Facility` |
+| Mining feature | A spoil heap or similar, matched in the English name or the original (отвал, террикон, відвал, German Halde but not Müllhalde, potash tips, Turkish pasa) | `Overburden Blade`, `Terrikon`, `Halde 311`, `Kaliberg` |
 | Address only | A site only Global Plastic Watch records (`contributing_data_sources` is `gpw_2021`). It maps sites from satellite images and names none; the name is an address worked out from the point. Skipped from 4 November 2026: 662 sites in batch 2, 70 in batch 4, 420 in batch 5, 468 in the last batch, none in batch 3 | `Nông Cống District, Thanh Hoa province, Vietnam` |
 
 Nothing in the database changes: a skipped site stays in WasteMAP and Climate TRACE. It just isn't
@@ -996,7 +1026,19 @@ web-searched until it has a name worth searching for. Words that only describe t
 such as municipal, sanitary, controlled, open-air and final disposal, don't count as a name:
 `Sanitary Landfill` and `Controlled Landfill` are skipped, `North Landfill` is searched. Spanish
 words were added for Mexico, where 417 sites are named just `Basurero Municipal`; batch 3 skips 667
-of its 2,220 sites. Names still in Cyrillic are searched.
+of its 2,220 sites. For batch 4 (16 November 2026), the words OSM's Russian, German and Turkish
+names translate to, and German and Russian ones left untranslated: on the 16 November seed that
+skips 187 more of batch 4's sites (151 generic, 23 mining heaps, 13 not names) and 133 in batches
+1, 2, 3, 5 and 6. A name in Cyrillic that is a place, such as `Михайловка`, is still searched.
+
+**5. Sites known not to be municipal waste sites are skipped too,** whatever their name: those our
+seed types `Non-Municipal Waste Landfill` or `Not a Waste Facility`, and the 51 that the reviewers
+on RMI/waste_data_ingestion_pipeline#379 found are mine, slag and ash dumps, sludge fields or coal
+yards ([`data/not_municipal_sites.csv`](data/not_municipal_sites.csv)), until the database is rebuilt
+with them. A municipal-waste model leaves them out, so nothing found about them is used. They are
+listed in `skipped_sites.csv` as `not municipal`; listing their ids still searches them. Like the
+name rule, this runs after sites with nothing left to ask are dropped, so it lists only sites that
+would otherwise have been searched.
 
 The generic test knows only English and Spanish words, so it reads the English name, not the source's own
 spelling. It can't tell a generic original such as `Полигон ТБО` ("MSW landfill") from a
@@ -1113,7 +1155,7 @@ the tests, a new cell's 6,000 m² of geomembrane was given as a site's area.
 |---|---|---|---|
 | `facility_status` | enum | — | `facility_status` |
 | `facility_type` | enum | — | `facility_type` |
-| `operator` ‡ | text | — | *none yet — review layer only* |
+| `operator` | text | — | `operator` |
 | `owner` ‡ | text | — | *none yet — review layer only* |
 | `opening_year` | integer year | `year` | `opening_year` |
 | `closing_year` | integer year | `year` | `closing_year` |
@@ -1127,7 +1169,7 @@ the tests, a new cell's 6,000 m² of geomembrane was given as a site's area.
 | `has_biocover` | boolean | — | `has_biocover` |
 | `has_open_burning` ‡ | boolean | — | *none yet — review layer only* |
 
-‡ **Review-layer only: `operator`, `owner`, `has_open_burning`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
+‡ **Review-layer only: `owner` and `has_open_burning`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. RMI/waste_data_ingestion_pipeline#382 adds both. `consolidated_facility` has neither, so each is asked of every facility. `operator`, `has_flare` and `flare_efficiency` were review-layer only too, until upstream added their columns; since 16 November 2026 the seed reads them (F44), so a site with one recorded isn't asked for it.
 
 **Incoming waste counts municipal waste only,** as the standardized spec's "Municipal waste only"
 rule asks of every source: household and similar waste, which decomposes and generates methane.
@@ -1185,8 +1227,8 @@ because the site had been sealed.
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
 | `gccs_ch4_flared_metric_tonnes` | numeric | `metric tonnes CH4` | `gccs_ch4_flared_metric_tonnes` |
-| `has_flare` ‡ | boolean | — | *none yet — review layer only* |
-| `flare_efficiency` ‡ | fraction 0–1 | `fraction between 0 and 1` | *none yet — review layer only* |
+| `has_flare` | boolean | — | `has_flare` |
+| `flare_efficiency` | fraction 0–1 | `fraction between 0 and 1` | `flare_efficiency` |
 | `gccs_energy_project_type` | enum array | — | `gccs_energy_project_type` |
 | `gccs_current_project_status` | enum array | — | `gccs_current_project_status` |
 | `gccs_collection_efficiency` | fraction 0–1 | `fraction between 0 and 1` | `gccs_collection_efficiency` |
@@ -1220,6 +1262,17 @@ accents aside: "toneladas por día", "metros cuadrados", "Hectáreas", "Tonnen p
 "tonnellate all'anno". Until 31 October 2026 they were refused, which dropped Pro Limpieza's area
 and waste in place in every Mexico test run. "ton" counts as tonnes only beside words in one of
 those languages ("ton/día"), where it means the metric tonne; an English "tons" stays ambiguous.
+
+For batch 4 (16 November 2026), Russian and Turkish units are read too ("тыс. т в год", "т/сут",
+"га", "кв. км", "ton/gün", "bin ton/yıl", "metrekare", and Turkey's dönüm, 1,000 m²), and German,
+Russian and Turkish magnitudes (Mio., Mrd., Tsd., тыс., млн, млрд, bin, milyon, milyar), and the
+German reports' Mg (megagrams, which lowercasing had made milligrams) and "to/a". A unit in
+Cyrillic used to count as no unit at all, so 12 га (hectares) would have loaded as 12 m². Thousands
+groups that can only be thousands are joined: "1 400 000", "1.400.000" and "1.234,5". They used to
+read as several numbers, in any language: "120 000 tonnes" became "120 to 0". A lone "45.000" may be
+a decimal, so the prompt asks for plain digits, with a point for decimals and no separators. The
+prompt also says a "ton" in a source not in English is the metric tonne: in the batch 4 practice
+run, Sol marked a Turkish page's 700 t a day "ambiguous tons", and it was dropped.
 
 Allowed categorical values come from the **live Postgres enums** — regenerate with
 `scripts/generate_enums.py`. Anything outside them maps to NULL with a parse warning rather than

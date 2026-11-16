@@ -46,14 +46,14 @@ GAP_FILL_ATTRIBUTES = [
     "facility_status",
     "facility_type",
     "bulk_waste_type",
-    # WP-531. Review layer only for now: the upstream standardized spec has no operator column, so
-    # it is deliberately absent from ATTRIBUTE_TO_STANDARD_COLUMN and never reaches the
-    # standardized table. consolidated_facility has no operator either, so the baseline is always
-    # empty and it is asked of every searched facility. Promotion is a follow-up once upstream adds
-    # the column - one entry in ATTRIBUTE_TO_STANDARD_COLUMN and STANDARDIZED_FACILITY_COLUMNS.
+    # WP-531. Searched since October 2026, when it was review layer only. Upstream has had an
+    # `operator` column since #238, and the seed reads consolidated_facility's (F44), so it is a
+    # baseline like any other: a site whose operator is recorded isn't asked, and a found one loads
+    # into the standardized column (ATTRIBUTE_TO_STANDARD_COLUMN).
     "operator",
-    # Asked of every site from 13 November 2026, at Carbon Mapper's request. Review layer only, like
-    # operator, and compared and doubted as operator is.
+    # Asked of every site from 13 November 2026, at Carbon Mapper's request, and compared and doubted
+    # as operator is. Review layer only until ingestion #382 adds the column: no seed has one, so
+    # every site is asked.
     "owner",
     "opening_year",
     "closing_year",
@@ -66,7 +66,7 @@ GAP_FILL_ATTRIBUTES = [
     "cover_types",
     "has_biocover",
     # Asked of every site from 10 November 2026, at Carbon Mapper's request: open burning changes a
-    # dump's emissions. Review layer only, like operator: no upstream column yet.
+    # dump's emissions. Review layer only until ingestion #382 adds the column, like owner.
     "has_open_burning",
     "gccs_ch4_flared_metric_tonnes",
     "has_flare",
@@ -355,6 +355,10 @@ ATTRIBUTE_TO_STANDARD_COLUMN = {
     "gccs_energy_project_type": "gccs_energy_project_type",
     "gccs_current_project_status": "gccs_current_project_status",
     "gccs_collection_efficiency": "gccs_collection_efficiency",
+    # Upstream columns since 2026-11 (the spec pinned in schema/SCHEMA_SOURCE.json).
+    "operator": "operator",
+    "has_flare": "has_flare",
+    "flare_efficiency": "flare_efficiency",
 }
 
 
@@ -447,7 +451,7 @@ GCCS_CURRENT_PROJECT_STATUS_MAP = {
 }
 
 # F31. No database enum or standardized column exists yet, so these values are this project's own;
-# like `operator`, bulk_waste_type reaches review but has no standardized column.
+# like `owner`, bulk_waste_type reaches review but has no standardized column.
 BULK_WASTE_TYPE_VALUES = ["municipal solid waste", "inert waste", "others"]
 # The distinction that matters is municipal solid waste, which decomposes and generates methane,
 # against inert waste, which does not; the prompt defines each and classifies by the bulk received.
@@ -696,22 +700,29 @@ PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 AI_SEARCH_DATA_SOURCE = "ai_search_2026"
 
 # The columns of the standardized facility table, in the order StandardizedFacilityTableSpecification.md
-# defines them (as of upstream 8c0bb3fe, `has_biocover` sits beside the other cover columns). This
+# defines them (as of the upstream commit in schema/SCHEMA_SOURCE.json: the composition and methane
+# shares are ratios now, and operator, has_flare and flare_efficiency have columns). This
 # repository no longer writes the table: ingestion builds it from reviewed values. The list stays so
 # the attribute bindings above can be checked against the vendored spec and the database.
 STANDARDIZED_FACILITY_COLUMNS = [
-    "facility_id", "year", "facility_name", "iso3c_plus", "area_square_meters", "facility_status",
-    "facility_type", "opening_year", "closing_year", "has_landfill_gas_collection",
-    "waste_depth", "annual_incoming_waste_metric_tonnes", "waste_in_place_metric_tonnes",
+    "facility_id", "year", "is_year_exact", "facility_name", "facility_name_translated", "operator",
+    "iso3c_plus", "area_square_meters", "facility_status", "facility_type", "opening_year",
+    "closing_year", "has_landfill_gas_collection", "waste_depth",
+    "annual_incoming_waste_metric_tonnes", "waste_in_place_metric_tonnes",
     "has_cover", "cover_types", "has_biocover",
     "gccs_ch4_flared_metric_tonnes", "gccs_ch4_generated_metric_tonnes",
-    "gccs_ch4_collected_metric_tonnes", "gccs_energy_project_type", "gccs_current_project_status",
-    "gccs_ch4_flow_to_project_metric_tonnes", "gccs_ch4_percent", "gccs_collection_efficiency",
+    "gccs_ch4_collected_metric_tonnes", "gccs_lfg_collected_cubic_meters",
+    "gccs_lfg_flared_cubic_meters", "gccs_lfg_generated_cubic_meters", "gccs_energy_project_type",
+    "gccs_current_project_status", "gccs_ch4_flow_to_project_metric_tonnes",
+    "gccs_lfg_flow_to_project_cubic_meters", "gccs_ch4_ratio", "gccs_collection_efficiency",
+    "has_flare", "flare_efficiency",
     "oxidation", "mcf", "latitude", "longitude", "point", "is_location_exact",
-    "ch4_emissions_metric_tonnes", "food_percent_by_weight", "green_percent_by_weight",
-    "wood_percent_by_weight", "paper_cardboard_percent_by_weight", "textiles_percent_by_weight",
-    "plastic_percent_by_weight", "metal_percent_by_weight", "glass_percent_by_weight",
-    "rubber_percent_by_weight", "other_percent_by_weight", "data_source", "created_date", "git_sha",
+    "ch4_emissions_metric_tonnes", "food_ratio_by_weight", "green_ratio_by_weight",
+    "wood_ratio_by_weight", "paper_cardboard_ratio_by_weight", "textiles_ratio_by_weight",
+    "plastic_ratio_by_weight", "metal_ratio_by_weight", "glass_ratio_by_weight",
+    "rubber_ratio_by_weight", "diaper_ratio_by_weight", "sewage_sludge_ratio_by_weight",
+    "other_ratio_by_weight", "msw_ratio_by_weight", "construction_demolition_ratio_by_weight",
+    "inerts_ratio_by_weight", "bulk_ratio_by_weight", "data_source", "created_date", "git_sha",
 ]
 
 

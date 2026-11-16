@@ -161,7 +161,8 @@ ATTRIBUTE_GUIDANCE = {
         "Waste actually accepted per year - not a permitted or licensed limit or a design "
         "capacity. Report the source's original unit; the pipeline converts. "
         "Distinguish metric tonnes from US short tons. If the source just says 'tons', keep the "
-        "number in value and set unit to 'ambiguous tons'. Never put words in value. "
+        "number in value and set unit to 'ambiguous tons', unless the source isn't in English, "
+        "where a ton is metric. Never put words in value. "
         # The standardized spec's rule (Hugh, 30 October): municipal waste only, as far as the
         # source allows; where it doesn't say, the amount is taken as municipal.
         "Municipal solid waste only. Where the source splits the amount by kind of waste, return "
@@ -782,7 +783,8 @@ Value requirements:
   among them, put it in unverified_leads instead of forcing a wrong category.
 - Report the source's original unit in the unit field. The pipeline converts.
 - value must hold only the value itself. For numeric attributes that means digits, never
-  words, ranges in prose, or unit text.
+  words, ranges in prose, or unit text. Write them plainly, with a point for decimals and no
+  thousands separators: 1400000 or 1.4, never 1.400.000, 1 400 000 or 1,4.
 - Gas capture attributes only apply if the facility actually has a gas collection system. If it
   does not, omit them rather than returning zeros.
 - Return only actual figures, dates and features: what the facility is, has, did or does.

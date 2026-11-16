@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from openpyxl import load_workbook
@@ -237,6 +238,31 @@ def test_the_search_command_takes_a_pass_label_and_a_minimum_tonnage(tmp_path, m
             cli.build_parser().parse_args(["search", "--pass-label", label])
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["search", "--min-tonnes", "-100000"])
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["search", "--min-area-ha", "-20"])
+
+
+def test_min_area_keeps_the_sites_our_seed_says_cover_that_much(capsys):
+    """Batch 4 has almost no tonnages, so its Sol pass takes sites of 20 ha or more instead. A
+    site with no area isn't known to be large."""
+    sites = [
+        {"site_id": "1", "site_name": "Deponie Klein", "country_iso3": "DEU", "area_square_meters": "45000"},
+        {"site_id": "2", "site_name": "Deponie Gross", "country_iso3": "DEU", "area_square_meters": "1280000.5"},
+        {"site_id": "3", "site_name": "Deponie Ohne", "country_iso3": "DEU", "area_square_meters": ""},
+        {"site_id": "4", "site_name": "Deponie Genau", "country_iso3": "DEU", "area_square_meters": "200000"},
+    ]
+    config = PipelineConfig(input_csv=None, run_dir=Path("r"), run_id="t", min_area_ha=20)
+    assert [site["site_id"] for site in search.select_sites(sites, config)] == ["2", "4"]
+    assert "Taking 20 ha or more: 2 site(s): 2 4\n" in capsys.readouterr().out
+    assert len(search.select_sites(sites, replace(config, min_area_ha=0))) == 4
+
+
+def test_the_search_command_takes_a_minimum_area(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli, "run_search", lambda config, pass_label="": seen.append((config.min_area_ha, pass_label)))
+    argv = ["search", "--run-id", "batch4", "--run-dir", str(tmp_path / "run"), "--local", "--batch", "4"]
+    assert cli.main([*argv, "--min-area-ha", "20", "--pass-label", "sol"]) == 0
+    assert seen == [(20, "sol")]
 
 
 def test_name_yield_counts_a_site_searched_in_two_passes_once(tmp_path):
