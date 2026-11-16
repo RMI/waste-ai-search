@@ -46,14 +46,14 @@ GAP_FILL_ATTRIBUTES = [
     "facility_status",
     "facility_type",
     "bulk_waste_type",
-    # WP-531. Review layer only for now: the upstream standardized spec has no operator column, so
-    # it is deliberately absent from ATTRIBUTE_TO_STANDARD_COLUMN and never reaches the
-    # standardized table. consolidated_facility has no operator either, so the baseline is always
-    # empty and it is asked of every searched facility. Promotion is a follow-up once upstream adds
-    # the column - one entry in ATTRIBUTE_TO_STANDARD_COLUMN and STANDARDIZED_FACILITY_COLUMNS.
+    # WP-531. Searched since October 2026, when it was review layer only. Upstream has had an
+    # `operator` column since #238, and the seed reads consolidated_facility's (F44), so it is a
+    # baseline like any other: a site whose operator is recorded isn't asked, and a found one loads
+    # into the standardized column (ATTRIBUTE_TO_STANDARD_COLUMN).
     "operator",
-    # Asked of every site from 13 November 2026, at Carbon Mapper's request. Review layer only, like
-    # operator, and compared and doubted as operator is.
+    # Asked of every site from 13 November 2026, at Carbon Mapper's request, and compared and doubted
+    # as operator is. Review layer only until ingestion #382 adds the column: no seed has one, so
+    # every site is asked.
     "owner",
     "opening_year",
     "closing_year",
@@ -66,7 +66,7 @@ GAP_FILL_ATTRIBUTES = [
     "cover_types",
     "has_biocover",
     # Asked of every site from 10 November 2026, at Carbon Mapper's request: open burning changes a
-    # dump's emissions. Review layer only, like operator: no upstream column yet.
+    # dump's emissions. Review layer only until ingestion #382 adds the column, like owner.
     "has_open_burning",
     "gccs_ch4_flared_metric_tonnes",
     "has_flare",
@@ -451,7 +451,7 @@ GCCS_CURRENT_PROJECT_STATUS_MAP = {
 }
 
 # F31. No database enum or standardized column exists yet, so these values are this project's own;
-# like `operator`, bulk_waste_type reaches review but has no standardized column.
+# like `owner`, bulk_waste_type reaches review but has no standardized column.
 BULK_WASTE_TYPE_VALUES = ["municipal solid waste", "inert waste", "others"]
 # The distinction that matters is municipal solid waste, which decomposes and generates methane,
 # against inert waste, which does not; the prompt defines each and classifies by the bulk received.

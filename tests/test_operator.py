@@ -1,8 +1,8 @@
-"""WP-531 item 2: search for the facility operator, in the review layer only.
+"""WP-531 item 2: search for the facility operator.
 
-The upstream standardized spec has no operator column yet, so operator reaches found_values.csv but
-has no standardized column to go to. Adding one is a separate follow-up once upstream adds the
-column; these tests pin today's boundary so that change is deliberate.
+It began in the review layer only. Upstream has had an operator column since ingestion #238, and the
+seed reads consolidated_facility's (F44), so a found operator loads into it, and one we hold is a
+baseline that isn't asked for again.
 """
 from __future__ import annotations
 

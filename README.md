@@ -1036,7 +1036,9 @@ seed types `Non-Municipal Waste Landfill` or `Not a Waste Facility`, and the 51 
 on RMI/waste_data_ingestion_pipeline#379 found are mine, slag and ash dumps, sludge fields or coal
 yards ([`data/not_municipal_sites.csv`](data/not_municipal_sites.csv)), until the database is rebuilt
 with them. A municipal-waste model leaves them out, so nothing found about them is used. They are
-listed in `skipped_sites.csv` as `not municipal`; listing their ids still searches them.
+listed in `skipped_sites.csv` as `not municipal`; listing their ids still searches them. Like the
+name rule, this runs after sites with nothing left to ask are dropped, so it lists only sites that
+would otherwise have been searched.
 
 The generic test knows only English and Spanish words, so it reads the English name, not the source's own
 spelling. It can't tell a generic original such as `Полигон ТБО` ("MSW landfill") from a
@@ -1153,7 +1155,7 @@ the tests, a new cell's 6,000 m² of geomembrane was given as a site's area.
 |---|---|---|---|
 | `facility_status` | enum | — | `facility_status` |
 | `facility_type` | enum | — | `facility_type` |
-| `operator` ‡ | text | — | *none yet — review layer only* |
+| `operator` | text | — | `operator` |
 | `owner` ‡ | text | — | *none yet — review layer only* |
 | `opening_year` | integer year | `year` | `opening_year` |
 | `closing_year` | integer year | `year` | `closing_year` |
@@ -1167,7 +1169,7 @@ the tests, a new cell's 6,000 m² of geomembrane was given as a site's area.
 | `has_biocover` | boolean | — | `has_biocover` |
 | `has_open_burning` ‡ | boolean | — | *none yet — review layer only* |
 
-‡ **Review-layer only: `operator`, `owner`, `has_open_burning`, `has_flare`, `flare_efficiency`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. Loading them is a follow-up once upstream adds the columns. `consolidated_facility` has none of them either, so each is asked of every facility its scoping rules allow.
+‡ **Review-layer only: `owner` and `has_open_burning`.** The upstream standardized spec has no column for them yet, so a found value is sorted and approved like any other, and can reach `accepted_values.csv`, but has no standardized column to load into. RMI/waste_data_ingestion_pipeline#382 adds both. `consolidated_facility` has neither, so each is asked of every facility. `operator`, `has_flare` and `flare_efficiency` were review-layer only too, until upstream added their columns; since 16 November 2026 the seed reads them (F44), so a site with one recorded isn't asked for it.
 
 **Incoming waste counts municipal waste only,** as the standardized spec's "Municipal waste only"
 rule asks of every source: household and similar waste, which decomposes and generates methane.
@@ -1225,8 +1227,8 @@ because the site had been sealed.
 | Attribute | Type | Unit asked for | → standardized column |
 |---|---|---|---|
 | `gccs_ch4_flared_metric_tonnes` | numeric | `metric tonnes CH4` | `gccs_ch4_flared_metric_tonnes` |
-| `has_flare` ‡ | boolean | — | *none yet — review layer only* |
-| `flare_efficiency` ‡ | fraction 0–1 | `fraction between 0 and 1` | *none yet — review layer only* |
+| `has_flare` | boolean | — | `has_flare` |
+| `flare_efficiency` | fraction 0–1 | `fraction between 0 and 1` | `flare_efficiency` |
 | `gccs_energy_project_type` | enum array | — | `gccs_energy_project_type` |
 | `gccs_current_project_status` | enum array | — | `gccs_current_project_status` |
 | `gccs_collection_efficiency` | fraction 0–1 | `fraction between 0 and 1` | `gccs_collection_efficiency` |

@@ -146,7 +146,8 @@ def test_repeated_refreshes_accumulate_run_ids_without_duplicating_fields():
 
 
 def test_values_with_no_database_column_survive_the_refreshed_seed(tmp_path):
-    """A database seed has no column for these, so writing dropped them and pass 2 asked again."""
+    """A database seed taken before F44 had no column for these (and none has one for
+    bulk_waste_type), so writing dropped them and pass 2 asked again."""
     from waste_ai_search.input_loader import load_sites
     from waste_ai_search.seed_refresh import write_refreshed_seed
 

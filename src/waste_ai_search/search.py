@@ -142,7 +142,8 @@ def choose_sites(
     # does not name its unnamed sites, so it doesn't.
     skipped: list[dict[str, Any]] = []
     if not config.site_ids:
-        # Sites known not to be municipal waste sites. Listing their ids still searches them.
+        # Sites known not to be municipal waste sites. Listing their ids still searches them. After
+        # the check above, like the name rule, so it lists only sites that would have been searched.
         selected, not_municipal = skip_not_municipal(selected)
         skipped.extend(not_municipal)
         if not_municipal:
