@@ -782,7 +782,8 @@ Value requirements:
   among them, put it in unverified_leads instead of forcing a wrong category.
 - Report the source's original unit in the unit field. The pipeline converts.
 - value must hold only the value itself. For numeric attributes that means digits, never
-  words, ranges in prose, or unit text.
+  words, ranges in prose, or unit text. Write them plainly, with a point for decimals and no
+  thousands separators: 1400000 or 1.4, never 1.400.000, 1 400 000 or 1,4.
 - Gas capture attributes only apply if the facility actually has a gas collection system. If it
   does not, omit them rather than returning zeros.
 - Return only actual figures, dates and features: what the facility is, has, did or does.

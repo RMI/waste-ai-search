@@ -34,7 +34,9 @@ LENGTH_TARGET_ATTRIBUTES = {"waste_depth"}
 AREA_TARGET_ATTRIBUTES = {"area_square_meters"}
 
 # A unit has to carry a letter or a unit symbol; bare digits and punctuation are not a unit.
-UNIT_WORD_PATTERN = re.compile(r"[a-z%°]")
+# Any letter: a unit in Cyrillic ("га", "тыс. т") is a unit too. Read as none, it was taken for the
+# attribute's canonical unit, so 12 га (hectares) loaded as 12 square metres.
+UNIT_WORD_PATTERN = re.compile(r"[^\W\d_]|[%°]")
 
 CO2_PATTERN = re.compile(r"co\s?2|co₂|carbon dioxide")
 
@@ -273,6 +275,9 @@ def convert_area_value(attribute_name: str, original_value: str, original_unit: 
         factor, note = 2_589_988.110336, "Converted from square miles to square meters."
     elif re.search(r"\b(ha|hectares?)\b", text):
         factor, note = 10_000.0, "Converted from hectares to square meters."
+    elif re.search(r"\b(daa|decares?)\b", text):
+        # Turkey's dönüm.
+        factor, note = 1_000.0, "Converted from decares (dönüm) to square meters."
     elif re.search(r"(km2|km\^2|km²|square kilomet(?:er|re)s?|sq\.?\s*km)", text):
         factor, note = 1_000_000.0, "Converted from square kilometers to square meters."
     elif re.search(r"\bacres?\b", text):
@@ -479,9 +484,10 @@ def parse_numbers(value: str, unit: str = "") -> tuple[list[float], float]:
     asks for digits in value and the source's unit in unit. Only whole words are read from the
     unit: an abbreviation there is a unit in its own right ("mm" is millimetres).
     """
+    text = _without_thousands_groups(_plain(value.lower()))
     # A comma followed by one or two digits is a decimal comma ("1,4 millones"), since a thousands
     # group always has three; any other comma groups thousands ("1,235,000") and is dropped.
-    text = re.sub(r"(?<=\d),(?=\d{1,2}(?!\d))", ".", _plain(value.lower())).replace(",", "")
+    text = re.sub(r"(?<=\d),(?=\d{1,2}(?!\d))", ".", text).replace(",", "")
     # A hyphen BETWEEN two digits is a range separator, not a sign: sources write "3-8 metres"
     # far more often than they write a negative quantity. Left as-is, "3-8" parses to [3, -8],
     # which then reads as a negative measurement and the whole value is discarded. A leading
@@ -504,6 +510,20 @@ def parse_numbers(value: str, unit: str = "") -> tuple[list[float], float]:
     return [float(match) for match in matches], multiplier
 
 
+def _without_thousands_groups(text: str) -> str:
+    """Thousands groups that can only be thousands, joined: "1 400 000" (Russian, French), and
+    "1.400.000" or "1.234,5" (German, Turkish). They read as several numbers, so 120 000 t became
+    "120 to 0". A lone "45.000" is left alone: it may be a decimal, and the prompt asks for plain
+    digits."""
+    text = re.sub(r"(?<=\d)[ \u00a0\u202f\u2009](?=\d{3}(?!\d))", "", text)
+    text = re.sub(
+        r"\b\d{1,3}(?:\.\d{3}){2,}(?!\d)|\b\d{1,3}(?:\.\d{3})+(?=,\d)",
+        lambda match: match.group(0).replace(".", ""),
+        text,
+    )
+    return text
+
+
 def _plain(text: str) -> str:
     """Text with its accents taken off: "millón" reads as "millon"."""
     decomposed = unicodedata.normalize("NFKD", text)
@@ -516,10 +536,14 @@ def _plain(text: str) -> str:
 # Italian and German words for a thousand million are 10^9, so they come before the millions, and
 # the millions before the thousands. Spanish "billón" is 10^12, too rare in these sources to read.
 _MAGNITUDES = [
-    (r"\bbillions?\b|\bmil millones\b|\bmilliards?\b|\bmiliard[oi]\b|\bmilliarden?\b", 1_000_000_000.0),
-    (r"\bmillions?\b|\bmillon(?:es)?\b|\bmilh(?:ao|oes)\b|\bmilion[ei]\b|\bmillionen\b", 1_000_000.0),
+    (r"\bbillions?\b|\bmil millones\b|\bmilliards?\b|\bmiliard[oi]\b|\bmilliarden?\b"
+     # Batch 4: German Mrd., Russian млрд and миллиард, Turkish milyar.
+     r"|\bmrd\b|\bмлрд\b|\bмиллиард\w*|\bmilyar\b", 1_000_000_000.0),
+    (r"\bmillions?\b|\bmillon(?:es)?\b|\bmilh(?:ao|oes)\b|\bmilion[ei]\b|\bmillionen\b"
+     r"|\bmio\b|\bмлн\b|\bмиллион\w*|\bmilyon\b", 1_000_000.0),
     # Not Spanish "miles" (thousands), which is the English unit too; "5 mil" is how a figure is written.
-    (r"\bthousands?\b|\bmil\b|\bmilliers?\b|\bmille\b|\bmila\b|\btausend\b", 1_000.0),
+    (r"\bthousands?\b|\bmil\b|\bmilliers?\b|\bmille\b|\bmila\b|\btausend\b"
+     r"|\btsd\b|\bтыс\w*|\bbin\b", 1_000.0),
 ]
 
 
@@ -546,18 +570,39 @@ _FOREIGN_UNITS = [
     (r"\b(?:metros?|metres?|metri)\s+(?:cuadrados?|quadrados?|carres?|quadrati)\b|\bquadratmeter\b", "square meters"),
     (r"\b(?:metros?|metres?|metri)\s+(?:cubicos?|cubes?|cubi)\b|\bkubikmeter\b", "cubic meters"),
     (r"\b(?:hectareas?|ettar[io]|hektar(?:en|e)?)\b", "hectares"),
-    (r"\b(?:metros?|metri)\b", "meters"),
+    # Batch 4, Turkish: metrekare, kilometrekare, metreküp, and the dönüm (a decare, 1,000 m2).
+    (r"\bkilometrekare\b", "square kilometers"),
+    (r"\bmetrekare\b", "square meters"),
+    (r"\bmetrekup\b", "cubic meters"),
+    (r"\b(?:donum|dekar)\b", "decares"),
+    # Russian, read with й as и and ё as е, as _plain leaves them.
+    (r"\bквадратн\w*\s+километр\w*|\bкв\.?\s*км\b|\bкм(?:2|²)", "square kilometers"),
+    (r"\bквадратн\w*\s+метр\w*|\bкв\.?\s*м\b|\bм(?:2|²)", "square meters"),
+    (r"\bкубическ\w*\s+метр\w*|\bкубометр\w*|\bкуб\.?\s*м\b|\bм(?:3|³)", "cubic meters"),
+    (r"\bгектар\w*|\bга\b", "hectares"),
+    (r"\bтонн\w*|(?<!\w)т(?!\w)", "tonnes"),
+    (r"\bкилограмм\w*|\bкг\b", "kg"),
+    (r"\bкилометр\w*|\bкм\b", "km"),
+    (r"\bметр\w*|(?<!\w)м(?!\w)", "meters"),
+    (r"\b(?:metros?|metri|metre)\b", "meters"),
     # German "t/a" is tonnes a year.
     (r"\bt\s*/\s*a\b", "t/year"),
 ]
+# Words showing a unit is written in a language where "ton" is the metric tonne, though no unit
+# word above matched: Turkish "milyon ton", German "Mio. t".
+_FOREIGN_MARKERS = r"\b(?:bin|milyon|milyar|mio|mrd|tsd|тыс\w*|млн|млрд)\b"
 # "por día", "par jour", "al giorno", "pro Tag", "/día", "diarias": a time denominator.
-_PER = r"\s*(?:\b(?:por|par|pro|al|all')\s*|/\s*)"
+_PER = r"\s*(?:\b(?:por|par|pro|al|all'|в)\s*|/\s*)"
 _FOREIGN_PERIODS = [
-    (_PER + r"(?:dia|jour|giorno|tag)\b|\s*\b(?:diari[ao]s?|quotidien(?:ne)?s?|giornalier[ei]|taglich)\b", "/day"),
-    (_PER + r"(?:semana|semaine|settimana|woche)\b|\s*\b(?:semanal(?:es)?|hebdomadaires?|settimanal[ei]|wochentlich)\b", "/week"),
-    (_PER + r"(?:mes|mois|mese|monat)\b|\s*\b(?:mensual(?:es)?|mensuel(?:le)?s?|mensil[ei]|monatlich)\b", "/month"),
-    (_PER + r"(?:ano|an|anno|jahr)\b|\s*\b(?:anual(?:es)?|annuel(?:le)?s?|annu[ei]|jahrlich)\b", "/year"),
-    (_PER + r"(?:hora|heure|ora|stunde)\b", "/hour"),
+    (_PER + r"(?:dia|jour|giorno|tag|сут\w*|день|gun)\b|\s*\b(?:diari[ao]s?|quotidien(?:ne)?s?|giornalier[ei]|taglich"
+     r"|ежедневно|в\s+сутки|gunluk|gunde)\b", "/day"),
+    (_PER + r"(?:semana|semaine|settimana|woche|неделю|hafta)\b|\s*\b(?:semanal(?:es)?|hebdomadaires?|settimanal[ei]"
+     r"|wochentlich|еженедельно|haftalık)\b", "/week"),
+    (_PER + r"(?:mes|mois|mese|monat|мес\w*|ay)\b|\s*\b(?:mensual(?:es)?|mensuel(?:le)?s?|mensil[ei]|monatlich"
+     r"|ежемесячно|aylık)\b", "/month"),
+    (_PER + r"(?:ano|an|anno|jahr|год\w*|yıl)\b|\s*\b(?:anual(?:es)?|annuel(?:le)?s?|annu[ei]|jahrlich"
+     r"|ежегодно|yıllık|yılda)\b", "/year"),
+    (_PER + r"(?:hora|heure|ora|stunde|час|ч|saat)\b", "/hour"),
 ]
 
 
@@ -567,7 +612,7 @@ def _in_english(text: str) -> str:
     ambiguous."""
     decomposed = unicodedata.normalize("NFKD", text)
     text = "".join(c for c in decomposed if not unicodedata.combining(c))
-    foreign = 0
+    foreign = len(re.findall(_FOREIGN_MARKERS, text))
     for pattern, english in (*_FOREIGN_UNITS, *_FOREIGN_PERIODS):
         text, count = re.subn(pattern, english, text)
         foreign += count

@@ -23,6 +23,15 @@ GENERIC_EXACT_NAMES = {
     "rubbish tip",
     "landfill site",
     "dumping",
+    # Batch 4 (Germany, Russia, Turkey): kinds of site written as one word, or as a word for a
+    # place rather than a waste site, that the rule below can't read as generic.
+    "landfillmsw",
+    "biolandfill",
+    "pigsty",
+    "sump",
+    "ruins",
+    "shooting range",
+    "reclamation lands",
 }
 
 GENERIC_TOKENS = {
@@ -43,6 +52,18 @@ GENERIC_TOKENS = {
     "basura",
     "residuos",
     "disposicion", "disposición",
+    # Batch 4. Names reach us in English, but OSM's Russian ones translate their words for a
+    # landfill as "MSW" (ТБО, ТКО) and "polygon" (полигон), and the kind of non-municipal waste a
+    # site holds as its whole name ("Woodworking waste", "Litter storage", "Oil pits").
+    "msw", "tbo", "tko", "polygon", "poltgon", "dumping", "dumpsite", "dumps",
+    "storage", "pit", "pits", "beds", "pockets", "yard", "hump", "area", "zone", "facility",
+    # German and Russian spellings, for a name that reached us untranslated ("ehem. Deponie",
+    # "Erdmassendeponie", "Wertstoffhof", "Бывшая свалка").
+    "deponie", "mülldeponie", "muelldeponie", "erddeponie", "abfalldeponie", "bauschuttdeponie",
+    "bodendeponie", "erdmassendeponie", "erdaushubdeponie", "altdeponie", "kreismülldeponie",
+    "müllkippe", "muellkippe", "kippe", "schuttplatz", "wertstoffhof", "recyclinghof",
+    "altlastsanierung",
+    "свалка", "свалки", "полигон", "тбо", "тко",
 }
 
 # Words that, beside a generic word, only say what kind of site it is ("Municipal Landfill",
@@ -57,6 +78,19 @@ GENERIC_QUALIFIERS = {
     "sanitario", "sanitaria", "controlado", "controlada", "cielo", "abierto", "sitio", "tipo",
     "solidos", "sólidos", "urbanos", "rsu", "sin", "nombre",
     "the", "del", "los", "las",
+    # Batch 4. Words that say a site's state or what it held, never which site it is ("Former
+    # landfill", "Spontaneous dump", "Excavated landfill", "Woodworking waste"). "Central", "East"
+    # and the like are still left out: they say which site.
+    "former", "old", "new", "closed", "inactive", "unused", "illegal", "unauthorized",
+    "spontaneous", "elemental", "temporary", "currently", "incomplete", "reclaimed",
+    "recultivated", "excavated", "district", "village", "household", "urban", "domestic",
+    "industrial", "production", "woodworking", "deprocessing", "sawdust", "lignin", "litter",
+    "livestock", "alkaline", "rubber", "goods", "oil", "drain", "wastewater", "asbestos", "lime",
+    "soda", "ore", "mud", "peat", "clay", "earth", "green", "rubble", "space", "place", "sorting",
+    "complex", "collection", "processing", "operating", "use", "fill", "dumping",
+    "ehem", "ehemalige", "ehm", "städt", "stillgelegt", "rekultivierte",
+    "бывшая", "бывший", "старая", "стихийная", "несанкционированная", "незаконная", "городская",
+    "районная", "поселковая", "закрыта", "закрытая",
 }
 
 # Two-letter words that say nothing about which site it is: articles and prepositions (English,
@@ -90,7 +124,7 @@ def informative_tokens(text: str) -> list[str]:
     ("GB Landfill", "SR 85 Landfill"), or single letters joined by "&" ("K & W Landfill"). Short
     numbers ("Dump 1"), lone letters ("Landfill A") and roman numerals ("Landfill II") don't.
     """
-    words = [word.strip(".,;:()[]{}") for word in text.split()]
+    words = [word.strip(".,;:()[]{}\"'«»") for word in re.sub(r"[()/\[\]]", " ", text).split()]
     informative = []
     for index, word in enumerate(words):
         if not word or word in GENERIC_TOKENS or word in GENERIC_QUALIFIERS:
@@ -112,7 +146,7 @@ def is_generic_site_name(name: Any) -> bool:
         return True
     if text in GENERIC_EXACT_NAMES:
         return True
-    tokens = {token.strip(".,;:()[]{}") for token in text.split()}
+    tokens = {token.strip(".,;:()[]{}\"'«»") for token in re.sub(r"[()/\[\]]", " ", text).split()}
     return bool(tokens & GENERIC_TOKENS) and not informative_tokens(text)
 
 

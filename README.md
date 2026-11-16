@@ -986,9 +986,9 @@ facility nearby. Five classes of name are skipped
 | Class | What it is | Examples |
 |---|---|---|
 | No name | An empty name, the filler ingestion gives an OSM polygon with no name, or a name saying there is none, unless the source's own spelling is a name | `OpenStreetMap Landfill`, `NO NAME` |
-| Not a name | A URL, a bare number or a survey note that ended up as the name | `update the tag landuse after survey`, `4000` |
-| Generic label | Only says what kind of site it is (`is_generic_site_name`), in English or Spanish. Initials and route codes count as a name: `K & W Landfill` and `SR 85 Landfill` are searched | `domestic landfill`, `Municipal Landfill`, `Landfill II`, `Basurero Municipal`, `Relleno Sanitario Tipo C` |
-| Mining feature | A spoil heap or similar, matched in the English name or the original (отвал, террикон, відвал) | `Overburden Blade`, `Terrikon` |
+| Not a name | A URL, a bare number, a survey or mapper's note, a single letter, a numbered part of a site, or a street that ended up as the name | `update the tag landuse after survey`, `4000`, `clarify what exactly it is`, `Map 4`, `проспект Тракторостроителей` |
+| Generic label | Only says what kind of site it is (`is_generic_site_name`), in English or Spanish, or in German or Russian where a name reached us untranslated. Words for a site's state or what it held count as kind, not name. Initials and route codes count as a name: `K & W Landfill` and `SR 85 Landfill` are searched | `domestic landfill`, `Municipal Landfill`, `Landfill II`, `Basurero Municipal`, `Relleno Sanitario Tipo C`, `MSW landfill`, `Former landfill`, `Woodworking waste`, `ehem. Deponie`, `Solid Waste Facility` |
+| Mining feature | A spoil heap or similar, matched in the English name or the original (отвал, террикон, відвал, German Halde but not Müllhalde, potash tips, Turkish pasa) | `Overburden Blade`, `Terrikon`, `Halde 311`, `Kaliberg` |
 | Address only | A site only Global Plastic Watch records (`contributing_data_sources` is `gpw_2021`). It maps sites from satellite images and names none; the name is an address worked out from the point. Skipped from 4 November 2026: 662 sites in batch 2, 70 in batch 4, 420 in batch 5, 468 in the last batch, none in batch 3 | `Nông Cống District, Thanh Hoa province, Vietnam` |
 
 Nothing in the database changes: a skipped site stays in WasteMAP and Climate TRACE. It just isn't
@@ -996,7 +996,17 @@ web-searched until it has a name worth searching for. Words that only describe t
 such as municipal, sanitary, controlled, open-air and final disposal, don't count as a name:
 `Sanitary Landfill` and `Controlled Landfill` are skipped, `North Landfill` is searched. Spanish
 words were added for Mexico, where 417 sites are named just `Basurero Municipal`; batch 3 skips 667
-of its 2,220 sites. Names still in Cyrillic are searched.
+of its 2,220 sites. For batch 4 (16 November 2026), the words OSM's Russian, German and Turkish
+names translate to, and German and Russian ones left untranslated: on the 16 November seed that
+skips 187 more of batch 4's sites (151 generic, 23 mining heaps, 13 not names) and 133 in batches
+1, 2, 3, 5 and 6. A name in Cyrillic that is a place, such as `Михайловка`, is still searched.
+
+**5. Sites known not to be municipal waste sites are skipped too,** whatever their name: those our
+seed types `Non-Municipal Waste Landfill` or `Not a Waste Facility`, and the 51 that the reviewers
+on RMI/waste_data_ingestion_pipeline#379 found are mine, slag and ash dumps, sludge fields or coal
+yards ([`data/not_municipal_sites.csv`](data/not_municipal_sites.csv)), until the database is rebuilt
+with them. A municipal-waste model leaves them out, so nothing found about them is used. They are
+listed in `skipped_sites.csv` as `not municipal`; listing their ids still searches them.
 
 The generic test knows only English and Spanish words, so it reads the English name, not the source's own
 spelling. It can't tell a generic original such as `Полигон ТБО` ("MSW landfill") from a
@@ -1220,6 +1230,14 @@ accents aside: "toneladas por día", "metros cuadrados", "Hectáreas", "Tonnen p
 "tonnellate all'anno". Until 31 October 2026 they were refused, which dropped Pro Limpieza's area
 and waste in place in every Mexico test run. "ton" counts as tonnes only beside words in one of
 those languages ("ton/día"), where it means the metric tonne; an English "tons" stays ambiguous.
+
+For batch 4 (16 November 2026), Russian and Turkish units are read too ("тыс. т в год", "т/сут",
+"га", "кв. км", "ton/gün", "bin ton/yıl", "metrekare", and Turkey's dönüm, 1,000 m²), and German,
+Russian and Turkish magnitudes (Mio., Mrd., Tsd., тыс., млн, млрд, bin, milyon, milyar). A unit in
+Cyrillic used to count as no unit at all, so 12 га (hectares) would have loaded as 12 m². Thousands
+groups that can only be thousands are joined: "1 400 000", "1.400.000" and "1.234,5". They used to
+read as several numbers, in any language: "120 000 tonnes" became "120 to 0". A lone "45.000" may be
+a decimal, so the prompt asks for plain digits, with a point for decimals and no separators.
 
 Allowed categorical values come from the **live Postgres enums** — regenerate with
 `scripts/generate_enums.py`. Anything outside them maps to NULL with a parse warning rather than

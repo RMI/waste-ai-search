@@ -63,21 +63,20 @@ def test_spec_columns_match_the_code(provenance: dict) -> None:
         "Update STANDARDIZED_FACILITY_COLUMNS and the attribute bindings in schema.py."
     )
 
-    # `point` is a real column on all 11 transformed.* tables that the spec does not document;
-    # it is derived from latitude/longitude. It is the ONLY accepted extra, so that
-    # a genuinely invented column cannot slip in beside it.
+    # `point`, derived from latitude/longitude, was once the one column the spec didn't document.
+    # The spec documents it now, so the code declares nothing the spec doesn't.
     extra = [c for c in STANDARDIZED_FACILITY_COLUMNS if c not in in_spec]
-    assert extra == ["point"], (
-        f"Code declares columns the spec does not define: {extra}. Only 'point' is an accepted "
-        "deviation; anything else must be added to the spec upstream first."
+    assert extra == [], (
+        f"Code declares columns the spec does not define: {extra}. Anything else must be added to "
+        "the spec upstream first."
     )
 
 
 def test_column_set_matches_the_spec() -> None:
-    """43 spec columns plus `point`."""
+    """The spec's 59 columns, `point` among them."""
     from waste_ai_search.schema import STANDARDIZED_FACILITY_COLUMNS
 
-    assert len(STANDARDIZED_FACILITY_COLUMNS) == 44
+    assert len(STANDARDIZED_FACILITY_COLUMNS) == 59
     assert STANDARDIZED_FACILITY_COLUMNS[0] == "facility_id"
     assert STANDARDIZED_FACILITY_COLUMNS[-3:] == ["data_source", "created_date", "git_sha"]
     # Grouped with the other cover columns, where the spec puts it.

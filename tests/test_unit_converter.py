@@ -121,3 +121,51 @@ def test_millimetres_and_miles_are_not_read_as_thousands():
     assert parse_numbers("12", "milímetros") == ([12.0], 1.0)
     assert parse_numbers("3", "millas") == ([3.0], 1.0)
     assert parse_numbers("31.2", "miles") == ([31.2], 1.0)
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value", "unit", "expected"),
+    [
+        # Batch 4. Thousands groups that can only be thousands: they read as several numbers, so
+        # 120 000 t became "120 to 0".
+        ("annual_incoming_waste_metric_tonnes", "120 000", "tonnes", "120000"),
+        ("annual_incoming_waste_metric_tonnes", "1 400 000", "т", "1400000"),
+        ("annual_incoming_waste_metric_tonnes", "1.400.000", "Tonnen", "1400000"),
+        ("annual_incoming_waste_metric_tonnes", "1.234,5", "t", "1234.5"),
+        # German
+        ("waste_in_place_metric_tonnes", "1,4", "Mio. t", "1400000"),
+        ("waste_in_place_metric_tonnes", "2", "Mrd. t", "2000000000"),
+        ("annual_incoming_waste_metric_tonnes", "12", "Tsd. t/a", "12000"),
+        # Russian
+        ("annual_incoming_waste_metric_tonnes", "250", "тыс. т в год", "250000"),
+        ("waste_in_place_metric_tonnes", "1,2", "млн тонн", "1200000"),
+        ("annual_incoming_waste_metric_tonnes", "150", "т/сут", "54750"),
+        ("annual_incoming_waste_metric_tonnes", "300", "тонн в сутки", "109500"),
+        ("annual_incoming_waste_metric_tonnes", "12", "тыс. тонн в месяц", "144000"),
+        ("area_square_meters", "42,2", "га", "422000"),
+        ("area_square_meters", "45 000", "м²", "45000"),
+        ("area_square_meters", "2,5", "кв. км", "2500000"),
+        ("waste_depth", "15", "м", "15"),
+        # Turkish: "ton" beside Turkish words is the metric tonne.
+        ("annual_incoming_waste_metric_tonnes", "650", "ton/gün", "237250"),
+        ("annual_incoming_waste_metric_tonnes", "500", "bin ton/yıl", "500000"),
+        ("waste_in_place_metric_tonnes", "1,5", "milyon ton", "1500000"),
+        ("area_square_meters", "440", "dönüm", "440000"),
+        ("area_square_meters", "5", "metrekare", "5"),
+    ],
+)
+def test_german_russian_and_turkish_units_are_read(attribute, value, unit, expected):
+    result = convert_attribute_value(attribute, value, unit)
+    assert (result.value, result.warning) == (expected, "")
+
+
+def test_a_unit_in_cyrillic_is_a_unit_not_none():
+    """Read as no unit, 12 га (hectares) loaded as 12 square metres, and a volume in млн м3 as
+    tonnes. An unread Cyrillic unit is refused, like any unsupported unit."""
+    assert convert_attribute_value("waste_in_place_metric_tonnes", "3,5", "млн м3").warning.startswith("Unsupported mass unit")
+    assert convert_attribute_value("area_square_meters", "3", "десятин").warning.startswith("Unsupported area unit")
+
+
+def test_a_lone_dot_group_stays_a_decimal():
+    """'45.000' may be a decimal; the prompt asks for plain digits, so it is left as written."""
+    assert convert_attribute_value("area_square_meters", "26.799", "ha").value == "267990"

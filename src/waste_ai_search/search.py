@@ -64,6 +64,7 @@ from .searchable_names import (
     SKIPPED_SITES_FILE,
     class_breakdown,
     record_skips,
+    skip_not_municipal,
     skip_unsearchable_names,
 )
 
@@ -140,12 +141,23 @@ def choose_sites(
     # have searched. Listing site ids names each site, so it wins; naming a country with --iso3
     # does not name its unnamed sites, so it doesn't.
     skipped: list[dict[str, Any]] = []
-    if not config.site_ids and not config.include_unsearchable_names:
-        selected, skipped = skip_unsearchable_names(selected)
-        if skipped:
+    if not config.site_ids:
+        # Sites known not to be municipal waste sites. Listing their ids still searches them.
+        selected, not_municipal = skip_not_municipal(selected)
+        skipped.extend(not_municipal)
+        if not_municipal:
             print(
-                f"Skipped {len(skipped):,} site(s) whose name gives a search nothing to look for "
-                f"({class_breakdown([row['name_class'] for row in skipped])}; "
+                f"Skipped {len(not_municipal):,} site(s) known not to be municipal waste sites "
+                "(typed Non-Municipal Waste Landfill or Not a Waste Facility, by our seed or "
+                "data/not_municipal_sites.csv)."
+            )
+    if not config.site_ids and not config.include_unsearchable_names:
+        selected, by_name = skip_unsearchable_names(selected)
+        skipped.extend(by_name)
+        if by_name:
+            print(
+                f"Skipped {len(by_name):,} site(s) whose name gives a search nothing to look for "
+                f"({class_breakdown([row['name_class'] for row in by_name])}; "
                 "pass --include-unsearchable-names to search them)."
             )
     if config.batch:

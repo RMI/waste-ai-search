@@ -1,7 +1,7 @@
 {
   "repo": "RMI/waste_data_ingestion_pipeline",
   "path": "facility_etl/StandardizedFacilityTableSpecification.md",
-  "ref": "5cfeadfa9a775a7ff2482d1fc21791c73f6039d6",
-  "sha256": "4f0e77cb5d21ec11d5fb3aee47443117c3e4a9f3c89fa46776ab1108fc38d9b1",
-  "synced_at": "2026-09-28T21:25:32+00:00"
+  "ref": "89d716c21127655687021a881755c15f13e1f040",
+  "sha256": "7de243130728c043fa352924f884135494607bde9246029b9dc981e1de4b947a",
+  "synced_at": "2026-11-16T15:24:18+00:00"
 }

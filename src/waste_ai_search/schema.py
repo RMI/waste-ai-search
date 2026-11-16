@@ -355,6 +355,10 @@ ATTRIBUTE_TO_STANDARD_COLUMN = {
     "gccs_energy_project_type": "gccs_energy_project_type",
     "gccs_current_project_status": "gccs_current_project_status",
     "gccs_collection_efficiency": "gccs_collection_efficiency",
+    # Upstream columns since 2026-11 (the spec pinned in schema/SCHEMA_SOURCE.json).
+    "operator": "operator",
+    "has_flare": "has_flare",
+    "flare_efficiency": "flare_efficiency",
 }
 
 
@@ -696,22 +700,29 @@ PARSE_WARNING_HEADERS = ["run_id", "site_id", "site_name", "warning"]
 AI_SEARCH_DATA_SOURCE = "ai_search_2026"
 
 # The columns of the standardized facility table, in the order StandardizedFacilityTableSpecification.md
-# defines them (as of upstream 8c0bb3fe, `has_biocover` sits beside the other cover columns). This
+# defines them (as of the upstream commit in schema/SCHEMA_SOURCE.json: the composition and methane
+# shares are ratios now, and operator, has_flare and flare_efficiency have columns). This
 # repository no longer writes the table: ingestion builds it from reviewed values. The list stays so
 # the attribute bindings above can be checked against the vendored spec and the database.
 STANDARDIZED_FACILITY_COLUMNS = [
-    "facility_id", "year", "facility_name", "iso3c_plus", "area_square_meters", "facility_status",
-    "facility_type", "opening_year", "closing_year", "has_landfill_gas_collection",
-    "waste_depth", "annual_incoming_waste_metric_tonnes", "waste_in_place_metric_tonnes",
+    "facility_id", "year", "is_year_exact", "facility_name", "facility_name_translated", "operator",
+    "iso3c_plus", "area_square_meters", "facility_status", "facility_type", "opening_year",
+    "closing_year", "has_landfill_gas_collection", "waste_depth",
+    "annual_incoming_waste_metric_tonnes", "waste_in_place_metric_tonnes",
     "has_cover", "cover_types", "has_biocover",
     "gccs_ch4_flared_metric_tonnes", "gccs_ch4_generated_metric_tonnes",
-    "gccs_ch4_collected_metric_tonnes", "gccs_energy_project_type", "gccs_current_project_status",
-    "gccs_ch4_flow_to_project_metric_tonnes", "gccs_ch4_percent", "gccs_collection_efficiency",
+    "gccs_ch4_collected_metric_tonnes", "gccs_lfg_collected_cubic_meters",
+    "gccs_lfg_flared_cubic_meters", "gccs_lfg_generated_cubic_meters", "gccs_energy_project_type",
+    "gccs_current_project_status", "gccs_ch4_flow_to_project_metric_tonnes",
+    "gccs_lfg_flow_to_project_cubic_meters", "gccs_ch4_ratio", "gccs_collection_efficiency",
+    "has_flare", "flare_efficiency",
     "oxidation", "mcf", "latitude", "longitude", "point", "is_location_exact",
-    "ch4_emissions_metric_tonnes", "food_percent_by_weight", "green_percent_by_weight",
-    "wood_percent_by_weight", "paper_cardboard_percent_by_weight", "textiles_percent_by_weight",
-    "plastic_percent_by_weight", "metal_percent_by_weight", "glass_percent_by_weight",
-    "rubber_percent_by_weight", "other_percent_by_weight", "data_source", "created_date", "git_sha",
+    "ch4_emissions_metric_tonnes", "food_ratio_by_weight", "green_ratio_by_weight",
+    "wood_ratio_by_weight", "paper_cardboard_ratio_by_weight", "textiles_ratio_by_weight",
+    "plastic_ratio_by_weight", "metal_ratio_by_weight", "glass_ratio_by_weight",
+    "rubber_ratio_by_weight", "diaper_ratio_by_weight", "sewage_sludge_ratio_by_weight",
+    "other_ratio_by_weight", "msw_ratio_by_weight", "construction_demolition_ratio_by_weight",
+    "inerts_ratio_by_weight", "bulk_ratio_by_weight", "data_source", "created_date", "git_sha",
 ]
 
 

@@ -114,10 +114,14 @@ def test_a_tier_3_operator_goes_to_an_sme():
     assert row["status"] == SME_REVIEW
 
 
-def test_operator_has_no_standardized_column():
-    """Review layer only until upstream adds a column. Pinned so adding it is deliberate."""
-    assert "operator" not in ATTRIBUTE_TO_STANDARD_COLUMN
-    assert "operator" not in STANDARDIZED_FACILITY_COLUMNS
+def test_operator_has_a_standardized_column():
+    """Upstream added the column (spec pinned in schema/SCHEMA_SOURCE.json), so a found operator
+    has somewhere to load, and the seed reads ours as a baseline."""
+    from waste_ai_search.seed_source import SELECT_FIELDS
+
+    assert ATTRIBUTE_TO_STANDARD_COLUMN["operator"] == "operator"
+    assert "operator" in STANDARDIZED_FACILITY_COLUMNS
+    assert "operator" in SELECT_FIELDS
 
 
 def test_a_found_operator_is_carried_into_the_next_pass_seed():
