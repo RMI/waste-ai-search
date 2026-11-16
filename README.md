@@ -903,6 +903,36 @@ AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search run \
   never came across, not ones it ran out of searches for, and where no model found anything, each
   had confirmed the town and found no page about a dump there.
 
+**Batch 4 (Germany, Russia, Turkey) takes the large sites by area instead.** Its seed gives a
+tonnage for 3 of its 727 sites, so `--min-area-ha 20` takes the 169 whose footprint is 20 ha or
+more (128 in Germany, 33 in Russia, 8 in Turkey). In the 16 November 2026 practice runs on 47 of its
+sites, all with Terra and all with Sol, area predicted pages as tonnage did in Mexico: pages at 12
+of 14 sites over 20 ha for Terra, at 3 of 14 under 5 ha. On the sites over 20 ha, Sol added 30
+pages to Terra's 27, the two sharing 6; under 5 ha it added 5. Sol's pages were weaker on the
+automatic checks (its quotes found on the page 71% of the time against Terra's 86%; values it
+inferred 37% against 26%), and nobody has judged them blind yet. Terra cost $0.28 a site and Sol
+$0.41, so the batch is about $205 with Terra and $70 more with Sol on the large sites.
+
+```bash
+uv run python scripts/fill_place_cache.py --batch 4 --input-csv outputs/runs/batch4-seed/seed.csv
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search search \
+  --run-id batch4 --batch 4 --workers 3
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-sol uv run waste-ai-search search \
+  --run-id batch4 --batch 4 --min-area-ha 20 --pass-label sol --workers 3
+uv run waste-ai-search check-links --run-id batch4 --retry-unverified
+AZURE_AI_AGENT_NAME=waste-ai-search-gpt-5-6-terra uv run waste-ai-search run \
+  --run-id batch4 --batch 4 --workers 3
+```
+
+- The first command fills `data/geocode_cache.jsonl` with the towns of the batch's sites and of
+  our other sites within 60 km of them, slowly (one request every 2 seconds, and pauses of up to
+  15 minutes when refused), before any search. The searches then need none. Each prompt names our
+  other sites nearby, and in Germany 47 sites have 578 of them. Two practice runs looking them up at
+  once had Nominatim refuse every request for over an hour. It resumes where it stopped.
+- Seed the run from the database, so its seed carries WasteMAP IDs and the run keeps a snapshot:
+  copy `outputs/runs/batch4-seed` to `outputs/runs/batch4` to use the 16 November seed the counts
+  here come from, or leave it out to seed afresh.
+
 ### What is actually searched — read this before a full run
 
 Four rules narrow the search. The first three mean a full run queries **12,392 of 15,537

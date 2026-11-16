@@ -171,6 +171,13 @@ def choose_sites(
         selected = [site for site in selected if (incoming_tonnes(site) or 0) >= config.min_tonnes]
         ids = " ".join(normalize_scalar(site.get("site_id")) for site in selected)
         print(f"Taking {config.min_tonnes:,.0f} t a year or more: {len(selected):,} site(s){': ' + ids if ids else '.'}")
+    if config.min_area_ha > 0:
+        # As --min-tonnes, by footprint: batch 4 has almost no tonnages, and in its practice runs a
+        # site's area predicted its pages as tonnage did in Mexico's. A site with no area isn't
+        # known to be large.
+        selected = [site for site in selected if (area_hectares(site) or 0) >= config.min_area_ha]
+        ids = " ".join(normalize_scalar(site.get("site_id")) for site in selected)
+        print(f"Taking {config.min_area_ha:,.0f} ha or more: {len(selected):,} site(s){': ' + ids if ids else '.'}")
 
     if config.pilot_size > 0:
         return select_mixed_pilot(selected, size=config.pilot_size), skipped
@@ -183,6 +190,14 @@ def incoming_tonnes(site: dict[str, Any]) -> float | None:
     """The waste a year our seed says a site takes, in tonnes, or None where it says nothing."""
     try:
         return float(normalize_scalar(site.get("annual_incoming_waste_metric_tonnes")).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def area_hectares(site: dict[str, Any]) -> float | None:
+    """The footprint our seed gives a site, in hectares, or None where it gives none."""
+    try:
+        return float(normalize_scalar(site.get("area_square_meters")).replace(",", "")) / 10_000
     except ValueError:
         return None
 

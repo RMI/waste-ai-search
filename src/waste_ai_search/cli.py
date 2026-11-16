@@ -85,6 +85,14 @@ def tonnes(text: str) -> float:
     return number
 
 
+def hectares(text: str) -> float:
+    """An area of zero or more hectares: a negative one would take every site."""
+    number = float(text)
+    if number < 0:
+        raise argparse.ArgumentTypeError(f"give 0 or more hectares, not {text}")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="waste-ai-search",
@@ -128,6 +136,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=tonnes,
         default=0,
         help="Search only sites our seed says take at least this many tonnes of waste a year (0 = any).",
+    )
+    search.add_argument(
+        "--min-area-ha",
+        type=hectares,
+        default=0,
+        help="Search only sites whose footprint our seed says covers at least this many hectares (0 = any).",
     )
     search.add_argument(
         "--pass-label",
@@ -360,6 +374,7 @@ def make_config(args: argparse.Namespace) -> PipelineConfig:
         iso3=list(getattr(args, "iso3", []) or []),
         batch=getattr(args, "batch", None) or 0,
         min_tonnes=getattr(args, "min_tonnes", 0) or 0,
+        min_area_ha=getattr(args, "min_area_ha", 0) or 0,
         site_ids=list(getattr(args, "site_ids", []) or []),
         force=getattr(args, "force", False),
         site_delay_seconds=getattr(args, "site_delay_seconds", 3.0),
