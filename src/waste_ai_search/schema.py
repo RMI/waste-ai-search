@@ -52,6 +52,9 @@ GAP_FILL_ATTRIBUTES = [
     # empty and it is asked of every searched facility. Promotion is a follow-up once upstream adds
     # the column - one entry in ATTRIBUTE_TO_STANDARD_COLUMN and STANDARDIZED_FACILITY_COLUMNS.
     "operator",
+    # Asked of every site from 13 November 2026, at Carbon Mapper's request. Review layer only, like
+    # operator, and compared and doubted as operator is.
+    "owner",
     "opening_year",
     "closing_year",
     "has_landfill_gas_collection",
@@ -62,6 +65,9 @@ GAP_FILL_ATTRIBUTES = [
     "has_cover",
     "cover_types",
     "has_biocover",
+    # Asked of every site from 10 November 2026, at Carbon Mapper's request: open burning changes a
+    # dump's emissions. Review layer only, like operator: no upstream column yet.
+    "has_open_burning",
     "gccs_ch4_flared_metric_tonnes",
     "has_flare",
     "flare_efficiency",
@@ -75,8 +81,8 @@ GAP_FILL_ATTRIBUTES = [
 
 # The key values (key-values plan, docs/plans/2026-10-26-smes-check-key-values.md): from a Tier 3-5
 # source an SME checks each of these against the page, on its own Site_Review row, as well as the
-# source's match to our site. A Tier 1-2 source's values are trusted as read, except an operator the
-# agent marked Inferred or Conflicting (found_values.needs_value_check).
+# source's match to our site. A Tier 1-2 source's values are trusted as read, except an operator or
+# owner the agent marked Inferred or Conflicting (found_values.needs_value_check).
 VALUE_CHECKED_ATTRIBUTES = [
     "facility_type",
     "closing_year",
@@ -269,7 +275,9 @@ REQUESTABLE_ATTRIBUTES = [*IDENTITY_ATTRIBUTES, *GAP_FILL_ATTRIBUTES]
 VALUE_ATTRIBUTES = list(GAP_FILL_ATTRIBUTES)
 IDENTITY_VALUES = {*IDENTITY_ATTRIBUTES, *COORDINATE_ATTRIBUTES}
 
-BOOLEAN_TARGET_ATTRIBUTES = {"has_landfill_gas_collection", "has_cover", "has_biocover", "has_flare"}
+BOOLEAN_TARGET_ATTRIBUTES = {
+    "has_landfill_gas_collection", "has_cover", "has_biocover", "has_open_burning", "has_flare",
+}
 ARRAY_TARGET_ATTRIBUTES = {"cover_types", "gccs_energy_project_type", "gccs_current_project_status"}
 # Stored as a numeric array in the spec, so multiple project rows can collapse into one record.
 NUMERIC_ARRAY_TARGET_ATTRIBUTES = {"gccs_ch4_flow_to_project_metric_tonnes"}

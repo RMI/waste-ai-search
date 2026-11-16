@@ -78,8 +78,9 @@ CHECK_REQUIRED = "required"
 # Conflicting (Hugh, 1 November 2026). On pages judged ours in the Mexico tests, Terra's Direct values
 # were wrong 1 time in 49 and its Inferred ones 9 in 35; Sol's 2 in 60 and 17 in 55. An operator
 # inferred from a "municipal" dump, or from who owns the land, was wrong at 7864 and 9188, and
-# government pages that load as read gave such values too.
-DOUBTED_CHECKED_ATTRIBUTES = ["operator"]
+# government pages that load as read gave such values too. An owner is inferred the same way, from a
+# "municipal" dump or from who runs it, so it is checked alike (13 November 2026).
+DOUBTED_CHECKED_ATTRIBUTES = ["operator", "owner"]
 DOUBTED_BASES = {"inferred", "conflicting"}
 # Batch 1's location check: a source placing the facility further than this from our coordinates
 # may be about another facility, so an SME looks, whatever its tier.
@@ -143,8 +144,8 @@ def review_id(site_id: str, page: str, name: str) -> str:
 
 def needs_value_check(attribute: str, tier: int, value_basis: Any) -> bool:
     """Whether an SME checks a value on its own Site_Review row, as well as its pair's match: a key
-    value (schema.VALUE_CHECKED_ATTRIBUTES) from a Tier 3-5 pair, or an operator the agent marked
-    Inferred or Conflicting, from a pair of any tier."""
+    value (schema.VALUE_CHECKED_ATTRIBUTES) from a Tier 3-5 pair, or an operator or owner the agent
+    marked Inferred or Conflicting, from a pair of any tier."""
     if attribute in VALUE_CHECKED_ATTRIBUTES and tier > MAX_TRUSTED_TIER:
         return True
     return attribute in DOUBTED_CHECKED_ATTRIBUTES and normalize_scalar(value_basis).casefold() in DOUBTED_BASES
