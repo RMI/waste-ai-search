@@ -1233,11 +1233,14 @@ those languages ("ton/día"), where it means the metric tonne; an English "tons"
 
 For batch 4 (16 November 2026), Russian and Turkish units are read too ("тыс. т в год", "т/сут",
 "га", "кв. км", "ton/gün", "bin ton/yıl", "metrekare", and Turkey's dönüm, 1,000 m²), and German,
-Russian and Turkish magnitudes (Mio., Mrd., Tsd., тыс., млн, млрд, bin, milyon, milyar). A unit in
+Russian and Turkish magnitudes (Mio., Mrd., Tsd., тыс., млн, млрд, bin, milyon, milyar), and the
+German reports' Mg (megagrams, which lowercasing had made milligrams) and "to/a". A unit in
 Cyrillic used to count as no unit at all, so 12 га (hectares) would have loaded as 12 m². Thousands
 groups that can only be thousands are joined: "1 400 000", "1.400.000" and "1.234,5". They used to
 read as several numbers, in any language: "120 000 tonnes" became "120 to 0". A lone "45.000" may be
-a decimal, so the prompt asks for plain digits, with a point for decimals and no separators.
+a decimal, so the prompt asks for plain digits, with a point for decimals and no separators. The
+prompt also says a "ton" in a source not in English is the metric tonne: in the batch 4 practice
+run, Sol marked a Turkish page's 700 t a day "ambiguous tons", and it was dropped.
 
 Allowed categorical values come from the **live Postgres enums** — regenerate with
 `scripts/generate_enums.py`. Anything outside them maps to NULL with a parse warning rather than

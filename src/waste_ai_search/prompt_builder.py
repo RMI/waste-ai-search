@@ -161,7 +161,8 @@ ATTRIBUTE_GUIDANCE = {
         "Waste actually accepted per year - not a permitted or licensed limit or a design "
         "capacity. Report the source's original unit; the pipeline converts. "
         "Distinguish metric tonnes from US short tons. If the source just says 'tons', keep the "
-        "number in value and set unit to 'ambiguous tons'. Never put words in value. "
+        "number in value and set unit to 'ambiguous tons', unless the source isn't in English, "
+        "where a ton is metric. Never put words in value. "
         # The standardized spec's rule (Hugh, 30 October): municipal waste only, as far as the
         # source allows; where it doesn't say, the amount is taken as municipal.
         "Municipal solid waste only. Where the source splits the amount by kind of waste, return "

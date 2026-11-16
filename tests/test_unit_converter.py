@@ -169,3 +169,18 @@ def test_a_unit_in_cyrillic_is_a_unit_not_none():
 def test_a_lone_dot_group_stays_a_decimal():
     """'45.000' may be a decimal; the prompt asks for plain digits, so it is left as written."""
     assert convert_attribute_value("area_square_meters", "26.799", "ha").value == "267990"
+
+
+@pytest.mark.parametrize(
+    ("value", "unit", "expected"),
+    [
+        # Batch 4 practice run: German reports write tonnes as Mg (megagrams) and "to".
+        ("100000", "Mg/year", "100000"),
+        ("100000", "Mg/a", "100000"),
+        ("5473.96", "to/year", "5473.96"),
+        ("5473.96", "to/Jahr", "5473.96"),
+    ],
+)
+def test_german_tonnes_written_mg_or_to_are_read(value, unit, expected):
+    result = convert_attribute_value("annual_incoming_waste_metric_tonnes", value, unit)
+    assert (result.value, result.warning) == (expected, "")

@@ -622,6 +622,10 @@ def _in_english(text: str) -> str:
 
 
 def normalize_unit_text(value: str) -> str:
+    # German reports give tonnes as Mg (megagrams), which lowercasing would make milligrams, and
+    # as "to" ("to/a", "to/Jahr"). Both before lowering. Batch 4 practice run, 16 November 2026.
+    value = re.sub(r"\bMg\b", "tonnes", value)
+    value = re.sub(r"\b[Tt]o(?=\s*/)", "tonnes", value)
     text = _in_english(value.lower().strip())
     # Gas-flow abbreviations bundle the volume scale and the time denominator into one token, so
     # split them out or the per-day factor is silently lost. MMCFD is the spec's own example.
