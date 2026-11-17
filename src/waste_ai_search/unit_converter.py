@@ -564,6 +564,8 @@ def detect_unit_text(value: str, unit: str) -> str:
 # with accents taken off. Order matters: square and cubic metres before metres.
 _FOREIGN_UNITS = [
     (r"\b(?:toneladas?|tonnellat[ae]|tonnen)(?:\s+metricas?)?\b", "tonnes"),
+    # German "Megagramm", the Mg written out (batch 4, 16 November: Bremen's intake in "Megagramm/year").
+    (r"\bmegagramm\w*", "tonnes"),
     (r"\b(?:kilogramos?|quilogramas?|kilogrammes?|kilogramm[ei]?)\b", "kg"),
     (r"\b(?:kilometros?|quilometros?|kilometres?|chilometri)\s+(?:cuadrados?|quadrados?|carres?|quadrati)\b"
      r"|\bquadratkilometer\b", "square kilometers"),
@@ -580,7 +582,8 @@ _FOREIGN_UNITS = [
     (r"\bквадратн\w*\s+метр\w*|\bкв\.?\s*м\b|\bм(?:2|²)", "square meters"),
     (r"\bкубическ\w*\s+метр\w*|\bкубометр\w*|\bкуб\.?\s*м\b|\bм(?:3|³)", "cubic meters"),
     (r"\bгектар\w*|\bга\b", "hectares"),
-    (r"\bтонн\w*|(?<!\w)т(?!\w)", "tonnes"),
+    # "тонnes": the model once began the word in Cyrillic and ended it in English (batch 4, site 12370).
+    (r"\bтонн\w*|\bтонnes\b|(?<!\w)т(?!\w)", "tonnes"),
     (r"\bкилограмм\w*|\bкг\b", "kg"),
     (r"\bкилометр\w*|\bкм\b", "km"),
     (r"\bметр\w*|(?<!\w)м(?!\w)", "meters"),
