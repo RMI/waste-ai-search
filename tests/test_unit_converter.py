@@ -177,6 +177,8 @@ def test_a_lone_dot_group_stays_a_decimal():
         # Batch 4 practice run: German reports write tonnes as Mg (megagrams) and "to".
         ("100000", "Mg/year", "100000"),
         ("100000", "Mg/a", "100000"),
+        ("100000", "Megagramm/year", "100000"),
+        ("100000", "тонnes/year", "100000"),
         ("5473.96", "to/year", "5473.96"),
         ("5473.96", "to/Jahr", "5473.96"),
     ],
