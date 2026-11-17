@@ -19,6 +19,7 @@ from waste_ai_search.found_values import place_words
 from waste_ai_search.geocoder import (
     SITE_PLACES_FILE,
     load_geocode_cache,
+    lookup_geocode,
     look_up_places,
     place_text,
     save_site_places,
@@ -84,6 +85,20 @@ def test_a_site_with_no_place_is_looked_up_once_into_the_cache(tmp_path):
     )
     # Only a municipality and a state: nothing that would place our point more closely.
     assert record["formatted_address"] == ""
+
+
+def test_a_cached_place_under_the_same_id_elsewhere_is_not_this_sites(tmp_path):
+    """Batch 4, 16 November: WasteMAP id 7882, a German landfill, was given the town cached under
+    old id 7882, Tanlajás in San Luis Potosí. A place under the site's id counts only at its point."""
+    cache = tmp_path / "geocode_cache.jsonl"
+    geocoder = Places()
+    look_up_places([site("7882", latitude="21.66453", longitude="-98.87919")], cache, geocoder)
+    # The same site a few metres off keeps its place.
+    assert lookup_geocode(site("7882", latitude="21.6646", longitude="-98.8792"), load_geocode_cache(cache))
+    german = site("7882", country_iso3="DEU", latitude="48.241072", longitude="7.784136")
+    assert lookup_geocode(german, load_geocode_cache(cache)) is None
+    look_up_places([german], cache, geocoder)
+    assert geocoder.asked[-1] == (48.24107, 7.78414)
 
 
 def test_a_site_whose_seed_has_its_place_is_not_looked_up(tmp_path):

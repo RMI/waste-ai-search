@@ -23,6 +23,17 @@ def coord_key(latitude: Any, longitude: Any) -> str:
     return f"{lat:.5f},{lon:.5f}"
 
 
+def _same_point(key: str, other: str) -> bool:
+    """Whether two coord keys are within SAME_POINT_KM; a record with no point is taken as the site's."""
+    if not other:
+        return True
+    try:
+        (lat1, lon1), (lat2, lon2) = (tuple(float(part) for part in k.split(",")) for k in (key, other))
+    except ValueError:
+        return True
+    return haversine_km(lat1, lon1, lat2, lon2) <= SAME_POINT_KM
+
+
 def load_geocode_cache(path: Path | None) -> dict[str, dict[str, Any]]:
     if path is None or not path.exists():
         return {}
@@ -40,11 +51,21 @@ def load_geocode_cache(path: Path | None) -> dict[str, dict[str, Any]]:
     return cache
 
 
+# How far a cached place's point may be from the site's for the site's id to keep it.
+SAME_POINT_KM = 1.0
+
+
 def lookup_geocode(site: dict[str, Any], cache: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    """The cached place of this site: the one under its id, if it was looked up at the site's point,
+    else the one at its point. An id alone isn't enough, because batches 1 to 3 were keyed by the
+    old site ids and batch 4 by WasteMAP ids, which reuse the same numbers: on 16 November 28 batch 4
+    sites, among them German 7882, were given a town in San Luis Potosí that way."""
     site_id = normalize_scalar(site.get("site_id"))
-    if site_id and f"site:{site_id}" in cache:
-        return cache[f"site:{site_id}"]
     key = coord_key(site.get("latitude"), site.get("longitude"))
+    if site_id and f"site:{site_id}" in cache:
+        record = cache[f"site:{site_id}"]
+        if not key or _same_point(key, normalize_scalar(record.get("coord_key"))):
+            return record
     if key and f"coord:{key}" in cache:
         return cache[f"coord:{key}"]
     return None
